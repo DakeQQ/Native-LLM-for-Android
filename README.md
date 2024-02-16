@@ -8,3 +8,4 @@
 7. The tokenizer.cpp and tokenizer.hpp files originated from the mnn-llm repository.
 8. We will make the exported method public later.
 
+![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM.gif?raw=true)
