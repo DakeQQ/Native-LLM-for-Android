@@ -26,6 +26,7 @@ inline static void clear_history() {
     offset[0] = 0;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
+    input_ids[0] = start_id;
     std::fill(input_ids.begin(),input_ids.end(),0);
     std::fill(idx_theta.begin(), idx_theta.begin() + theta.size(),0.f);
     std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
@@ -373,16 +374,16 @@ Java_com_example_myapplication_MainActivity_Load_1Models_10(JNIEnv *env, jobject
             }
             ort_runtime_A->SessionOptionsAppendExecutionProvider(session_options_A, "QNN", option_keys.data(), option_values.data(), option_keys.size());
         } else if (use_nnapi) {  // It needs to add the app into /vendor/etc/nnapi_extensions_app_allowlist
-            uint32_t npflags = 0;
+            uint32_t nnapi_flags = 0;
             if (use_gpu | use_dsp_npu) {
-                npflags |= NNAPI_FLAG_CPU_DISABLED;
+                nnapi_flags |= NNAPI_FLAG_CPU_DISABLED;
             } else {
-                npflags |= NNAPI_FLAG_CPU_ONLY;
+                nnapi_flags |= NNAPI_FLAG_CPU_ONLY;
             }
             if (use_fp16) {
-                npflags |= NNAPI_FLAG_USE_FP16;
+                nnapi_flags |= NNAPI_FLAG_USE_FP16;
             }
-            OrtSessionOptionsAppendExecutionProvider_Nnapi(session_options_A, npflags);
+            OrtSessionOptionsAppendExecutionProvider_Nnapi(session_options_A, nnapi_flags);
         } else if (use_xnnpack) {
             option_keys.push_back("intra_op_num_threads");
             option_values.push_back("4");
