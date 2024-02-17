@@ -9,7 +9,7 @@
 8. We will make the exported method public later.
 
 1. 在Android设备上运行本地LLM的演示。
-2. 演示模型已上传至云端硬盘：
+2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1ig73aGeXtd7NGjfU6qvZcMLXj947JCHb?usp=drive_link
 3. 下载后，请将模型文件放入assets文件夹。
 4. 记得解压存放在libs/arm64-v8a文件夹中的*.so压缩文件。
 5. 演示模型名为'Qwen'，它们是从ModelScope转换来的，并经过代码优化，以实现极致执行速度。
