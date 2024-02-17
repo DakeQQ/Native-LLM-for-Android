@@ -197,7 +197,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
         }
     }
-    if ((input_ids[0] != stop_id_0) && (input_ids[0] != stop_id_1) && (response_count < single_chat_limit)) {
+    if (((input_ids[0] != stop_id_0) | (input_ids[0] != stop_id_1)) && (response_count < single_chat_limit)) {
         save_max_logit_position[response_count] = input_ids[0];
         response_count += 1;
         return env->NewStringUTF(get_output_words(input_ids[0]).c_str());
