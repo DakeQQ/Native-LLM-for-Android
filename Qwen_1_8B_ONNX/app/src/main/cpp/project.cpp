@@ -26,7 +26,6 @@ inline static void clear_history() {
     offset[0] = 0;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
-    input_ids[0] = start_id;
     std::fill(input_ids.begin(),input_ids.end(),0);
     std::fill(idx_theta.begin(), idx_theta.begin() + theta.size(),0.f);
     std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
