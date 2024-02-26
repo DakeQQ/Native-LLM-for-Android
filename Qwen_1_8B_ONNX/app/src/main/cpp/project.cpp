@@ -21,9 +21,9 @@ inline static std::string get_output_words(const int& id) {
 
 inline static void clear_history() {
     save_index = 0;
-    history_len[0] = 0;
-    attention_mask[0] = -999999999999.f;
-    offset[0] = 0;
+    history_len = 0;
+    attention_mask = -999999999999.f;
+    offset = 0;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
     std::fill(input_ids.begin(),input_ids.end(),0);
@@ -59,8 +59,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         }
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = get_input_ids(query, add_prompt);
-        ids_len[0] = get_ids.size();
-        num_ids_per_chat[save_index] = ids_len[0];
+        ids_len = get_ids.size();
+        num_ids_per_chat[save_index] = ids_len;
         if (save_index > 0) {
             accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
             if (accumulate_num_ids[save_index] >= next_chat_buffer) {
@@ -72,7 +72,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                         for (int j = k; j <= save_index; j++) {
                             accumulate_num_ids[j] -= accumulate_num_ids[i];
                         }
-                        ids_len[0] = accumulate_num_ids[save_index];
+                        ids_len = accumulate_num_ids[save_index];
                         std::move(get_ids.begin(), get_ids.end(), input_ids.begin() + accumulate_num_ids[save_index - 1]);
                         std::move(num_ids_per_chat.begin() + k, num_ids_per_chat.end(), num_ids_per_chat.begin());
                         std::move(accumulate_num_ids.begin() + k, accumulate_num_ids.end(), accumulate_num_ids.begin());
@@ -87,7 +87,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 }
             } else {
                 std::move(get_ids.begin(), get_ids.end(),input_ids.begin() + accumulate_num_ids[save_index - 1]);
-                ids_len[0] = accumulate_num_ids[save_index];
+                ids_len = accumulate_num_ids[save_index];
             }
         } else {
             if (num_ids_per_chat[0] > max_token_history) {
@@ -99,7 +99,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
         }
         int index = theta.size() + theta.size();
-        for (float i = 2.f; i < static_cast<float> (ids_len[0]); i++) {
+        for (float i = 2.f; i < static_cast<float> (ids_len); i++) {
             for (int j = 0; j < theta.size(); j++) {
                 idx_theta[index] = i * theta[j];
                 index++;
@@ -121,7 +121,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 &input_tensors_A[0]);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(attention_mask.data()), sizeof(float),
+                reinterpret_cast<void *>(&attention_mask), sizeof(float),
                 input_dims_A[1].data(), input_dims_A[1].size(), input_types_A[1],
                 &input_tensors_A[1]);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
@@ -146,17 +146,17 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         }
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(history_len.data()), sizeof(int64_t),
+                reinterpret_cast<void *>(&history_len), sizeof(int64_t),
                 input_dims_A[4].data(), input_dims_A[4].size(), input_types_A[4],
                 &input_tensors_A[4]);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(ids_len.data()), sizeof(int64_t),
+                reinterpret_cast<void *>(&ids_len), sizeof(int64_t),
                 input_dims_A[5].data(), input_dims_A[5].size(), input_types_A[5],
                 &input_tensors_A[5]);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(offset.data()), sizeof(int64_t),
+                reinterpret_cast<void *>(&offset), sizeof(int64_t),
                 input_dims_A[6].data(), input_dims_A[6].size(), input_types_A[6],
                 &input_tensors_A[6]);
         ort_runtime_A->ReleaseMemoryInfo(memory_info);
@@ -173,19 +173,19 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         ort_runtime_A->GetTensorMutableData(output_tensors_A[2], &output_tensors_buffer_2);
         kv_shape = reinterpret_cast<int64_t*> (output_tensors_buffer_2)[0];
         if (kv_shape >= max_token_history) {
-            offset[0] = kv_shape - max_token_history + 1;
-            history_len[0] = max_token_history;
+            offset = kv_shape - max_token_history + 1;
+            history_len = max_token_history;
         } else {
-            offset[0] = 0;
-            history_len[0] = kv_shape;
+            offset = 0;
+            history_len = kv_shape;
         }
         if (add_prompt) {
             for (int i = 0; i < theta.size(); i++) {
-                idx_theta[i] = (history_len[0] - 1) * theta[i];
+                idx_theta[i] = (history_len - 1) * theta[i];
             }
-            ids_len[0] = 1;
+            ids_len = 1;
             response_count = 0;
-            attention_mask[0] = 0.f;
+            attention_mask = 0.f;
         }
         auto *hidden_state = reinterpret_cast<float*> (output_tensors_buffer_0);
         float max_score = hidden_state[0];
@@ -205,9 +205,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         save_max_logit_position[response_count] = end_id;
         response_count += 1;
         num_ids_per_chat[save_index] += response_count;
-        attention_mask[0] = -999999999999.f;
-        history_len[0] = 0;
-        offset[0] = 0;
+        attention_mask = -999999999.f;
+        history_len = 0;
+        offset = 0;
         input_ids[0] = start_id;
         std::fill(idx_theta.begin(), idx_theta.begin() + theta.size(),0.f);
         std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
@@ -293,7 +293,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_10(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base", "2");  // One block can contain 1 or more cores, and sharing 1 job.
         ort_runtime_A->AddSessionConfigEntry(session_options_A, // Binding the #cpu to run the model. 'A;B;' means A & B work respectively. 'A,B' means A & B work cooperatively.
                                              "session.intra_op_thread_affinities",
-                                             "1,5;2,7");  // The optimal cost/performance (C/P) value setting for running the Qwen 1.8B LLM on a Kirin 990. Experiment to find the best performance yourself.
+                                             "1,3;2,4");  // The best C/P value setting for running Qwen 1.8B LLM.
         ort_runtime_A->SetIntraOpNumThreads(session_options_A, 3); // dynamic_block_base + 1
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.inter_op.allow_spinning",
                                              "1");  // 0 for low power
