@@ -30,6 +30,8 @@ public class MainActivity extends AppCompatActivity {
     private static List<ChatMessage> messages;
     private static String usrInputText = "";
     private static final String first_talk = "请输入问题 Enter Questions";
+    private static final String load_failed = "模型加载失败。\nModel loading failed.";
+    private static final String over_inputs = "一次输入太多单词 \nInput too many words at once.";
     private static final String file_name_vocab = "vocab.txt";
     private boolean clear_flag = false;
 
@@ -56,7 +58,7 @@ public class MainActivity extends AppCompatActivity {
         clearButton.setOnClickListener(v -> clearHistory());
         runOnUiThread(() -> {
             if (!Load_Models_0(mgr,false,false,false,false,false,false)) {
-                addHistory(ChatMessage.TYPE_SERVER, "模型加载失败。\nModel loading failed.");
+                addHistory(ChatMessage.TYPE_SERVER, load_failed);
             }
         });
         Copy_from_Asset_to_Cache(file_name_vocab, mgr);
@@ -115,7 +117,7 @@ public class MainActivity extends AppCompatActivity {
                             chatting = false;
                         }
                         case "Over_Inputs" -> {
-                            addHistory(ChatMessage.TYPE_SERVER, "一次输入太多单词 \nInput too many words at once.");
+                            addHistory(ChatMessage.TYPE_SERVER, over_inputs);
                             chatting = false;
                         }
                         default -> {
