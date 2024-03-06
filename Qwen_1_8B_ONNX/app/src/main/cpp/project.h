@@ -35,7 +35,7 @@ const int single_chat_limit = 65; // It is recommended to set it to max_token_hi
 const int input_ids_buffer_size = max_token_history * sizeof(int32_t);
 const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int32_t> input_ids(max_token_history, 0);
-std::vector<int> accumulate_num_ids(10,0);  // Just make sure the size is enough before reaching max_token_history.
+std::vector<int> accumulate_num_ids(10,0);  // Pre-allocate space for recording the num_ids per chat round. Just make sure the space size is sufficient to accommodate many chat sessions before reaching the max_token_history limit.
 std::vector<int> num_ids_per_chat(10,0); // Same size with accumulate_num_ids.
 std::vector<int> save_max_logit_position(max_token_history,0);
 float attention_mask = -999999999.f;
