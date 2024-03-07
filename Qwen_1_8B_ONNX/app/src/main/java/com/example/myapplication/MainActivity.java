@@ -56,11 +56,9 @@ public class MainActivity extends AppCompatActivity {
         answerView.setLayoutManager(new LinearLayoutManager(this));
         answerView.setAdapter(chatAdapter);
         clearButton.setOnClickListener(v -> clearHistory());
-        runOnUiThread(() -> {
-            if (!Load_Models_0(mgr,false,false,false,false,false,false)) {
-                addHistory(ChatMessage.TYPE_SERVER, load_failed);
-            }
-        });
+        if (!Load_Models_0(mgr,false,false,false,false,false,false)) {
+            addHistory(ChatMessage.TYPE_SERVER, load_failed);
+        }
         Copy_from_Asset_to_Cache(file_name_vocab, mgr);
         Pre_Process();
         Start_Chat();
