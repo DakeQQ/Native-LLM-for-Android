@@ -3,7 +3,7 @@
 inline static std::vector<int> get_input_ids(const std::string& query, bool add_prompt) {
     if (add_prompt) {
         std::vector<int> ids = tokenizer->encode(query);
-        ids.insert(ids.begin(),{198, 151644, 872, 198});  // Chat prompt head
+        ids.insert(ids.begin(),{151644, 872, 198});  // Chat prompt head
         ids.insert(ids.end(),{151645, 198, 151644, 77091, 198});  // Chat prompt tail
         return ids;
     } else {
@@ -197,12 +197,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
         }
     }
-    if ((input_ids[0] != stop_id_0) && (input_ids[0] != stop_id_1) && (response_count < single_chat_limit)) {
+    if ((input_ids[0] != end_id_0) && (input_ids[0] != end_id_1) && (response_count < single_chat_limit)) {
         save_max_logit_position[response_count] = input_ids[0];
         response_count += 1;
         return env->NewStringUTF(get_output_words(input_ids[0]).c_str());
     } else {
-        save_max_logit_position[response_count] = end_id;
+        save_max_logit_position[response_count] = end_id_1;
         response_count += 1;
         num_ids_per_chat[save_index] += response_count;
         attention_mask = -999999999.f;
