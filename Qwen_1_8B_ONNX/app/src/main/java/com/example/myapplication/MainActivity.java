@@ -103,6 +103,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void run() {
             LLM_Talk = Run_LLM(usrInputText,true, clear_flag);
+            usrInputText = "";
             if (clear_flag) {
                 clear_flag = false;
             }
@@ -126,7 +127,6 @@ public class MainActivity extends AppCompatActivity {
                 });
                 LLM_Talk = Run_LLM(usrInputText,false, clear_flag);
             }
-            usrInputText = "";
         }
     }
     @SuppressLint("SetTextI18n")
