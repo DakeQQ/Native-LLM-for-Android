@@ -372,7 +372,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_10(JNIEnv *env, jobject
                 option_values.push_back(qnn_cpu_so);
             }
             ort_runtime_A->SessionOptionsAppendExecutionProvider(session_options_A, "QNN", option_keys.data(), option_values.data(), option_keys.size());
-        } else if (use_nnapi) {  // It needs to add the app into /vendor/etc/nnapi_extensions_app_allowlist
+        } else if (use_nnapi) {  // The "Failed to read /vendor/etc/nnapi_extensions_app_allowlist ..." is an info level log and should not cause catastrophic error.
             uint32_t nnapi_flags = 0;
             if (use_gpu | use_dsp_npu) {
                 nnapi_flags |= NNAPI_FLAG_CPU_DISABLED;
