@@ -358,6 +358,12 @@ Java_com_example_myapplication_MainActivity_Load_1Models_10(JNIEnv *env, jobject
                 option_values.push_back("8");  // 0 for auto
                 option_keys.push_back("qnn_context_priority");
                 option_values.push_back("high");
+                option_keys.push_back("enable_htp_fp16_precision");  //  HTP float mode, enable it both fp32 & fp16.
+                if (use_fp16) {
+                    option_values.push_back("1");
+                } else {
+                    option_values.push_back("0");
+                }
                 ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                                      "ep.context_enable", "1");
                 ort_runtime_A->AddSessionConfigEntry(session_options_A,
