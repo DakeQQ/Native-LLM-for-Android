@@ -177,10 +177,11 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                            output_tensors_A.data());
     }
     {
-        void* hidden_state;
-        ort_runtime_A->GetTensorMutableData(output_tensors_A[0], &hidden_state);
+        void* max_logit_id;
+        ort_runtime_A->GetTensorMutableData(output_tensors_A[0], &max_logit_id);
         ort_runtime_A->GetTensorMutableData(output_tensors_A[1], &key_states);
         ort_runtime_A->GetTensorMutableData(output_tensors_A[2], &value_states);
+        input_ids[0] = reinterpret_cast<int32_t*> (max_logit_id)[0];
         history_len += ids_len;
         if (add_prompt) {
             for (int i = 0; i < theta.size(); i++) {
@@ -189,14 +190,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             ids_len = 1;
             response_count = 0;
             attention_mask = 0.f;
-        }
-        float max_score = reinterpret_cast<float*> (hidden_state)[0];
-        input_ids[0] = 0;
-        for (int i = 1; i < vocab_size; i++) {
-            if (reinterpret_cast<float*> (hidden_state)[i] > max_score) {
-                max_score = reinterpret_cast<float*> (hidden_state)[i];
-                input_ids[0] = i;
-            }
         }
     }
     if ((input_ids[0] != end_id_0) && (input_ids[0] != end_id_1) && (response_count < single_chat_limit)) {
@@ -294,7 +287,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_10(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base", "2");  // One block can contain 1 or more cores, and sharing 1 job.
         ort_runtime_A->AddSessionConfigEntry(session_options_A, // Binding the #cpu to run the model. 'A;B;' means A & B work respectively. 'A,B' means A & B work cooperatively.
                                              "session.intra_op_thread_affinities",
-                                             "1,5;2,6");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
+                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
         ort_runtime_A->SetIntraOpNumThreads(session_options_A, 3); // dynamic_block_base + 1
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.inter_op.allow_spinning",
                                              "1");  // 0 for low power
