@@ -22,13 +22,13 @@ int response_count = 0;
 int save_index = 0;
 int64_t history_len = 0;
 int64_t ids_len = 0;
-const int max_token_history = 256;  // Fixed, it need to re-export the LLM model if this value changed. 
-const int vocab_size = 151936;
+const std::string file_name_A = "Qwen_1_8B_1024.ort";
+const int max_token_history = 1024;  // Please set this value to match the model name flag.
 const int end_id_1 = 151643;
 const int start_id = 151644;
 const int end_id_0 = 151645;
 const int past_key_value_size = 49152 * max_token_history;  // 24 * 1 * 1 * 16 * 128
-const int single_chat_limit = 127; // It is recommended to set it to max_token_history/2, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
+const int single_chat_limit = 368; // It is recommended to set it to max_token_history/2, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
 const int input_ids_buffer_size = max_token_history * sizeof(int32_t);
 const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int32_t> input_ids(max_token_history, 0);
@@ -40,7 +40,6 @@ std::vector<float> theta(64, 0.f);
 std::vector<float> idx_theta(max_token_history * theta.size(),0.f);
 const int idx_theta_buffer_size = idx_theta.size() * sizeof(float);
 const int past_key_values_buffer_size = past_key_value_size * sizeof(float);
-const std::string file_name_A = "Qwen_1_8B.ort";
 const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/files/";
 const std::string vocab_file = "/data/user/0/com.example.myapplication/cache/vocab.txt";  // We have moved the vocab.txt from assets to the cache folder in Java process.
 const char* qnn_htp_so = "/data/user/0/com.example.myapplication/cache/libQnnHtp.so";  //  If use (std::string + "libQnnHtp.so").c_str() instead, it will open failed.
