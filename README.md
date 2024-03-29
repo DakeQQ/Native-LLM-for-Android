@@ -1,6 +1,6 @@
 # Native-LLM-for-Android
 1. Demonstration of running a native LLM on Android device.
-2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1ig73aGeXtd7NGjfU6qvZcMLXj947JCHb?usp=drive_link
+2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. After downloading, place the model into the assets folder.
 4. Remember to decompress the *.so zip file stored in the libs/arm64-v8a folder.
 5. The demo models, named 'Qwen, version:1.5, params:1.8B', were converted from ModelScope and underwent code optimizations to achieve extreme execution speed.
@@ -10,8 +10,8 @@
 9. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。
-2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1ig73aGeXtd7NGjfU6qvZcMLXj947JCHb?usp=drive_link
-3. 百度: 链接: 链接: https://pan.baidu.com/s/1T9KdkgTMIobonhxaTCoFzA?pwd=dake 提取码: dake
+2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
+3. 百度: 链接: 链接: 链接: https://pan.baidu.com/s/1ao_w12zesFS6ZfJnsw0lWA?pwd=dake 提取码: dake
 4. 下载后，请将模型文件放入assets文件夹。
 5. 记得解压存放在libs/arm64-v8a文件夹中的*.so压缩文件。
 6. 演示模型名为'Qwen, 版本:1.5, 参数量:1.8B'，它们是从ModelScope转换来的，并经过代码优化，以实现极致执行速度。
