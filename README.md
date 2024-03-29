@@ -23,6 +23,6 @@
 | OS | Device | Backend | Format | Inference<br>(256 Context) | Inference<br>(1024 Context) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2 - cpu (X2+A715) | q8f32 | 19 token/s | 13 token/s |
-| Harmony 4 | P40 | Kirin_990_5G - cpu (2*A76) | q8f32 | 11 token/s | 8 token/s |
+| Harmony 4 | P40 | Kirin_990_5G - cpu (2*A76) | q8f32 | 10 token/s | 8 token/s |
 # 演示结果 Demo Results
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM.gif?raw=true)
