@@ -97,8 +97,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 std::move(get_ids.begin(), get_ids.end(),input_ids.begin());
             }
         }
-        int index = theta.size() + theta.size();
-        for (float i = 2.f; i < static_cast<float> (ids_len); i++) {
+        int index = theta_index;
+        for (float i = 2.f; i < static_cast<float> (ids_len); i+=1.f) {
             for (int j = 0; j < theta.size(); j++) {
                 idx_theta[index] = i * theta[j];
                 index++;
