@@ -56,7 +56,7 @@ public class MainActivity extends AppCompatActivity {
         answerView.setLayoutManager(new LinearLayoutManager(this));
         answerView.setAdapter(chatAdapter);
         clearButton.setOnClickListener(v -> clearHistory());
-        if (!Load_Models_0(mgr,false,false,false,false,false,false)) {
+        if (!Load_Models_A(mgr,false,false,false,false,false,false)) {
             addHistory(ChatMessage.TYPE_SERVER, load_failed);
         }
         Copy_from_Asset_to_Cache(file_name_vocab, mgr);
@@ -112,7 +112,7 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     switch (LLM_Talk) {
                         case "END" -> {
-                            addHistory(ChatMessage.TYPE_SERVER,"\nDecode: " + ((float) 1000 * response_count / (System.currentTimeMillis() - start_time)) + " token/s");
+                            addHistory(ChatMessage.TYPE_SERVER,"\n\nDecode: " + ((float) 1000 * response_count / (System.currentTimeMillis() - start_time)) + " token/s");
                             chatting = false;
                         }
                         case "Over_Inputs" -> {
@@ -174,6 +174,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private native boolean Pre_Process();
-    private native boolean Load_Models_0(AssetManager assetManager, boolean USE_GPU, boolean FP16, boolean USE_NNAPI, boolean USE_XNNPACK, boolean USE_QNN, boolean USE_DSP_NPU);
+    private native boolean Load_Models_A(AssetManager assetManager, boolean USE_GPU, boolean FP16, boolean USE_NNAPI, boolean USE_XNNPACK, boolean USE_QNN, boolean USE_DSP_NPU);
     private static native String Run_LLM(String Query, boolean add_prompt, boolean clear);
 }
