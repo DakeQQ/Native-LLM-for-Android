@@ -38,6 +38,7 @@ std::vector<int> save_max_logit_position(max_token_history,0);
 float attention_mask = -999999999.f;
 std::vector<float> theta(64, 0.f);
 std::vector<float> idx_theta(max_token_history * theta.size(),0.f);
+const int theta_index = theta.size() + theta.size();
 const int idx_theta_buffer_size = idx_theta.size() * sizeof(float);
 const int past_key_values_buffer_size = past_key_value_size * sizeof(float);
 const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/files/";
