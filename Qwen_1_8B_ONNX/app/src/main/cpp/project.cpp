@@ -62,10 +62,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         num_ids_per_chat[save_index] = ids_len;
         if (save_index > 0) {
             accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
-            if (accumulate_num_ids[save_index] >= next_chat_buffer) {
+            if (accumulate_num_ids[save_index] > next_chat_buffer) {
                 bool over_inputs = true;
                 for (int i = 0; i < save_index; i++) {
-                    if (accumulate_num_ids[save_index] - accumulate_num_ids[i] < next_chat_buffer) {
+                    if (accumulate_num_ids[save_index] - accumulate_num_ids[i] <= next_chat_buffer) {
                         std::move(input_ids.begin() + accumulate_num_ids[i], input_ids.end(), input_ids.begin());
                         int k = i + 1;
                         for (int j = k; j <= save_index; j++) {
@@ -201,9 +201,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
         if (save_index > 0) {
             accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
-            if (accumulate_num_ids[save_index] >= next_chat_buffer) {
+            if (accumulate_num_ids[save_index] > next_chat_buffer) {
                 for (int i = 0; i < save_index; i++) {
-                    if (accumulate_num_ids[save_index] - accumulate_num_ids[i] < next_chat_buffer) {
+                    if (accumulate_num_ids[save_index] - accumulate_num_ids[i] <= next_chat_buffer) {
                         std::move(input_ids.begin() + accumulate_num_ids[i],input_ids.end(),input_ids.begin());
                         int k = i + 1;
                         for (int j = k; j <= save_index; j++) {
