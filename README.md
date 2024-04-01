@@ -3,7 +3,7 @@
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. After downloading, place the model into the assets folder.
 4. Remember to decompress the *.so zip file stored in the libs/arm64-v8a folder.
-5. The demo models, named 'Qwen, version:1.5, params:1.8B', were converted from ModelScope and underwent code optimizations to achieve extreme execution speed.
+5. The demo models were converted from ModelScope and underwent code optimizations to achieve extreme execution speed.
 6. Therefore, the inputs & outputs of the demo models are slightly different from the original one.
 7. The tokenizer.cpp and tokenizer.hpp files originated from the mnn-llm repository.
 8. We will make the exported method public later, and it does not support old versions of LLM.
@@ -14,15 +14,15 @@
 3. 百度: https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake 提取码: dake
 4. 下载后，请将模型文件放入assets文件夹。
 5. 记得解压存放在libs/arm64-v8a文件夹中的*.so压缩文件。
-6. 演示模型名为'Qwen, 版本:1.5, 参数量:1.8B'，它们是从ModelScope转换来的，并经过代码优化，以实现极致执行速度。
+6. 演示模型是从ModelScope转换来的，并经过代码优化，以实现极致执行速度。
 7. 因此，演示模型的输入输出与原始模型略有不同。
 8. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
 9. 我们未来会提供转换导出的方法, 并且不再支持旧版的LLM。
 10. 看更多項目: https://dakeqq.github.io/overview/
 # 性能 Performance
-| OS | Device | Backend | Format | Inference<br>(256 Context) | Inference<br>(1024 Context) |
+| OS | Device | Backend | Model | Inference<br>(256 Context) | Inference<br>(1024 Context) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2 - CPU (X2+A715) | q8f32 | 18 token/s | 14 token/s |
-| Harmony 4 | P40 | Kirin_990_5G - CPU (2*A76) | q8f32 | 11 token/s | 9 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2 - CPU (X2+A715) | Qwen1.5-1.8B-q8f32 | 18 token/s | 14 token/s |
+| Harmony 4 | P40 | Kirin_990_5G - CPU (2*A76) | Qwen1.5-1.8B-q8f32 | 11 token/s | 9 token/s |
 # 演示结果 Demo Results
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
