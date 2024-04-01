@@ -26,8 +26,6 @@ inline static void clear_history() {
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
     std::fill(input_ids.begin(),input_ids.end(),0);
-    std::fill(idx_theta.begin(), idx_theta.begin() + theta.size(),0.f);
-    std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
 }
 
 extern "C"
@@ -42,7 +40,31 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
         theta[i] = std::powf(10000.f, -theta[i] * 0.0078125f);  // 1/(10000^(x/128))
     }
     theta[0] = 1.f;
-    std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
+    std::vector<float> idx_theta(max_token_history * theta.size(), 0.f);
+    std::move(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
+    int index = theta.size() + theta.size();
+    for (float i = 2.f; i < static_cast<float> (max_token_history); i += 1.f) {
+        for (int j = 0; j < theta.size(); j++) {
+            idx_theta[index] = i * theta[j];
+            index++;
+        }
+    }
+    std::vector<float> temp_cos(idx_theta.size(), 0.f);
+    std::vector<float> temp_sin(idx_theta.size(), 0.f);
+    for (int i = 0; i < idx_theta.size(); i++) {
+        temp_cos[i] = std::cosf(idx_theta[i]);
+        temp_sin[i] = std::sinf(idx_theta[i]);
+    }
+    index = 0;
+    int index2 = 0;
+    for (int i = 0; i < max_token_history; i++) {
+        std::copy(temp_cos.begin() + index, temp_cos.begin() + index + theta.size(), cos_rotary_pos_emb.begin() + index2);
+        std::move(temp_cos.begin() + index, temp_cos.begin() + index + theta.size(), cos_rotary_pos_emb.begin() + index2 + theta.size());
+        std::copy(temp_sin.begin() + index, temp_sin.begin() + index + theta.size(), sin_rotary_pos_emb.begin() + index2);
+        std::move(temp_sin.begin() + index, temp_sin.begin() + index + theta.size(), sin_rotary_pos_emb.begin() + index2 + theta.size());
+        index += theta.size();
+        index2 = index + index;
+    }
     return JNI_TRUE;
 }
 
@@ -97,17 +119,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 std::move(get_ids.begin(), get_ids.end(),input_ids.begin());
             }
         }
-        int index = theta_index;
-        for (float i = 2.f; i < static_cast<float> (ids_len); i+=1.f) {
-            for (int j = 0; j < theta.size(); j++) {
-                idx_theta[index] = i * theta[j];
-                index++;
-            }
-        }
-    } else {
-        for (int i = 0; i < theta.size(); i++) {
-            idx_theta[i] += theta[i];
-        }
     }
     {
         std::vector<float> past_key_values;
@@ -125,45 +136,50 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 &input_tensors_A[1]);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void*>(idx_theta.data()), idx_theta_buffer_size,
+                reinterpret_cast<void*>(cos_rotary_pos_emb.data()), rotary_pos_emb_buffer_size,
                 input_dims_A[2].data(), input_dims_A[2].size(), input_types_A[2],
                 &input_tensors_A[2]);
+        ort_runtime_A->CreateTensorWithDataAsOrtValue(
+                memory_info,
+                reinterpret_cast<void*>(sin_rotary_pos_emb.data()), rotary_pos_emb_buffer_size,
+                input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
+                &input_tensors_A[3]);
         if (add_prompt) {
             past_key_values.resize(past_key_value_size, 0.f);
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
                     reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
-                    input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
-                    &input_tensors_A[3]);
+                    input_dims_A[4].data(), input_dims_A[4].size(), input_types_A[4],
+                    &input_tensors_A[4]);
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
                     reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
-                    input_dims_A[4].data(), input_dims_A[4].size(), input_types_A[4],
-                    &input_tensors_A[4]);
+                    input_dims_A[5].data(), input_dims_A[5].size(), input_types_A[5],
+                    &input_tensors_A[5]);
         } else {
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
                     reinterpret_cast<void*>(reinterpret_cast<float*> (key_states)),
                     past_key_values_buffer_size,
-                    input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
-                    &input_tensors_A[3]);
+                    input_dims_A[4].data(), input_dims_A[4].size(), input_types_A[4],
+                    &input_tensors_A[4]);
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
                     reinterpret_cast<void*>(reinterpret_cast<float*> (value_states)),
                     past_key_values_buffer_size,
-                    input_dims_A[4].data(), input_dims_A[4].size(), input_types_A[4],
-                    &input_tensors_A[4]);
+                    input_dims_A[5].data(), input_dims_A[5].size(), input_types_A[5],
+                    &input_tensors_A[5]);
         }
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
                 reinterpret_cast<void*>(&history_len), sizeof(int64_t),
-                input_dims_A[5].data(), input_dims_A[5].size(), input_types_A[5],
-                &input_tensors_A[5]);
+                input_dims_A[6].data(), input_dims_A[6].size(), input_types_A[6],
+                &input_tensors_A[6]);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
                 reinterpret_cast<void*>(&ids_len), sizeof(int64_t),
-                input_dims_A[6].data(), input_dims_A[6].size(), input_types_A[6],
-                &input_tensors_A[6]);
+                input_dims_A[7].data(), input_dims_A[7].size(), input_types_A[7],
+                &input_tensors_A[7]);
         ort_runtime_A->ReleaseMemoryInfo(memory_info);
         ort_runtime_A->Run(session_model_A, nullptr, input_names_A.data(),
                            (const OrtValue *const *) input_tensors_A.data(),
@@ -175,12 +191,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         ort_runtime_A->GetTensorMutableData(output_tensors_A[0], &max_logit_id);
         ort_runtime_A->GetTensorMutableData(output_tensors_A[1], &key_states);
         ort_runtime_A->GetTensorMutableData(output_tensors_A[2], &value_states);
-        input_ids[0] = reinterpret_cast<int32_t*> (max_logit_id)[0];
+        input_ids[0] = static_cast<int32_t> (reinterpret_cast<int64_t*> (max_logit_id)[0]);
         history_len += ids_len;
         if (add_prompt) {
-            for (int i = 0; i < theta.size(); i++) {
-                idx_theta[i] = (history_len - 1) * theta[i];
-            }
             ids_len = 1;
             response_count = 0;
             attention_mask = 0.f;
@@ -197,8 +210,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         attention_mask = -999999999.f;
         history_len = 0;
         input_ids[0] = start_id;
-        std::fill(idx_theta.begin(), idx_theta.begin() + theta.size(),0.f);
-        std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
         if (save_index > 0) {
             accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
             if (accumulate_num_ids[save_index] > next_chat_buffer) {
@@ -277,11 +288,11 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->EnableCpuMemArena(session_options_A);
         ort_runtime_A->EnableMemPattern(session_options_A);
         ort_runtime_A->SetSessionExecutionMode(session_options_A, ORT_SEQUENTIAL);
-        ort_runtime_A->SetInterOpNumThreads(session_options_A, 2);
+        ort_runtime_A->SetInterOpNumThreads(session_options_A, 4);
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base", "2");  // One block can contain 1 or more cores, and sharing 1 job.
         ort_runtime_A->AddSessionConfigEntry(session_options_A, // Binding the #cpu to run the model. 'A;B;' means A & B work respectively. 'A,B' means A & B work cooperatively.
                                              "session.intra_op_thread_affinities",
-                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
+                                             "1,3;2,4");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
         ort_runtime_A->SetIntraOpNumThreads(session_options_A, 3); // dynamic_block_base + 1
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.inter_op.allow_spinning",
                                              "1");  // 0 for low power
@@ -367,7 +378,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 option_values.push_back(qnn_cpu_so);
             }
             ort_runtime_A->SessionOptionsAppendExecutionProvider(session_options_A, "QNN", option_keys.data(), option_values.data(), option_keys.size());
-        } else if (use_nnapi) {  // The "Failed to read /vendor/etc/nnapi_extensions_app_allowlist ..." is an info level log and should not cause catastrophic error.
+        } else if (use_nnapi) {  // It needs to add the app into /vendor/etc/nnapi_extensions_app_allowlist
             uint32_t nnapi_flags = 0;
             if (use_gpu | use_dsp_npu) {
                 nnapi_flags |= NNAPI_FLAG_CPU_DISABLED;
