@@ -35,13 +35,13 @@ JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz) {
     tokenizer.reset(new Tiktoken);
     tokenizer->load( vocab_file);
-    theta[0] = 1.f;
     for (int i = 1; i < theta.size(); i++) {
         theta[i] = theta[i - 1] + 2;  // even sequence
     }
     for (int i = 1; i < theta.size(); i++) {
         theta[i] = std::powf(10000.f, -theta[i] * 0.0078125f);  // 1/(10000^(x/128))
     }
+    theta[0] = 1.f;
     std::copy(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
     return JNI_TRUE;
 }
