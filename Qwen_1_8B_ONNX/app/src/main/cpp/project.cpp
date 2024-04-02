@@ -111,12 +111,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 ids_len = accumulate_num_ids[save_index];
             }
         } else {
-            if (num_ids_per_chat[0] > max_token_history) {
+            if (num_ids_per_chat[0] >= max_token_history) {
                 clear_history();
                 return env->NewStringUTF("Over_Inputs");
             } else {
                 accumulate_num_ids[0] = num_ids_per_chat[0];
-                std::move(get_ids.begin(), get_ids.end(),input_ids.begin());
+                std::move(get_ids.begin(), get_ids.end(), input_ids.begin());
             }
         }
     }
@@ -214,31 +214,27 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             if (accumulate_num_ids[save_index] > next_chat_buffer) {
                 for (int i = 0; i < save_index; i++) {
                     if (accumulate_num_ids[save_index] - accumulate_num_ids[i] <= next_chat_buffer) {
-                        std::move(input_ids.begin() + accumulate_num_ids[i],input_ids.end(),input_ids.begin());
+                        std::move(input_ids.begin() + accumulate_num_ids[i], input_ids.end(), input_ids.begin());
                         int k = i + 1;
                         for (int j = k; j <= save_index; j++) {
                             accumulate_num_ids[j] -= accumulate_num_ids[i];
                         }
-                        std::move(save_max_logit_position.begin(),save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[save_index] - response_count);
-                        std::move(num_ids_per_chat.begin() + k,num_ids_per_chat.end(),num_ids_per_chat.begin());
-                        std::move(accumulate_num_ids.begin() + k,accumulate_num_ids.end(),accumulate_num_ids.begin());
+                        std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[save_index] - response_count);
+                        std::move(num_ids_per_chat.begin() + k, num_ids_per_chat.end(), num_ids_per_chat.begin());
+                        std::move(accumulate_num_ids.begin() + k, accumulate_num_ids.end(), accumulate_num_ids.begin());
                         save_index -= i;
                         return env->NewStringUTF("END");
                     }
                 }
                 clear_history();
             } else {
-                std::move(save_max_logit_position.begin(),save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[save_index] - response_count);
+                std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[save_index] - response_count);
                 save_index += 1;
             }
         } else {
-            if (num_ids_per_chat[0] > max_token_history) {
-                clear_history();
-            } else {
-                std::move(save_max_logit_position.begin(),save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[0]);
-                accumulate_num_ids[0] = num_ids_per_chat[0];
-                save_index += 1;
-            }
+            std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[0]);
+            accumulate_num_ids[0] = num_ids_per_chat[0];
+            save_index += 1;
         }
         return env->NewStringUTF("END");
     }
