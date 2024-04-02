@@ -352,7 +352,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 option_values.push_back("8");  // 0 for auto
                 option_keys.push_back("qnn_context_priority");
                 option_values.push_back("high");
-                if (use_fp16) {
+                if (use_fp16) { // Enable it to run a float model on HTP. (both fp16 & fp32 format)
                     option_keys.push_back("enable_htp_fp16_precision");
                     option_values.push_back("1");
                 } else {
