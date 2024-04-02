@@ -121,7 +121,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         }
     }
     {
-        std::vector<float> past_key_values;
         OrtMemoryInfo *memory_info;
         ort_runtime_A->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
@@ -145,7 +144,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
                 &input_tensors_A[3]);
         if (add_prompt) {
-            past_key_values.resize(past_key_value_size, 0.f);
+            std::vector<float> past_key_values(past_key_value_size, 0.f);
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
                     reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
