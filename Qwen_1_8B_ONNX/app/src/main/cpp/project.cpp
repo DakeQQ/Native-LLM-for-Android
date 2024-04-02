@@ -25,7 +25,7 @@ inline static void clear_history() {
     attention_mask = -999999999999.f;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
-    std::fill(input_ids.begin(),input_ids.end(),0);
+    std::fill(input_ids.begin(), input_ids.end(), 0);
 }
 
 extern "C"
