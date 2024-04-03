@@ -36,7 +36,6 @@ idx_theta = position_ids * theta
 past_key_states = torch.zeros((block_nums, num_heads, max_seq_len, head_dim), dtype=torch.float32)
 past_values_states = past_key_states
 cos_rotary_pos_emb = torch.ones_like(idx_theta)
-sin_rotary_pos_emb = cos_rotary_pos_emb
 cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0)
 sin_rotary_pos_emb = cos_rotary_pos_emb
 last_hidden_state = torch.ones((1, max_seq_len, hidden_size), dtype=torch.float32)
