@@ -4,10 +4,12 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Replace the original "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_A".
-# Also replace another "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_B".
 path_A = 'C:/Users/MiniCPM-2B-dpo-fp32-A'  # set the folder path where the MiniCPM downloaded.
+# Replace the original "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_A".
+
 path_B = 'C:/Users/MiniCPM-2B-dpo-fp32-B'  # Copy the previous downloaded folder and rename it to folder-B.
+# Also replace another "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_B".
+
 onnx_model_A = 'C:/Users/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the MiniCPM_part_A stored.
 onnx_model_B = 'C:/Users/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the MiniCPM_part_B stored.
 
