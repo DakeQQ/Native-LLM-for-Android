@@ -6,7 +6,7 @@
 5. The demo models were converted from ModelScope and underwent code optimizations to achieve extreme execution speed.
 6. Therefore, the inputs & outputs of the demo models are slightly different from the original one.
 7. The tokenizer.cpp and tokenizer.hpp files originated from the mnn-llm repository.
-8. We will make the exported method public later, and it does not support old versions of LLM.
+8. To export the model on your own, please go to the 'Export' folder, follow the comments to replace the original 'modeling_***.py', and then execute the Python script.
 9. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。
@@ -17,7 +17,7 @@
 6. 演示模型是从ModelScope转换来的，并经过代码优化，以实现极致执行速度。
 7. 因此，演示模型的输入输出与原始模型略有不同。
 8. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
-9. 我们未来会提供转换导出的方法, 并且不再支持旧版的LLM。
+9. 想自行导出模型请前往“Export”文件夹，按照注释操作取代原模型的“modeling_***.py”，然后执行python脚本。
 10. 看更多項目: https://dakeqq.github.io/overview/
 # 性能 Performance
 | OS | Device | Backend | Model | Inference<br>(1024 Context) |
