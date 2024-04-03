@@ -45,12 +45,12 @@ const int input_ids_buffer_size = max_token_history * sizeof(int32_t);
 const int past_key_values_buffer_size = past_key_value_size * sizeof(float);
 const int hidden_state_buffer_size = max_token_history * 2304 * sizeof(float); // hidden_size=2304
 std::vector<int32_t> input_ids(max_token_history, 0);
-std::vector<int> accumulate_num_ids(30,0);  // Just make sure the size is enough before reaching max_token_history.
-std::vector<int> num_ids_per_chat(30,0); // Same size with accumulate_num_ids.
+std::vector<int> accumulate_num_ids(30, 0);  // Just make sure the size is enough before reaching max_token_history.
+std::vector<int> num_ids_per_chat(30, 0); // Same size with accumulate_num_ids.
 std::vector<int> save_max_logit_position(max_token_history,0);
 std::vector<float> theta(32, 0.f);
-std::vector<float> cos_rotary_pos_emb(2 * max_token_history * theta.size(),0.f);
-std::vector<float> sin_rotary_pos_emb(2 * max_token_history * theta.size(),0.f);
+std::vector<float> cos_rotary_pos_emb(2 * max_token_history * theta.size(), 0.f);
+std::vector<float> sin_rotary_pos_emb(cos_rotary_pos_emb.size(), 0.f);
 const int rotary_pos_emb_buffer_size = cos_rotary_pos_emb.size() * sizeof(float);
 const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/files/";
 const std::string vocab_file = "/data/user/0/com.example.myapplication/cache/vocab_MiniCPM.txt";  // We have moved the vocab.txt from assets to the cache folder in Java process.
