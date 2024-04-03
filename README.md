@@ -24,7 +24,7 @@
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Qwen1.5-1.8B<br>q8f32 | 14 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen1.5-1.8B<br>q8f32 | 9 token/s |
-| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 4 token/s |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 4.5 token/s |
 # 演示结果 Demo Results
 (Qwen1.5-1.8B / 1024 Context)<br>
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
