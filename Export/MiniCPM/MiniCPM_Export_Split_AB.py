@@ -38,7 +38,7 @@ past_values_states = past_key_states
 cos_rotary_pos_emb = torch.ones_like(idx_theta)
 sin_rotary_pos_emb = cos_rotary_pos_emb
 cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0)
-sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0)
+sin_rotary_pos_emb = cos_rotary_pos_emb
 last_hidden_state = torch.ones((1, max_seq_len, hidden_size), dtype=torch.float32)
 
 print('Part_A export start ...')
