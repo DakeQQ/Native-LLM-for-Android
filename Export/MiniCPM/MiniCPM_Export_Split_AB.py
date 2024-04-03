@@ -17,7 +17,6 @@ onnx_model_B = 'C:/Users/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path wh
 model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 max_seq_len = 768  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1014, at the same time.
 head_dim = 64  # from the model configs
-block_nums = 20
 num_heads = 36
 num_block = 20  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB.
 hidden_size = 2304
@@ -33,7 +32,7 @@ for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
 theta = torch.arange(0, head_dim, 2, dtype=torch.float32)
 idx_theta = position_ids * theta
-past_key_states = torch.zeros((block_nums, num_heads, max_seq_len, head_dim), dtype=torch.float32)
+past_key_states = torch.zeros((num_block, num_heads, max_seq_len, head_dim), dtype=torch.float32)
 past_values_states = past_key_states
 cos_rotary_pos_emb = torch.ones_like(idx_theta)
 cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0)
