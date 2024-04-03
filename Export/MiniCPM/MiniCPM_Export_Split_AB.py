@@ -19,12 +19,12 @@ max_seq_len = 768  # Please modify the same variable, which declared in the modi
 head_dim = 64  # from the model configs
 block_nums = 20
 num_heads = 36
-num_block = 20  # The original is 40, but we split it into half.
-hidden_size = 2304  # from the model configs
+num_block = 20  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB.
+hidden_size = 2304
 
 # Generate dummies for torch.onnx.export()
 input_ids = torch.ones((1, max_seq_len), dtype=torch.int32)
-attention_mask = torch.zeros(1, dtype=torch.float32) + -99999999999999.0
+attention_mask = torch.zeros(1, dtype=torch.float32) - 999999999.0
 ids_len = torch.zeros(1, dtype=torch.long) + 10  # "10" is just a dummy value.
 history_len = torch.zeros(1, dtype=torch.long) + 10  # "10" is just a dummy value.
 offset = torch.zeros(1, dtype=torch.long)
