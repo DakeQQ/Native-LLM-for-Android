@@ -122,7 +122,7 @@ token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros((1, max_seq_len), dtype=np.int32)
 input_ids[0, :ids_len[0]] = token[0, :]
-attention_mask = np.zeros(1, dtype=np.float32) - 99999999999999.0
+attention_mask = np.zeros(1, dtype=np.float32) - 999999999.0
 position_ids = np.zeros((max_seq_len, 1), dtype=np.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
