@@ -1011,7 +1011,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         self.model = MiniCPMModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.max_seq_len = 768
+        self.max_seq_len = 1024
         self.hidden_size=config.hidden_size
         # Initialize weights and apply final processing
         self.post_init()
