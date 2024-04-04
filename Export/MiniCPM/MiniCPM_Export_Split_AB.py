@@ -4,21 +4,21 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-path_A = 'C:/Users/MiniCPM-2B-dpo-fp32-A'  # set the folder path where the MiniCPM downloaded.
+path_A = 'C:/360Downloads/MiniCPM-2B-dpo-fp32-A'  # set the folder path where the MiniCPM downloaded.
 # Replace the original "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_A".
 
-path_B = 'C:/Users/MiniCPM-2B-dpo-fp32-B'  # Copy the previous downloaded folder and rename it to folder-B.
+path_B = 'C:/360Downloads/MiniCPM-2B-dpo-fp32-B'  # Copy the previous downloaded folder and rename it to folder-B.
 # Also replace another "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_B".
 
-onnx_model_A = 'C:/Users/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the MiniCPM_part_A stored.
-onnx_model_B = 'C:/Users/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the MiniCPM_part_B stored.
+onnx_model_A = 'C:/360Downloads/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the MiniCPM_part_A stored.
+onnx_model_B = 'C:/360Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the MiniCPM_part_B stored.
 
 # Load the model
 model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1014, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1016, at the same time.
 head_dim = 64  # from the model configs
 num_heads = 36
-num_block = 20  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB after the int8 quantized.
+num_layers = 20  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB after the int8 quantized.
 hidden_size = 2304
 
 # Generate dummies for torch.onnx.export()
@@ -32,7 +32,7 @@ for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
 theta = torch.arange(0, head_dim, 2, dtype=torch.float32)
 idx_theta = position_ids * theta
-past_key_states = torch.zeros((num_block, num_heads, max_seq_len, head_dim), dtype=torch.float32)
+past_key_states = torch.zeros((num_layers, num_heads, max_seq_len, head_dim), dtype=torch.float32)
 past_values_states = past_key_states
 cos_rotary_pos_emb = torch.ones_like(idx_theta)
 cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0)
@@ -75,16 +75,18 @@ torch.onnx.export(
 del model
 print('Part_B export done!')
 
-print('\nStart running the MiniCPM by ONNX Runtime\n')
+print('\nStart running the MiniCPM by ONNX Runtime.')
+print('Now loading . . . it could cost minutes.\n')
+
 # Run the exported model by ONNX Runtime
 query = "山东省最高的山是哪座山, 它比黄山高还是矮？差距多少？"
-max_single_chat_length = 341
+max_single_chat_length = 341  # It a adjustable value, but must less than max_seq_len.
 tokenizer = AutoTokenizer.from_pretrained(path_A, trust_remote_code=True)
 
 # ONNX Runtime settings
 session_opts = onnxruntime.SessionOptions()
-session_opts.log_severity_level = 3  # error level
-session_opts.intra_op_num_threads = 4  # CPU threads
+session_opts.log_severity_level = 3  # error level, it a adjustable value.
+session_opts.intra_op_num_threads = 4  # CPU threads, it a adjustable value.
 session_opts.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
 session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
@@ -120,7 +122,7 @@ token = tokenizer(history_str, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros((1, max_seq_len), dtype=np.int32)
 input_ids[0, :ids_len[0]] = token[0, :]
-attention_mask = -99999999999999.0 + np.zeros(1, dtype=np.float32)
+attention_mask = np.zeros(1, dtype=np.float32) - 99999999999999.0
 position_ids = np.zeros((max_seq_len, 1), dtype=np.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
@@ -131,7 +133,7 @@ sin_rotary_pos_emb = np.sin(idx_theta)
 cos_rotary_pos_emb = np.expand_dims(np.concatenate((cos_rotary_pos_emb, cos_rotary_pos_emb), axis=-1), axis=0)
 sin_rotary_pos_emb = np.expand_dims(np.concatenate((sin_rotary_pos_emb, sin_rotary_pos_emb), axis=-1), axis=0)
 history_len = np.zeros(1, dtype=np.int64)
-past_key_states_A = np.zeros((num_block, num_heads, max_seq_len, head_dim), dtype=np.float32)
+past_key_states_A = np.zeros((num_layers, num_heads, max_seq_len, head_dim), dtype=np.float32)
 past_values_states_A = past_key_states_A
 past_key_states_B = past_key_states_A
 past_values_states_B = past_key_states_A
