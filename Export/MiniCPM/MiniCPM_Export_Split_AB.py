@@ -117,8 +117,8 @@ out_name_B1 = ort_session_B.get_outputs()[1].name
 out_name_B2 = ort_session_B.get_outputs()[2].name
 
 # Pre-process inputs
-history_str = tokenizer.apply_chat_template([{"role": 'user', "content": query}], tokenize=False, add_generation_prompt=False)
-token = tokenizer(history_str, return_tensors='pt')['input_ids']
+prompt = tokenizer.apply_chat_template([{"role": 'user', "content": query}], tokenize=False, add_generation_prompt=False)
+token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros((1, max_seq_len), dtype=np.int32)
 input_ids[0, :ids_len[0]] = token[0, :]
