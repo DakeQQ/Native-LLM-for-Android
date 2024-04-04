@@ -4,14 +4,14 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-path_A = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32-A'  # set the folder path where the MiniCPM whole project downloaded.
+path_A = 'C:/360Downloads/MiniCPM-2B-dpo-fp32-A'  # set the folder path where the MiniCPM whole project downloaded.
 # Replace the original "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_A".
 
-path_B = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32-B'  # Copy the previous downloaded folder and rename it to folder-B.
+path_B = 'C:/360Downloads/MiniCPM-2B-dpo-fp32-B'  # Copy the previous downloaded folder and rename it to folder-B.
 # Also replace another "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_B".
 
-onnx_model_A = 'C:/Users/Downloads/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the exported MiniCPM_part_A stored.
-onnx_model_B = 'C:/Users/Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the exported MiniCPM_part_B stored.
+onnx_model_A = 'C:/360Downloads/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the exported MiniCPM_part_A stored.
+onnx_model_B = 'C:/360Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the exported MiniCPM_part_B stored.
 
 # Load the model
 model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
@@ -101,30 +101,34 @@ session_opts.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
 session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
 ort_session_A = onnxruntime.InferenceSession(onnx_model_A, sess_options=session_opts, providers=['CPUExecutionProvider'])
-in_name_A0 = ort_session_A.get_inputs()[0].name
-in_name_A1 = ort_session_A.get_inputs()[1].name
-in_name_A2 = ort_session_A.get_inputs()[2].name
-in_name_A3 = ort_session_A.get_inputs()[3].name
-in_name_A4 = ort_session_A.get_inputs()[4].name
-in_name_A5 = ort_session_A.get_inputs()[5].name
-in_name_A6 = ort_session_A.get_inputs()[6].name
-in_name_A7 = ort_session_A.get_inputs()[7].name
-out_name_A0 = ort_session_A.get_outputs()[0].name
-out_name_A1 = ort_session_A.get_outputs()[1].name
-out_name_A2 = ort_session_A.get_outputs()[2].name
+in_name_A = ort_session_A.get_inputs()
+out_name_A = ort_session_A.get_outputs()
+in_name_A0 = in_name_A[0].name
+in_name_A1 = in_name_A[1].name
+in_name_A2 = in_name_A[2].name
+in_name_A3 = in_name_A[3].name
+in_name_A4 = in_name_A[4].name
+in_name_A5 = in_name_A[5].name
+in_name_A6 = in_name_A[6].name
+in_name_A7 = in_name_A[7].name
+out_name_A0 = out_name_A[0].name
+out_name_A1 = out_name_A[1].name
+out_name_A2 = out_name_A[2].name
 
 ort_session_B = onnxruntime.InferenceSession(onnx_model_B, sess_options=session_opts, providers=['CPUExecutionProvider'])
-in_name_B0 = ort_session_B.get_inputs()[0].name
-in_name_B1 = ort_session_B.get_inputs()[1].name
-in_name_B2 = ort_session_B.get_inputs()[2].name
-in_name_B3 = ort_session_B.get_inputs()[3].name
-in_name_B4 = ort_session_B.get_inputs()[4].name
-in_name_B5 = ort_session_B.get_inputs()[5].name
-in_name_B6 = ort_session_B.get_inputs()[6].name
-in_name_B7 = ort_session_B.get_inputs()[7].name
-out_name_B0 = ort_session_B.get_outputs()[0].name
-out_name_B1 = ort_session_B.get_outputs()[1].name
-out_name_B2 = ort_session_B.get_outputs()[2].name
+in_name_B = ort_session_B.get_inputs()
+out_name_B = ort_session_B.get_outputs()
+in_name_B0 = in_name_B[0].name
+in_name_B1 = in_name_B[1].name
+in_name_B2 = in_name_B[2].name
+in_name_B3 = in_name_B[3].name
+in_name_B4 = in_name_B[4].name
+in_name_B5 = in_name_B[5].name
+in_name_B6 = in_name_B[6].name
+in_name_B7 = in_name_B[7].name
+out_name_B0 = out_name_B[0].name
+out_name_B1 = out_name_B[1].name
+out_name_B2 = out_name_B[2].name
 
 # Pre-process inputs
 prompt = tokenizer.apply_chat_template([{"role": 'user', "content": query}], tokenize=False, add_generation_prompt=False)
