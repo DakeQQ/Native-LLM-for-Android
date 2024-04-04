@@ -41,8 +41,13 @@ torch.onnx.export(
         history_len, ids_len),
     onnx_model,
     input_names=[
-        'input_ids', 'attention_mask', 'cos_rotary_pos_emb', 'sin_rotary_pos_emb', 'past_key_states',
-        'past_values_states', 'history_len',
+        'input_ids',
+        'attention_mask',
+        'cos_rotary_pos_emb',
+        'sin_rotary_pos_emb',
+        'past_key_states',
+        'past_values_states',
+        'history_len',
         'ids_len'
     ],
     output_names=['max_logit_id', 'past_key_states', 'past_values_states'],
