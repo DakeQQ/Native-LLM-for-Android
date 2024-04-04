@@ -4,7 +4,7 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-path = 'C:/Users/Downloads/Qwen1.5-1.8B-Chat'  # set the folder path where the MiniCPM whole project downloaded.
+path = 'C:/Users/Downloads/Qwen1.5-1.8B-Chat'  # set the folder path where the Qwen1.5 whole project downloaded.
 # Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
 
 onnx_model = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
