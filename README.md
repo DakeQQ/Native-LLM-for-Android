@@ -19,12 +19,12 @@
 8. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
 9. 想自行导出模型请前往“Export”文件夹，按照注释操作取代原模型的“modeling_***.py”，然后执行 ***_Export.py的python脚本。下一步，自己动手量化或优化导出的ONNX模型。
 10. 看更多項目: https://dakeqq.github.io/overview/
-# 通义千问性能 Qwen Performance
+# 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Qwen1.5-1.8B<br>q8f32 | 14 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen1.5-1.8B<br>q8f32 | 9 token/s |
-# MiniCPM性能 MiniCPM Performance
+# MiniCPM - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | MiniCPM-2.7B<br>q8f32 | 7.7 token/s |
