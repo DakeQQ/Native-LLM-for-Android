@@ -15,7 +15,7 @@ onnx_model_B = 'C:/Users/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path wh
 
 # Load the model
 model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
-max_seq_len = 768  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1014, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1014, at the same time.
 head_dim = 64  # from the model configs
 num_heads = 36
 num_block = 20  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB after the int8 quantized.
