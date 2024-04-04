@@ -259,9 +259,7 @@ class Qwen2Attention(nn.Module):
             torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin),
                          key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
             dtype=torch.float32), p=self.attention_dropout, training=self.training),
-            value_states).transpose(0,
-                                    1).contiguous().reshape(
-            ids_len, self.hidden_size)), key_states, value_states
+            value_states).transpose(0, 1).contiguous().reshape(ids_len, self.hidden_size)), key_states, value_states
 
 
 class Qwen2FlashAttention2(Qwen2Attention):
