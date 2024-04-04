@@ -16,10 +16,10 @@ onnx_model_B = 'C:/Users/Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign
 # Load the model
 model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1016, at the same time.
-head_dim = 64  # from the model configs
-num_heads = 36
-num_layers = 20  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB after the int8 quantized.
-hidden_size = 2304
+num_heads = model.config.num_attention_heads
+head_dim = model.config.hidden_size // num_heads
+num_layers = model.config.num_hidden_layers // 2  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB after the int8 quantized.
+hidden_size = model.config.hidden_size
 
 # Generate dummies for torch.onnx.export()
 input_ids = torch.ones((1, max_seq_len), dtype=torch.int32)
