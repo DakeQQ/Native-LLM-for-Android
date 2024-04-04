@@ -56,7 +56,7 @@ torch.onnx.export(
 del model
 print('Export done!')
 
-print('\nStart running the MiniCPM by ONNX Runtime.')
+print('\nStart running the Qwen by ONNXRuntime.')
 print('Now loading . . . it could cost minutes.\n')
 
 # Run the exported model by ONNX Runtime
