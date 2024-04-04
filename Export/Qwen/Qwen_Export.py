@@ -114,7 +114,8 @@ start_time = time.time()
 while history_len < max_single_chat_length:
     token_id, past_key_states_A, past_values_states_A = ort_session_A.run(
         [out_name_A0, out_name_A1, out_name_A2],
-        {in_name_A0: input_ids, in_name_A1: attention_mask,
+        {in_name_A0: input_ids,
+         in_name_A1: attention_mask,
          in_name_A2: cos_rotary_pos_emb,
          in_name_A3: sin_rotary_pos_emb,
          in_name_A4: past_key_states_A,
