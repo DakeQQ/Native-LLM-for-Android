@@ -664,8 +664,7 @@ class MiniCPMSdpaAttention(MiniCPMAttention):
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
         key_states = torch.cat(
-            (past_key_states, (key_states * rotary_pos_emb_cos) + (rotate_half(key_states) * rotary_pos_emb_sin)),
-            dim=-2)
+            (past_key_states, (key_states * rotary_pos_emb_cos) + (rotate_half(key_states) * rotary_pos_emb_sin)), dim=-2)
         value_states = torch.cat((past_value_states,
                                   self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads,
                                                                   self.head_dim).transpose(0, 1)), dim=-2)
