@@ -295,6 +295,7 @@ class MiniCPMAttention(nn.Module):
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         self.is_causal = True
+        self.head_dim_factor = 1.0 / math.sqrt(self.head_dim)
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -670,7 +671,7 @@ class MiniCPMSdpaAttention(MiniCPMAttention):
                                                                   self.head_dim).transpose(0, 1)), dim=-2)
         return self.o_proj(torch.matmul(nn.functional.dropout(nn.functional.softmax(
             torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin),
-                         key_states.transpose(1, 2)) * 0.125 + attention_mask, dim=-1,
+                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
             dtype=torch.float32), p=self.attention_dropout, training=self.training),
             value_states).transpose(0,
                                     1).contiguous().reshape(
@@ -696,6 +697,7 @@ class MiniCPMDecoderLayer(nn.Module):
 
         self.scale_depth = config.scale_depth
         self.num_hidden_layers = config.num_hidden_layers
+        self.scale_factor = self.scale_depth / math.sqrt(self.num_hidden_layers)
 
     def forward(
             self,
@@ -717,8 +719,8 @@ class MiniCPMDecoderLayer(nn.Module):
             past_value_states=past_value_states,
             ids_len=ids_len
         )
-        hidden_states_temp = hidden_states + hidden_states_temp * 0.221359436212
-        return (hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp)) * 0.221359436212,) + (past_key_states,) + (
+        hidden_states_temp = hidden_states + hidden_states_temp * self.scale_factor
+        return (hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp)) * self.scale_factor,) + (past_key_states,) + (
             past_value_states,)
 
 
@@ -1013,6 +1015,10 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.max_seq_len = 1024
         self.hidden_size = config.hidden_size
+        self.num_layers = config.num_hidden_layers // 2
+        self.num_heads = config.num_attention_heads
+        self.head_dim = self.hidden_size // self.num_heads
+        self.factor = self.config.hidden_size / self.config.dim_model_base
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1046,8 +1052,8 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
             history_len: torch.LongTensor = None,
             ids_len: torch.LongTensor = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        save_kv_0 = [None] * 20
-        save_kv_1 = [None] * 20
+        save_kv_0 = [None] * self.num_layers
+        save_kv_1 = [None] * self.num_layers
         kv_seq_len = ids_len + history_len
         cos_rotary_pos_emb = cos_rotary_pos_emb[:, history_len:kv_seq_len, :]
         sin_rotary_pos_emb = sin_rotary_pos_emb[:, history_len:kv_seq_len, :]
@@ -1055,8 +1061,8 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         past_value_states = past_value_states[:, :, :history_len, :]
         hidden_states = hidden_states[:, :ids_len, :]
         attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float32))) * attention_mask
-        for i in range(20):
-            hidden_states, save_kv_0[i], save_kv_1[i] = self.model.layers[i+20](
+        for i in range(self.num_layers):
+            hidden_states, save_kv_0[i], save_kv_1[i] = self.model.layers[i+self.num_layers](
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
                 rotary_pos_emb_cos=cos_rotary_pos_emb,
@@ -1065,11 +1071,10 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
                 past_value_states=past_value_states[i],
                 ids_len=ids_len
             )
-        expand_space = torch.zeros((20, 36, self.max_seq_len - kv_seq_len, 64), dtype=torch.float32)
-        return torch.argmax(self.lm_head(self.model.norm(hidden_states[:, -1, :]) * 0.11111111111)), torch.cat(
-            (torch.stack(save_kv_0), expand_space),
-            dim=-2), torch.cat(
-            (torch.stack(save_kv_1), expand_space), dim=-2)
+        expand_space = torch.zeros((self.num_layers, self.num_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float32)
+        return (torch.argmax(self.lm_head(self.model.norm(hidden_states[:, -1, :]) * self.factor)),
+                torch.cat((torch.stack(save_kv_0), expand_space), dim=-2),
+                torch.cat((torch.stack(save_kv_1), expand_space), dim=-2))
 
 
     def prepare_inputs_for_generation(
