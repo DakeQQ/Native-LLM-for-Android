@@ -4,7 +4,7 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-path = 'C:/Users/Downloads/Qwen1.5-1.8B-Chat'  # set the folder path where the Qwen whole project downloaded.
+path = 'C:/Users/Downloads/Qwen1.5-1.8B-Chat'  # set the folder path where the MiniCPM whole project downloaded.
 # Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
 
 onnx_model = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
@@ -72,17 +72,19 @@ session_opts.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
 session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
 ort_session_A = onnxruntime.InferenceSession(onnx_model, sess_options=session_opts, providers=['CPUExecutionProvider'])
-in_name_A0 = ort_session_A.get_inputs()[0].name
-in_name_A1 = ort_session_A.get_inputs()[1].name
-in_name_A2 = ort_session_A.get_inputs()[2].name
-in_name_A3 = ort_session_A.get_inputs()[3].name
-in_name_A4 = ort_session_A.get_inputs()[4].name
-in_name_A5 = ort_session_A.get_inputs()[5].name
-in_name_A6 = ort_session_A.get_inputs()[6].name
-in_name_A7 = ort_session_A.get_inputs()[7].name
-out_name_A0 = ort_session_A.get_outputs()[0].name
-out_name_A1 = ort_session_A.get_outputs()[1].name
-out_name_A2 = ort_session_A.get_outputs()[2].name
+in_name_A = ort_session_A.get_inputs()
+out_name_A = ort_session_A.get_outputs()
+in_name_A0 = in_name_A[0].name
+in_name_A1 = in_name_A[1].name
+in_name_A2 = in_name_A[2].name
+in_name_A3 = in_name_A[3].name
+in_name_A4 = in_name_A[4].name
+in_name_A5 = in_name_A[5].name
+in_name_A6 = in_name_A[6].name
+in_name_A7 = in_name_A[7].name
+out_name_A0 = out_name_A[0].name
+out_name_A1 = out_name_A[1].name
+out_name_A2 = out_name_A[2].name
 
 # Pre-process inputs
 prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
