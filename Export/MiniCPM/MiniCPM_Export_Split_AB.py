@@ -10,8 +10,8 @@ path_A = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32-A'  # set the folder path where
 path_B = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32-B'  # Copy the previous downloaded folder and rename it to folder-B.
 # Also replace another "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_B".
 
-onnx_model_A = 'C:/Users/Downloads/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the MiniCPM_part_A stored.
-onnx_model_B = 'C:/Users/Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the MiniCPM_part_B stored.
+onnx_model_A = 'C:/Users/Downloads/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the exported MiniCPM_part_A stored.
+onnx_model_B = 'C:/Users/Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the exported MiniCPM_part_B stored.
 
 # Load the model
 model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
