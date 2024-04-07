@@ -26,6 +26,7 @@
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Qwen1.5-1.8B<br>q8f32 | 14 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen1.5-1.8B<br>q8f32 | 9 token/s |
+| Harmony 3 | 荣耀20S | Kirin_810-CPU<br>(2*A76) | Qwen1.5-1.8B<br>q8f32 | 4.5 token/s |
 # MiniCPM - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
