@@ -19,7 +19,7 @@
 7. 因此，演示模型的输入输出与原始模型略有不同。
 8. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
 9. 想自行导出模型请前往“Export”文件夹，按照注释操作取代原模型的“modeling_***.py”，然后执行 ***_Export.py的python脚本。下一步，自己动手量化或优化导出的ONNX模型。
-10. 在导出MiniCPM-V的过程中, Resampler总报错“aten:：_upsample_bilinear2d_aa”算子不支持，因此暂时无法使用多模态交互。
+10. 在导出MiniCPM-V的过程中, Resampler总报错“aten::_upsample_bilinear2d_aa”算子不支持，因此暂时无法使用多模态交互。
 11. 看更多項目: https://dakeqq.github.io/overview/
 # 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
