@@ -38,7 +38,7 @@
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | MiniCPM-2.7B<br>q8f32 | 7.7 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 4.5 token/s |
-# Octopus V2 - 性能 Performance
+# Octopus - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Octopus V2-2B<br>q8f32 | testing |
