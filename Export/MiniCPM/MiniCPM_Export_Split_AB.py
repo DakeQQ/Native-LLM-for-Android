@@ -18,6 +18,7 @@ model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, 
 max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1013, at the same time.
 num_heads = model.config.num_attention_heads
 head_dim = model.config.hidden_size // num_heads
+num_key_value_heads = model.config.num_key_value_heads
 num_layers = model.config.num_hidden_layers // 2  # The original value was 40, but we divided it in half to ensure the size of a single file is less than 2GB after the int8 quantized.
 hidden_size = model.config.hidden_size
 
@@ -32,7 +33,7 @@ for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
 theta = torch.arange(0, head_dim, 2, dtype=torch.float32)
 idx_theta = position_ids * theta
-past_key_states = torch.zeros((num_layers, num_heads, max_seq_len, head_dim), dtype=torch.float32)
+past_key_states = torch.zeros((num_layers, num_key_value_heads, max_seq_len, head_dim), dtype=torch.float32)
 past_values_states = past_key_states
 cos_rotary_pos_emb = torch.ones_like(idx_theta)
 cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0)
@@ -147,7 +148,7 @@ sin_rotary_pos_emb = np.sin(idx_theta)
 cos_rotary_pos_emb = np.expand_dims(np.concatenate((cos_rotary_pos_emb, cos_rotary_pos_emb), axis=-1), axis=0)
 sin_rotary_pos_emb = np.expand_dims(np.concatenate((sin_rotary_pos_emb, sin_rotary_pos_emb), axis=-1), axis=0)
 history_len = np.zeros(1, dtype=np.int64)
-past_key_states_A = np.zeros((num_layers, num_heads, max_seq_len, head_dim), dtype=np.float32)
+past_key_states_A = np.zeros((num_layers, num_key_value_heads, max_seq_len, head_dim), dtype=np.float32)
 past_values_states_A = past_key_states_A
 past_key_states_B = past_key_states_A
 past_values_states_B = past_key_states_A
