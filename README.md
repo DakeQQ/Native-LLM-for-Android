@@ -1,6 +1,6 @@
 # Native-LLM-for-Android
 1. Demonstration of running a native LLM on Android device. Now support:
-    - Qwen1.5 - 0.5B, 1.8B
+    - Qwen1.5 - 0.5B, 1.8B...
     - MiniCPM - 2.7B
     - Octopus V2 - 2B
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
@@ -14,7 +14,7 @@
 10. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。目前支持:
-   - Qwen1.5 - 0.5B, 1.8B
+   - Qwen1.5 - 0.5B, 1.8B...
    - MiniCPM - 2.7B
    - Octopus V2 - 2B
 2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
