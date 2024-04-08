@@ -105,8 +105,6 @@ sin_rotary_pos_emb = np.expand_dims(np.concatenate((sin_rotary_pos_emb, sin_rota
 history_len = np.zeros(1, dtype=np.int64)
 past_key_states_A = np.zeros((num_layers, num_heads, max_seq_len, head_dim), dtype=np.float32)
 past_values_states_A = past_key_states_A
-past_key_states_B = past_key_states_A
-past_values_states_B = past_key_states_A
 num_decode = 0
 print('Test Question: ' + query + "\n")
 print('Qwen Answering:\n')
