@@ -1015,6 +1015,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         self.num_layers = config.num_hidden_layers // 2
         self.num_heads = config.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
+        self.num_key_value_heads = config.num_key_value_heads
         self.factor = self.config.hidden_size / self.config.dim_model_base
         # Initialize weights and apply final processing
         self.post_init()
@@ -1068,7 +1069,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
                 past_value_states=past_value_states[i],
                 ids_len=ids_len
             )
-        expand_space = torch.zeros((self.num_layers, self.num_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float32)
+        expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float32)
         return (torch.argmax(self.lm_head(self.model.norm(hidden_states[:, -1, :]) * self.factor)),
                 torch.cat((torch.stack(save_kv_0), expand_space), dim=-2),
                 torch.cat((torch.stack(save_kv_1), expand_space), dim=-2))
