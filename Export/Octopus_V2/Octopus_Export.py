@@ -88,7 +88,7 @@ out_name_A1 = out_name_A[1].name
 out_name_A2 = out_name_A[2].name
 
 # Pre-process inputs
-prompt = f"{query}"
+prompt = f"Below is the query from the users, please call the correct function and generate the parameters to call the function.\n\nQuery:{query}\n\nResponse:"
 token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros((1, max_seq_len), dtype=np.int32)
