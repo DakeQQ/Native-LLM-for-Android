@@ -1,5 +1,8 @@
 # Native-LLM-for-Android
-1. Demonstration of running a native LLM on Android device.
+1. Demonstration of running a native LLM on Android device. Now support:
+  - Qwen1.5 - 0.5B, 1.8B
+  - MiniCPM - 2.7B
+  - Octopus V2 - 2B
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. After downloading, place the model into the assets folder.
 4. Remember to decompress the *.so zip file stored in the libs/arm64-v8a folder.
@@ -10,7 +13,10 @@
 9. During the export process of MiniCPM-V, the Resampler always reports an error 'aten::_upsample_bilinear2d_aa' operator not supported, therefore, it is temporarily infeasible to use vision interaction.
 10. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
-1. 在Android设备上运行本地LLM的演示。
+1. 在Android设备上运行本地LLM的演示。目前支持:
+   - Qwen1.5 - 0.5B, 1.8B
+   - MiniCPM - 2.7B
+   - Octopus V2 - 2B
 2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. 百度: https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake 提取码: dake
 4. 下载后，请将模型文件放入assets文件夹。
@@ -32,6 +38,12 @@
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | MiniCPM-2.7B<br>q8f32 | 7.7 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 4.5 token/s |
+# Octopus V2 - 性能 Performance
+| OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
+|:-------:|:-------:|:-------:|:-------:|:-------:|
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Octopus V2-2B<br>q8f32 | testing |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Octopus V2-2B<br>q8f32 | testing |
+| Harmony 3 | 荣耀20S |  Kirin_810-CPU<br>(2*A76) | Octopus V2-2B<br>q8f32 | testing |
 # 演示结果 Demo Results
 (Qwen1.5-1.8B / 1024 Context)<br>
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
