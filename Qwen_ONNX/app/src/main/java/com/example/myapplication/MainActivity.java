@@ -58,10 +58,11 @@ public class MainActivity extends AppCompatActivity {
         clearButton.setOnClickListener(v -> clearHistory());
         if (!Load_Models_A(mgr,false,false,false,false,false,false)) {
             addHistory(ChatMessage.TYPE_SERVER, load_failed);
+        } else {
+            Copy_from_Asset_to_Cache(file_name_vocab, mgr);
+            Pre_Process();
+            Start_Chat();
         }
-        Copy_from_Asset_to_Cache(file_name_vocab, mgr);
-        Pre_Process();
-        Start_Chat();
     }
     @SuppressLint("NotifyDataSetChanged")
     private static void addHistory(int messageType, String result) {
