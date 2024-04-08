@@ -1,8 +1,8 @@
 # Native-LLM-for-Android
 1. Demonstration of running a native LLM on Android device. Now support:
-  - Qwen1.5 - 0.5B, 1.8B
-  - MiniCPM - 2.7B
-  - Octopus V2 - 2B
+    - Qwen1.5 - 0.5B, 1.8B
+    - MiniCPM - 2.7B
+    - Octopus V2 - 2B
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. After downloading, place the model into the assets folder.
 4. Remember to decompress the *.so zip file stored in the libs/arm64-v8a folder.
