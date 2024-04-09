@@ -3,13 +3,16 @@ import torch
 import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import shutil
 
 path = 'C:/Users/Downloads/Qwen1.5-1.8B-Chat'  # Set the folder path where the Qwen whole project downloaded.
-# Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
 
+# Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
+modified_path = './modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_qwen2.py stored.
 onnx_model = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
 
 # Load the model
+shutil.copyfile(modified_path, path + "/modeling_qwen2.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 1006, at the same time.
 num_heads = model.config.num_attention_heads
