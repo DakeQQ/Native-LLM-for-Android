@@ -668,11 +668,10 @@ class MiniCPMSdpaAttention(MiniCPMAttention):
         value_states = torch.cat((past_value_states,
                                   self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads,
                                                                   self.head_dim).transpose(0, 1)), dim=-2)
-        return self.o_proj(torch.matmul(nn.functional.dropout(nn.functional.softmax(
+        return self.o_proj(torch.matmul(nn.functional.softmax(
             torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin),
                          key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
-            dtype=torch.float32), p=self.attention_dropout, training=self.training),
-            value_states).transpose(0, 1).contiguous().reshape(ids_len, self.hidden_size)), key_states, value_states
+            dtype=torch.float32), value_states).transpose(0, 1).contiguous().reshape(1, ids_len, self.hidden_size)), key_states, value_states
 
 
 MINICPM_ATTENTION_CLASSES = {
