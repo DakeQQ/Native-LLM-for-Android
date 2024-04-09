@@ -3,18 +3,19 @@ import torch
 import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import shutil
 
-path_A = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32-A'  # Set the folder path where the MiniCPM whole project downloaded.
-# Replace the original "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_A".
+path = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32'  # Set the folder path where the MiniCPM whole project downloaded.
 
-path_B = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32-B'  # Copy the previous downloaded folder and rename it to folder-B.
-# Also replace another "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_B".
-
+# Replace the original "modeling_minicpm.py" with the modified "modeling_minicpm.py", which stored at the folder "modeling_modified_A&B".
+modified_path_A = './modeling_modified_A/modeling_minicpm.py'  # The path where the modified part_A modeling_minicpm.py stored.
+modified_path_B = './modeling_modified_B/modeling_minicpm.py'  # The path where the modified part_B modeling_minicpm.py stored.
 onnx_model_A = 'C:/Users/Downloads/MiniCPM_ONNX_A/MiniCPM_part_A.onnx'  # Assign a path where the exported MiniCPM_part_A stored.
 onnx_model_B = 'C:/Users/Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign a path where the exported MiniCPM_part_B stored.
 
 # Load the model
-model = AutoModelForCausalLM.from_pretrained(path_A, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
+shutil.copyfile(modified_path_A, path + "/modeling_minicpm.py")
+model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1013, at the same time.
 num_heads = model.config.num_attention_heads
 head_dim = model.config.hidden_size // num_heads
@@ -63,7 +64,8 @@ del model
 print('Part_A export done!')
 
 # Reload for part B
-model = AutoModelForCausalLM.from_pretrained(path_B, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
+shutil.copyfile(modified_path_B, path + "/modeling_minicpm.py")
+model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 print('Part_B export start ...')
 torch.onnx.export(
     model, (
@@ -92,7 +94,7 @@ print('Now loading . . . it could cost minutes.\n')
 # Run the exported model by ONNX Runtime
 query = "山东省最高的山是哪座山, 它比黄山高还是矮？差距多少？"
 max_single_chat_length = 341  # It a adjustable value, but must less than max_seq_len.
-tokenizer = AutoTokenizer.from_pretrained(path_A, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
 
 # ONNX Runtime settings
 session_opts = onnxruntime.SessionOptions()
