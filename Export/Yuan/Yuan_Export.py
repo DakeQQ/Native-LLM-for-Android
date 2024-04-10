@@ -118,8 +118,7 @@ in_name_B0 = ort_session_B.get_inputs()[0].name
 out_name_B0 = ort_session_B.get_outputs()[0].name
 
 # Pre-process inputs
-prompt = f'{query}<sep>'
-token = tokenizer(prompt, return_tensors='pt')['input_ids']
+token = tokenizer(query, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros((1, max_seq_len), dtype=np.int32)
 input_ids[0, :ids_len[0]] = token[0, :]
