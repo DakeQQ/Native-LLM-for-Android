@@ -180,14 +180,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         } else {
             ort_runtime_B->CreateTensorWithDataAsOrtValue(
                     memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<float*> (key_states)),
-                    past_key_values_buffer_size,
+                    reinterpret_cast<void*>(reinterpret_cast<float*> (key_states)), past_key_values_buffer_size,
                     input_dims_B[4].data(), input_dims_B[4].size(), input_types_B[4],
                     &input_tensors_B[4]);
             ort_runtime_B->CreateTensorWithDataAsOrtValue(
                     memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<float*> (value_states)),
-                    past_key_values_buffer_size,
+                    reinterpret_cast<void*>(reinterpret_cast<float*> (value_states)), past_key_values_buffer_size,
                     input_dims_B[5].data(), input_dims_B[5].size(), input_types_B[5],
                     &input_tensors_B[5]);
         }
