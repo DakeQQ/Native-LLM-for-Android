@@ -43,7 +43,7 @@
 # Octopus - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Octopus V2-2B<br>q8f32 | testing |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Octopus V2-2B<br>q8f32 | Out of RAM<br>(lm.head & Embed are too large) |
 # 源 Yuan - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
