@@ -552,7 +552,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
                                              "optimization.enable_gelu_approximation",
                                              "0");  // Set 0 is better for this model
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
-                                             "mlas.enable_gemm_fastmath_Brm64_bfloat16",
+                                             "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.disable_aot_function_inlining",
@@ -572,7 +572,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.use_ort_model_bytes_for_initializers",
                                              "0");  // If set use_ort_model_bytes_directly=1, use_ort_model_bytes_for_initializers should be 0.
-        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.set_denormal_Bs_zero",
+        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.set_denormal_as_zero",
                                              "0");  // // Use 0 instead of NaN or Inf.
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.use_env_allocators",
                                              "1");  // Use it to lower memory usage.
@@ -760,10 +760,10 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
                                              "optimization.enable_gelu_approximation",
                                              "0");  // Set 0 is better for this model
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
-                                             "mlas.enable_gemm_fastmath_Crm64_bfloat16",
+                                             "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
-                                             "session.disable_Cot_function_inlining",
+                                             "session.disable_aot_function_inlining",
                                              "0");  // 0 for speed
         ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.qdqisint8allowed",
                                              "1");  // 1 for Arm
@@ -780,7 +780,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "session.use_ort_model_bytes_for_initializers",
                                              "0");  // If set use_ort_model_bytes_directly=1, use_ort_model_bytes_for_initializers should be 0.
-        ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.set_denormal_Cs_zero",
+        ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.set_denormal_as_zero",
                                              "0");  // // Use 0 instead of NaN or Inf.
         ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.use_env_allocators",
                                              "1");  // Use it to lower memory usage.
