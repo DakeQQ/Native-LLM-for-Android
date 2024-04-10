@@ -323,7 +323,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base", "2");  // One block can contain 1 or more cores, and sharing 1 job.
         ort_runtime_A->AddSessionConfigEntry(session_options_A, // Binding the #cpu to run the model. 'A;B;' means A & B work respectively. 'A,B' means A & B work cooperatively.
                                              "session.intra_op_thread_affinities",
-                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
+                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Octopus_V2-2B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
         ort_runtime_A->SetIntraOpNumThreads(session_options_A, 3); // dynamic_block_base + 1
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.inter_op.allow_spinning",
                                              "1");  // 0 for low power
@@ -532,7 +532,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.dynamic_block_base", "2");  // One block can contain 1 or more cores, and sharing 1 job.
         ort_runtime_B->AddSessionConfigEntry(session_options_B, // Binding the #cpu to run the model. 'A;B;' means A & B work respectively. 'A,B' means A & B work cooperatively.
                                              "session.intra_op_thread_affinities",
-                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
+                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Octopus_V2-2B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
         ort_runtime_B->SetIntraOpNumThreads(session_options_B, 3); // dynamic_block_base + 1
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.inter_op.allow_spinning",
                                              "1");  // 0 for low power
@@ -547,13 +547,13 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
-                                             "optimization.enable_gelu_Bpproximation",
+                                             "optimization.enable_gelu_approximation",
                                              "0");  // Set 0 is better for this model
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
-                                             "mlas.enable_gemm_fastmath_Brm64_bfloat16",
+                                             "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
-                                             "session.disable_Bot_function_inlining",
+                                             "session.disable_aot_function_inlining",
                                              "0");  // 0 for speed
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.qdqisint8allowed",
                                              "1");  // 1 for Arm
@@ -570,9 +570,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.use_ort_model_bytes_for_initializers",
                                              "0");  // If set use_ort_model_bytes_directly=1, use_ort_model_bytes_for_initializers should be 0.
-        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.set_denormal_Bs_zero",
+        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.set_denormal_as_zero",
                                              "0");  // // Use 0 instead of NaN or Inf.
-        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.use_env_Bllocators",
+        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.use_env_allocators",
                                              "1");  // Use it to lower memory usage.
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.use_device_Bllocator_for_initializers",
@@ -589,7 +589,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
                 option_values.push_back("3");
                 option_keys.push_back("soc_model");
                 option_values.push_back("0");  // 0 for unknown
-                option_keys.push_back("htp_Brch");
+                option_keys.push_back("htp_arch");
                 option_values.push_back("73");  // 0 for unknown
                 option_keys.push_back("device_id");
                 option_values.push_back("0");  // 0 for single device
@@ -740,7 +740,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
         ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.dynamic_block_base", "2");  // One block can contain 1 or more cores, and sharing 1 job.
         ort_runtime_C->AddSessionConfigEntry(session_options_C, // Binding the #cpu to run the model. 'A;B;' means A & B work respectively. 'A,B' means A & B work cooperatively.
                                              "session.intra_op_thread_affinities",
-                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
+                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Octopus_V2-2B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
         ort_runtime_C->SetIntraOpNumThreads(session_options_C, 3); // dynamic_block_base + 1
         ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.inter_op.allow_spinning",
                                              "1");  // 0 for low power
@@ -755,13 +755,13 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
         ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
-                                             "optimization.enable_gelu_Cpproximation",
+                                             "optimization.enable_gelu_approximation",
                                              "0");  // Set 0 is better for this model
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
-                                             "mlas.enable_gemm_fastmath_Crm64_bfloat16",
+                                             "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
-                                             "session.disable_Cot_function_inlining",
+                                             "session.disable_aot_function_inlining",
                                              "0");  // 0 for speed
         ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.qdqisint8allowed",
                                              "1");  // 1 for Arm
@@ -778,12 +778,12 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "session.use_ort_model_bytes_for_initializers",
                                              "0");  // If set use_ort_model_bytes_directly=1, use_ort_model_bytes_for_initializers should be 0.
-        ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.set_denormal_Cs_zero",
+        ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.set_denormal_as_zero",
                                              "0");  // // Use 0 instead of NaN or Inf.
-        ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.use_env_Cllocators",
+        ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.use_env_allocators",
                                              "1");  // Use it to lower memory usage.
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
-                                             "session.use_device_Cllocator_for_initializers",
+                                             "session.use_device_allocator_for_initializers",
                                              "1");  // Use it to lower memory usage.
         std::vector<const char*> option_keys = {};
         std::vector<const char*> option_values = {};
@@ -797,7 +797,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
                 option_values.push_back("3");
                 option_keys.push_back("soc_model");
                 option_values.push_back("0");  // 0 for unknown
-                option_keys.push_back("htp_Crch");
+                option_keys.push_back("htp_arch");
                 option_values.push_back("73");  // 0 for unknown
                 option_keys.push_back("device_id");
                 option_values.push_back("0");  // 0 for single device
