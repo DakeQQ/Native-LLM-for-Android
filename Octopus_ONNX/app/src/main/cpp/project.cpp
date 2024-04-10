@@ -37,7 +37,7 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
         theta[i] = theta[i - 1] + 2;  // even sequence
     }
     for (int i = 1; i < theta.size(); i++) {
-        theta[i] = std::powf(10000.f, -theta[i] * 0.00390625);  // 1/(10000^(x/256))
+        theta[i] = std::powf(10000.f, -theta[i] * 0.00390625f);  // 1/(10000^(x/256))
     }
     theta[0] = 1.f;
     std::vector<float> idx_theta(max_token_history * theta.size(), 0.f);
