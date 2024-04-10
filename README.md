@@ -50,11 +50,11 @@
 # Octopus - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Octopus V2-2B<br>q8f32 | Out of RAM<br>( lm_head & Embed are too large ) |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Octopus V2-2B<br>q8f32 | 13 token/s |
 # Gemma - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Gemma1.1-it-2B<br>q8f32 | Out of RAM<br>( lm_head & Embed are too large ) |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Gemma1.1-it-2B<br>q8f32 | testing |
 # 演示结果 Demo Results
 (Qwen1.5-1.8B / 1024 Context)<br>
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
