@@ -545,13 +545,13 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
-                                             "optimization.enable_gelu_Bpproximation",
+                                             "optimization.enable_gelu_approximation",
                                              "0");  // Set 0 is better for this model
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
-                                             "mlas.enable_gemm_fastmath_Brm64_bfloat16",
+                                             "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
-                                             "session.disable_Bot_function_inlining",
+                                             "session.disable_aot_function_inlining",
                                              "0");  // 0 for speed
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.qdqisint8allowed",
                                              "1");  // 1 for Arm
@@ -568,9 +568,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.use_ort_model_bytes_for_initializers",
                                              "0");  // If set use_ort_model_bytes_directly=1, use_ort_model_bytes_for_initializers should be 0.
-        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.set_denormal_Bs_zero",
+        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.set_denormal_as_zero",
                                              "0");  // // Use 0 instead of NaN or Inf.
-        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.use_env_Bllocators",
+        ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.use_env_allocators",
                                              "1");  // Use it to lower memory usage.
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.use_device_Bllocator_for_initializers",
@@ -587,7 +587,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
                 option_values.push_back("3");
                 option_keys.push_back("soc_model");
                 option_values.push_back("0");  // 0 for unknown
-                option_keys.push_back("htp_Brch");
+                option_keys.push_back("htp_arch");
                 option_values.push_back("73");  // 0 for unknown
                 option_keys.push_back("device_id");
                 option_values.push_back("0");  // 0 for single device
