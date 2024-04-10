@@ -76,9 +76,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                                                      jboolean add_prompt,
                                                      jboolean clear) {
     if (add_prompt) {
-        if (clear) {
-            clear_history();
-        }
+        clear_history();  // Clear each time because the chat prompt is currently unsupported.
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = get_input_ids(query, add_prompt);
         ids_len = get_ids.size();
