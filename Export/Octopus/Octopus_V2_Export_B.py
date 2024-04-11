@@ -8,10 +8,10 @@ import shutil
 model_folder_path = 'C:/Users/Downloads/Octopus_V2-2B-fp32'  # set the folder path where the Octopus_V2 whole project downloaded.
 modified_path_B = 'C:./modeling_modified_B/modeling_gemma.py'  # The path where store the modified part_B modeling_gemma.py
 transformers_gemma_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/gemma/modeling_gemma.py'  # The original modeling_gemma.py path which was stored in the transformers python package.
-shutil.copyfile(modified_path_B, transformers_gemma_path)
 onnx_model_B = 'C:/Users/Downloads/Octopus_ONNX/Octopus_part_B.onnx'  # Assign a path where the exported Octopus_part_B model stored.
 
 # Load the model
+shutil.copyfile(modified_path_B, transformers_gemma_path)
 model = AutoModelForCausalLM.from_pretrained(model_folder_path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_gemma.py on line 937, at the same time.
 num_heads = model.config.num_attention_heads
