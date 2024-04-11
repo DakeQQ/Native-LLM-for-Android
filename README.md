@@ -2,8 +2,8 @@
 1. Demonstration of running a native LLM on Android device. Now support:
     - Qwen1.5-Chat: 0.5B, 1.8B, 4B ...
     - MiniCPM: 2.7B
-    - Yuan2.0: 2B+
-    - Octopus V2: 2.5B
+    - Yuan2.0-Februa-hf: 2B+
+    - OctopusV2: 2.5B
     - Gemma1.1-it: 2.5B
     - StableLM2-Chat: 1.6B, 3B
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
@@ -19,8 +19,8 @@
 1. 在Android设备上运行本地LLM的演示。目前支持:
    - 通义千问1.5-Chat: 0.5B, 1.8B, 4B ...
    - MiniCPM: 2.7B
-   - 源2.0: 2B+
-   - Octopus V2: 2.5B
+   - 源2.0-Februa-hf: 2B+
+   - OctopusV2: 2.5B
    - Gemma1.1-it: 2.5B
    - StableLM2-Chat: 1.6B, 3B
 2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
@@ -47,8 +47,8 @@
 # 源 Yuan - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Yuan2.0-2B<br>q8f32 | 10 token/s |
-| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Yuan2.0-2B<br>q8f32 | 5.7 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Yuan2.0-2B-Februa-hf<br>q8f32 | 10 token/s |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Yuan2.0-2B-Februa-hf<br>q8f32 | 5.7 token/s |
 # Octopus - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
