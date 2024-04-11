@@ -8,11 +8,10 @@ import shutil
 model_folder_path = 'C:/Users/Downloads/StableLM2-1.6B-Chat'  # set the folder path where the StableLM whole project downloaded.
 modified_path_A = 'C:./modeling_modified/modeling_stablelm.py'  # The path where store the modified modeling_stablelm.py
 transformers_gemma_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/stablelm/modeling_stablelm.py'  # The original modeling_stablelm.py path which was stored in the transformers python package.
-shutil.copyfile(modified_path_A, transformers_gemma_path)
 onnx_model_A = 'C:/Users/Downloads/StableLM_ONNX/StableLM.onnx'  # Assign a path where the exported StableLM model stored.
 
 # Load the model
-shutil.copyfile(modified_path_A, model_folder_path + "/modeling_stablelm.py")
+shutil.copyfile(modified_path_A, transformers_gemma_path)
 model = AutoModelForCausalLM.from_pretrained(model_folder_path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_stablelm.py on line 866, at the same time.
 num_heads = model.config.num_attention_heads
