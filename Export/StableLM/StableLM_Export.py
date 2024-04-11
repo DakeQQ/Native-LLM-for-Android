@@ -64,7 +64,7 @@ print('\nStart running the StableLM by ONNXRuntime.')
 print('Now loading . . . it could cost minutes.\n')
 
 # Run the exported model by ONNX Runtime
-query = "Hellow, how are you?"
+query = "Hello, how are you?"
 max_single_chat_length = 341  # It an adjustable value, but must less than max_seq_len.
 tokenizer = AutoTokenizer.from_pretrained(model_folder_path, trust_remote_code=True)
 
