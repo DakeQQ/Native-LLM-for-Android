@@ -3,7 +3,7 @@
     - Qwen1.5-Chat: 0.5B, 1.8B, 4B ...
     - MiniCPM: 2.7B
     - Yuan2.0-Februa-hf: 2B+
-    - OctopusV2: 2.5B
+    - Octopus-V2: 2.5B
     - Gemma1.1-it: 2.5B
     - StableLM2-Chat: 1.6B, 3B
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
@@ -20,7 +20,7 @@
    - 通义千问1.5-Chat: 0.5B, 1.8B, 4B ...
    - MiniCPM: 2.7B
    - 源2.0-Februa-hf: 2B+
-   - OctopusV2: 2.5B
+   - Octopus-V2: 2.5B
    - Gemma1.1-it: 2.5B
    - StableLM2-Chat: 1.6B, 3B
 2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
