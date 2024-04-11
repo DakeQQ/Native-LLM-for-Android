@@ -66,7 +66,7 @@ std::vector<float> cos_rotary_pos_emb(2 * max_token_history * theta.size(),0.f);
 std::vector<float> sin_rotary_pos_emb(cos_rotary_pos_emb.size(),0.f);
 const int rotary_pos_emb_buffer_size = cos_rotary_pos_emb.size() * sizeof(float);
 const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/files/";
-const std::string vocab_file = "/data/user/0/com.example.myapplication/cache/vocab_Gemma.txt";  // We have moved the vocab.txt from assets to the cache folder in Java process.
+const std::string vocab_file = "/data/user/0/com.example.myapplication/cache/vocab_Gemma11.txt";  // We have moved the vocab.txt from assets to the cache folder in Java process.
 const char* qnn_htp_so = "/data/user/0/com.example.myapplication/cache/libQnnHtp.so";  //  If use (std::string + "libQnnHtp.so").c_str() instead, it will open failed.
 const char* qnn_cpu_so = "/data/user/0/com.example.myapplication/cache/libQnnCpu.so";  //  If use (std::string + "libQnnCpu.so").c_str() instead, it will open failed.
 void* key_states;
