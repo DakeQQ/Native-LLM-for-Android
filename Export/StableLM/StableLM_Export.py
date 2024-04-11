@@ -20,6 +20,7 @@ num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
 num_layers = model.config.num_hidden_layers
 hidden_size = model.config.hidden_size
+partial_head_dim = head_dim // 4
 
 # Generate dummies for torch.onnx.export()
 input_ids = torch.ones((1, max_seq_len), dtype=torch.int32)
@@ -30,7 +31,7 @@ offset = torch.zeros(1, dtype=torch.long)
 position_ids = torch.zeros((max_seq_len, 1), dtype=torch.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
-theta = torch.arange(0, head_dim // 4, 2, dtype=torch.float32)
+theta = torch.arange(0, partial_head_dim, 2, dtype=torch.float32)
 idx_theta = position_ids * theta
 past_key_states = torch.zeros((num_layers, num_key_value_heads, max_seq_len, head_dim), dtype=torch.float32)
 past_values_states = past_key_states
@@ -99,7 +100,7 @@ attention_mask = np.zeros(1, dtype=np.float32) - 999999999.0
 position_ids = np.zeros((max_seq_len, 1), dtype=np.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
-theta = 10000.0 ** -(np.arange(0, head_dim // 4, 2, dtype=np.float32) / (head_dim // 4))
+theta = 10000.0 ** -(np.arange(0, partial_head_dim, 2, dtype=np.float32) / partial_head_dim)
 idx_theta = position_ids * theta
 cos_rotary_pos_emb = np.cos(idx_theta)
 sin_rotary_pos_emb = np.sin(idx_theta)
