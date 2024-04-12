@@ -1,7 +1,7 @@
 # Native-LLM-for-Android
 1. Demonstration of running a native LLM on Android device. Now support:
-    - Qwen1.5-Chat: 0.5B, 1.8B, 4B ...
-    - MiniCPM: 2.7B
+    - Qwen1.5-Chat: 0.5B, 1.8B ...
+    - MiniCPM-DPO/SFT: 1B, 2.7B
     - Yuan2.0-Februa-hf: 2B+
     - Octopus-V2: 2.5B
     - Gemma1.1-it: 2.5B
@@ -17,8 +17,8 @@
 10. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。目前支持:
-   - 通义千问1.5-Chat: 0.5B, 1.8B, 4B ...
-   - MiniCPM: 2.7B
+   - 通义千问1.5-Chat: 0.5B, 1.8B ...
+   - MiniCPM-DPO/SFT: 1B, 2.7B
    - 源2.0-Februa-hf: 2B+
    - Octopus-V2: 2.5B
    - Gemma1.1-it: 2.5B
