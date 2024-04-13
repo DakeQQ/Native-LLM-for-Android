@@ -11,7 +11,7 @@ inline static std::string get_output_words(const int& id) {
 inline static void clear_history() {
     save_index = 0;
     history_len = 0;
-    attention_mask = -999999999999.f;
+    attention_mask = -999999999.f;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
     std::fill(input_ids.begin(),input_ids.end(),0);
