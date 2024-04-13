@@ -179,7 +179,7 @@ while history_len < max_single_chat_length:
          in_name_B5: past_values_states_B,
          in_name_B6: history_len,
          in_name_B7: ids_len})
-    if token_id == 50256:  # the stop_id in Phi is "50256"
+    if (token_id == 50256) | (token_id == 27):  # the stop_id in Phi is "50256", "27" is the sign '<'.
         break
     else:
         history_len[0] += ids_len[0]
