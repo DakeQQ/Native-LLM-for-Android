@@ -1,14 +1,10 @@
 #include "project.h"
 
-inline static std::vector<int> get_input_ids(const std::string& query, bool add_prompt) {
-    if (add_prompt) {
-        std::vector<int> ids = tokenizer->encode(query);
-        ids.insert(ids.begin(),{77187});  // Chat prompt head
-        ids.insert(ids.end(),{77187});  // Chat prompt tail
-        return ids;
-    } else {
-        return tokenizer->encode(query);
-    }
+inline static std::vector<int> get_input_ids(const std::string& query) {
+    std::vector<int> ids = tokenizer->encode(query);
+    ids.insert(ids.begin(),{77187});  // Chat prompt head
+    ids.insert(ids.end(),{77187});  // Chat prompt tail
+    return ids;
 }
 
 inline static std::string get_output_words(const int& id) {
@@ -78,7 +74,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
     if (add_prompt) {
         clear_history();  // Clear each time because the chat prompt is currently unsupported.
         const char *query = env->GetStringUTFChars(jquery, nullptr);
-        std::vector<int32_t> get_ids = get_input_ids(query, add_prompt);
+        std::vector<int32_t> get_ids = get_input_ids(query);
         ids_len = get_ids.size();
         num_ids_per_chat[save_index] = ids_len;
         if (save_index > 0) {
