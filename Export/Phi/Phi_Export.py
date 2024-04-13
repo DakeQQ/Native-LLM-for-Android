@@ -5,11 +5,11 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
 
-model_folder_path = 'C:/User/Downloads/Phi2-Orange-V2'  # set the folder path where the Phi whole project downloaded.
+model_folder_path = 'C:/Users/Downloads/Phi2-Orange-V2'  # set the folder path where the Phi whole project downloaded.
 modified_path_A = 'C:./modeling_modified_A/modeling_phi.py'  # The path where store the modified part_A modeling_phi.py
 modified_path_B = 'C:./modeling_modified_B/modeling_phi.py'  # The path where store the modified part_B modeling_phi.py
-onnx_model_A = 'C:/User/Downloads/Phi_ONNX/Phi_A.onnx'  # Assign a path where the exported part_A Phi model stored.
-onnx_model_B = 'C:/User/Downloads/Phi_ONNX/Phi_B.onnx'  # Assign a path where the exported part_B Phi model stored.
+onnx_model_A = 'C:/Users/Downloads/Phi_ONNX/Phi_A.onnx'  # Assign a path where the exported part_A Phi model stored.
+onnx_model_B = 'C:/Users/Downloads/Phi_ONNX/Phi_B.onnx'  # Assign a path where the exported part_B Phi model stored.
 
 # Load the model
 shutil.copyfile(modified_path_A, model_folder_path + "/modeling_phi.py")
