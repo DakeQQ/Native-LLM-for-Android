@@ -10,7 +10,7 @@
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. After downloading, place the model into the assets folder.
 4. Remember to decompress the *.so zip file stored in the libs/arm64-v8a folder.
-5. The demo models were converted from ModelScope and underwent code optimizations to achieve extreme execution speed.
+5. The demo models were converted from HuggingFace or ModelScope and underwent code optimizations to achieve extreme execution speed.
 6. Therefore, the inputs & outputs of the demo models are slightly different from the original one.
 7. The tokenizer.cpp and tokenizer.hpp files originated from the mnn-llm repository.
 8. To export the model on your own, please go to the 'Export' folder, follow the comments to set the folder path, and then execute the ***_Export.py Python script. Next, quantize / optimize the onnx model by yourself.
@@ -29,7 +29,7 @@
 3. 百度: https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake 提取码: dake
 4. 下载后，请将模型文件放入assets文件夹。
 5. 记得解压存放在libs/arm64-v8a文件夹中的*.so压缩文件。
-6. 演示模型是从ModelScope转换来的，并经过代码优化，以实现极致执行速度。
+6. 演示模型是从HuggingFace或ModelScope转换来的，并经过代码优化，以实现极致执行速度。
 7. 因此，演示模型的输入输出与原始模型略有不同。
 8. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
 9. 想自行导出模型请前往“Export”文件夹，按照注释操作设定文件夹路径，然后执行 ***_Export.py的python脚本。下一步，自己动手量化或优化导出的ONNX模型。
