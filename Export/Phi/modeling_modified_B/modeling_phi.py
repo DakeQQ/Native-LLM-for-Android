@@ -901,7 +901,7 @@ class PhiForCausalLM(PhiPreTrainedModel):
     @add_start_docstrings_to_model_forward(PHI_INPUTS_DOCSTRING)
     def forward(
             self,
-            hidden_state_B: torch.FloatTensor = None,
+            hidden_states: torch.FloatTensor = None,
             attention_mask: Optional[torch.Tensor] = None,
             cos_rotary_pos_emb: torch.FloatTensor = None,
             sin_rotary_pos_emb: torch.FloatTensor = None,
@@ -917,7 +917,7 @@ class PhiForCausalLM(PhiPreTrainedModel):
         sin_rotary_pos_emb = sin_rotary_pos_emb[:, history_len:kv_seq_len, :]
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
-        hidden_states = hidden_state_B[:, :ids_len, :]
+        hidden_states = hidden_states[:, :ids_len, :]
         attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float32))) * attention_mask
         for i in range(self.num_layers):
             hidden_states, save_kv_0[i], save_kv_1[i] = self.model.layers[i + self.num_layers](
