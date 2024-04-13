@@ -131,7 +131,7 @@ out_name_B1 = out_name_B[1].name
 out_name_B2 = out_name_B[2].name
 
 # Pre-process inputs
-prompt = f'{query}'  # Unknown chat template.
+prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
 token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros((1, max_seq_len), dtype=np.int32)
