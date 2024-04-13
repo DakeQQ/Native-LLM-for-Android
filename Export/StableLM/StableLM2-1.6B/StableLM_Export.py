@@ -20,7 +20,7 @@ num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
 num_layers = model.config.num_hidden_layers
 hidden_size = model.config.hidden_size
-partial_head_dim = head_dim // 4
+partial_head_dim = int(model.config.partial_rotary_factor * head_dim)
 
 # Generate dummies for torch.onnx.export()
 input_ids = torch.ones((1, max_seq_len), dtype=torch.int32)
