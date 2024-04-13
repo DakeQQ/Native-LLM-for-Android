@@ -1,14 +1,10 @@
 #include "project.h"
 
-inline static std::vector<int> get_input_ids(const std::string& query, bool add_prompt) {
-    if (add_prompt) {
-        std::vector<int> ids = tokenizer->encode(query);
-        ids.insert(ids.begin(),{100277,  882, 198});  // Chat prompt head
-        ids.insert(ids.end(),{100278, 198, 100277, 78191, 198});  // Chat prompt tail
-        return ids;
-    } else {
-        return tokenizer->encode(query);
-    }
+inline static std::vector<int> get_input_ids(const std::string& query) {
+    std::vector<int> ids = tokenizer->encode(query);
+    ids.insert(ids.begin(),{100277,  882, 198});  // Chat prompt head
+    ids.insert(ids.end(),{100278, 198, 100277, 78191, 198});  // Chat prompt tail
+    return ids;
 }
 
 inline static std::string get_output_words(const int& id) {
