@@ -32,7 +32,7 @@
 5. 记得解压存放在libs/arm64-v8a文件夹中的*.so压缩文件。
 6. 演示模型是从HuggingFace或ModelScope转换来的，并经过代码优化，以实现极致执行速度。
 7. 因此，演示模型的输入输出与原始模型略有不同。
-8. 为了更好的适配ONNXRuntime-Android，导出时未使用dynamic-axes.因此导出的ONNX模型对x86_64而言不一定是最优解.
+8. 为了更好的适配ONNXRuntime-Android，导出时未使用dynamic-axes. 因此导出的ONNX模型对x86_64而言不一定是最优解.
 9. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
 10. 想自行导出模型请前往“Export”文件夹，按照注释操作设定文件夹路径，然后执行 ***_Export.py的python脚本。下一步，自己动手量化或优化导出的ONNX模型。
 11. 在导出MiniCPM-V的过程中, Resampler总报错“aten::_upsample_bilinear2d_aa”算子不支持，因此暂时无法使用多模态交互。
