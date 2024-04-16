@@ -279,7 +279,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base", "2");  // One block can contain 1 or more cores, and sharing 1 job.
         ort_runtime_A->AddSessionConfigEntry(session_options_A, // Binding the #cpu to run the model. 'A;B;' means A & B work respectively. 'A,B' means A & B work cooperatively.
                                              "session.intra_op_thread_affinities",
-                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on the Kirin 990 5G, due to limitations imposed by the RAM bandwidth.
+                                             "1;2");  // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on my device, due to limitations imposed by the RAM bandwidth.
         ort_runtime_A->SetIntraOpNumThreads(session_options_A, 3); // dynamic_block_base + 1
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.inter_op.allow_spinning",
                                              "1");  // 0 for low power
@@ -365,7 +365,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 option_values.push_back(qnn_cpu_so);
             }
             ort_runtime_A->SessionOptionsAppendExecutionProvider(session_options_A, "QNN", option_keys.data(), option_values.data(), option_keys.size());
-        } else if (use_nnapi) {  // It needs to add the app into /vendor/etc/nnapi_extensions_app_allowlist
+        } else if (use_nnapi) {
             uint32_t nnapi_flags = 0;
             if (use_gpu | use_dsp_npu) {
                 nnapi_flags |= NNAPI_FLAG_CPU_DISABLED;
