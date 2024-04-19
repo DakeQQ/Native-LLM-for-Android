@@ -42,6 +42,7 @@ const int start_id = 77187;
 const int end_id_0 = 77185;
 const int past_key_value_size = 49152 * max_token_history;  // 24 * 32 * 64
 const int single_chat_limit = 1024; // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
+const int theta_size = 32;
 const int next_chat_buffer = max_token_history - single_chat_limit;
 const int input_ids_buffer_size = max_token_history * sizeof(int32_t);
 const int past_key_values_buffer_size = past_key_value_size * sizeof(float);
@@ -52,7 +53,6 @@ std::vector<int32_t> input_ids(max_token_history, 0);
 std::vector<int> accumulate_num_ids(30,0);  // Just make sure the size is enough before reaching max_token_history.
 std::vector<int> num_ids_per_chat(30,0); // Same size with accumulate_num_ids.
 std::vector<int> save_max_logit_position(max_token_history,0);
-std::vector<float> theta(32, 0.f);
 std::vector<float> cos_rotary_pos_emb(2 * max_token_history * theta.size(),0.f);
 std::vector<float> sin_rotary_pos_emb(cos_rotary_pos_emb.size(),0.f);
 const int rotary_pos_emb_buffer_size = cos_rotary_pos_emb.size() * sizeof(float);
