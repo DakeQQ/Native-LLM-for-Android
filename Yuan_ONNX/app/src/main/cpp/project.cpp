@@ -22,10 +22,10 @@ extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz) {
     tokenizer.reset(new Sentencepiece);
-    tokenizer->load( vocab_file);
+    tokenizer->load(vocab_file);
     std::vector<float> theta(theta_size, 0.f);
     for (int i = 1; i < theta_size; i++) {
-        theta[i] = theta[i - 1] + 2;  // even sequence
+        theta[i] = theta[i - 1] + 2.f;  // even sequence
     }
     for (int i = 1; i < theta_size; i++) {
         theta[i] = std::powf(10000.f, -theta[i] * 0.015625f);  // 1/(10000^(x/64))
