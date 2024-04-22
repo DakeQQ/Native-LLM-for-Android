@@ -21,17 +21,17 @@ extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz) {
     tokenizer.reset(new Tiktoken);
-    tokenizer->load( vocab_file);
+    tokenizer->load(vocab_file);
     std::vector<float> theta(theta_size, 0.f);
     for (int i = 1; i < theta_size; i++) {
-        theta[i] = theta[i - 1] + 2;  // even sequence
+        theta[i] = theta[i - 1] + 2.f;  // even sequence
     }
     for (int i = 1; i < theta_size; i++) {
         theta[i] = std::powf(10000.f, -theta[i] * 0.0078125f);  // 1/(10000^(x/128))
     }
     theta[0] = 1.f;
     std::vector<float> idx_theta(max_token_history * theta_size, 0.f);
-    std::move(theta.begin(), theta.end(),idx_theta.begin() + theta_size);
+    std::move(theta.begin(), theta.end(), idx_theta.begin() + theta_size);
     int index = theta_size + theta_size;
     for (float i = 2.f; i < static_cast<float> (max_token_history); i += 1.f) {
         for (int j = 0; j < theta_size; j++) {
