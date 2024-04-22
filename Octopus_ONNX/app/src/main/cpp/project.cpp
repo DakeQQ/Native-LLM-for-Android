@@ -22,18 +22,19 @@ JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz) {
     tokenizer.reset(new Sentencepiece);
     tokenizer->load( vocab_file);
-    for (int i = 1; i < theta.size(); i++) {
-        theta[i] = theta[i - 1] + 2;  // even sequence
+    std::vector<float> theta(theta_size, 0.f);
+    for (int i = 1; i < theta_size; i++) {
+        theta[i] = theta[i - 1] + 2.f;  // even sequence
     }
-    for (int i = 1; i < theta.size(); i++) {
+    for (int i = 1; i < theta_size; i++) {
         theta[i] = std::powf(10000.f, -theta[i] * 0.00390625f);  // 1/(10000^(x/256))
     }
     theta[0] = 1.f;
-    std::vector<float> idx_theta(max_token_history * theta.size(), 0.f);
-    std::move(theta.begin(), theta.end(),idx_theta.begin() + theta.size());
-    int index = theta.size() + theta.size();
+    std::vector<float> idx_theta(max_token_history * theta_size, 0.f);
+    std::move(theta.begin(), theta.end(), idx_theta.begin() + theta_size);
+    int index = theta_size + theta_size;
     for (float i = 2.f; i < static_cast<float> (max_token_history); i += 1.f) {
-        for (int j = 0; j < theta.size(); j++) {
+        for (int j = 0; j < theta_size; j++) {
             idx_theta[index] = i * theta[j];
             index++;
         }
@@ -47,11 +48,11 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
     index = 0;
     int index2 = 0;
     for (int i = 0; i < max_token_history; i++) {
-        std::copy(temp_cos.begin() + index, temp_cos.begin() + index + theta.size(), cos_rotary_pos_emb.begin() + index2);
-        std::move(temp_cos.begin() + index, temp_cos.begin() + index + theta.size(), cos_rotary_pos_emb.begin() + index2 + theta.size());
-        std::copy(temp_sin.begin() + index, temp_sin.begin() + index + theta.size(), sin_rotary_pos_emb.begin() + index2);
-        std::move(temp_sin.begin() + index, temp_sin.begin() + index + theta.size(), sin_rotary_pos_emb.begin() + index2 + theta.size());
-        index += theta.size();
+        std::copy(temp_cos.begin() + index, temp_cos.begin() + index + theta_size, cos_rotary_pos_emb.begin() + index2);
+        std::move(temp_cos.begin() + index, temp_cos.begin() + index + theta_size, cos_rotary_pos_emb.begin() + index2 + theta_size);
+        std::copy(temp_sin.begin() + index, temp_sin.begin() + index + theta_size, sin_rotary_pos_emb.begin() + index2);
+        std::move(temp_sin.begin() + index, temp_sin.begin() + index + theta_size, sin_rotary_pos_emb.begin() + index2 + theta_size);
+        index += theta_size;
         index2 = index + index;
     }
     return JNI_TRUE;
