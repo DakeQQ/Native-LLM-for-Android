@@ -14,17 +14,17 @@ inline static void clear_history() {
     attention_mask = -999999999.f;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
-    std::fill(input_ids.begin(),input_ids.end(),0);
+    std::fill(input_ids.begin(), input_ids.end(), 0);
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz) {
     tokenizer.reset(new Sentencepiece);
-    tokenizer->load( vocab_file);
+    tokenizer->load(vocab_file);
     std::vector<float> theta(theta_size, 0.f);
     for (int i = 1; i < theta_size; i++) {
-        theta[i] = theta[i - 1] + 2;  // even sequence
+        theta[i] = theta[i - 1] + 2.f;  // even sequence
     }
     for (int i = 1; i < theta_size; i++) {
         theta[i] = std::powf(10000.f, -theta[i] * 0.015625f);  // 1/(10000^(x/64))
