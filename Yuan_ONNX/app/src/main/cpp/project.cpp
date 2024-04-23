@@ -413,6 +413,11 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         } else if (use_xnnpack) {
             option_keys.push_back("intra_op_num_threads");
             option_values.push_back("4");
+            ort_runtime_A->SetInterOpNumThreads(session_options_A, 4);  // Keep the same value as above.
+            ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.intra_op.allow_spinning", "0");  // Set to 0.
+            ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base", "1");  // Set to 1.
+            ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.intra_op_thread_affinities", "1,2,3,4");  // Use ',' to split the #core
+            ort_runtime_A->SetIntraOpNumThreads(session_options_A, 1); // // Set to 1.
             ort_runtime_A->SessionOptionsAppendExecutionProvider(session_options_A, "XNNPACK", option_keys.data(), option_values.data(), option_keys.size());
         }
         status = ort_runtime_A->CreateSessionFromArray(ort_env_A, fileBuffer.data(), fileSize,
@@ -622,6 +627,11 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         } else if (use_xnnpack) {
             option_keys.push_back("intra_op_num_threads");
             option_values.push_back("4");
+            ort_runtime_B->SetInterOpNumThreads(session_options_B, 4);  // Keep the same value as above.
+            ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.intra_op.allow_spinning", "0");  // Set to 0.
+            ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.dynamic_block_base", "1");  // Set to 1.
+            ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.intra_op_thread_affinities", "1,2,3,4");  // Use ',' to split the #core
+            ort_runtime_B->SetIntraOpNumThreads(session_options_B, 1); // // Set to 1.
             ort_runtime_B->SessionOptionsAppendExecutionProvider(session_options_B, "XNNPACK", option_keys.data(), option_values.data(), option_keys.size());
         }
         status = ort_runtime_B->CreateSessionFromArray(ort_env_B, fileBuffer.data(), fileSize,
