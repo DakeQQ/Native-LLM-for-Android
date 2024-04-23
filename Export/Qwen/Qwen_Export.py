@@ -14,7 +14,7 @@ onnx_model = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the
 # Load the model
 shutil.copyfile(modified_path, path + "/modeling_qwen2.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 1005, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 1002, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
