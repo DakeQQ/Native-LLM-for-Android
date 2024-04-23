@@ -249,12 +249,9 @@ class Qwen2Attention(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat(
-            (past_key_states, (key_states * rotary_pos_emb_cos) + (rotate_half(key_states) * rotary_pos_emb_sin)),
-            dim=-2)
+        key_states = torch.cat((past_key_states, (key_states * rotary_pos_emb_cos) + (rotate_half(key_states) * rotary_pos_emb_sin)), dim=-2)
         value_states = torch.cat((past_value_states,
-                                  self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads,
-                                                                  self.head_dim).transpose(0, 1)), dim=-2)
+                                  self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         return self.o_proj(torch.matmul(nn.functional.softmax(
             torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin),
                          key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
