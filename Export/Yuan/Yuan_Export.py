@@ -6,7 +6,7 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
 
-path = 'C:/Users/Downloads/Yuan2-2B-Februa-hf'  # Set the folder path where the Yuan2 whole project downloaded.
+path = 'C:/Users/Downloads/Yuan2-2B-Mars-hf'  # Set the folder path where the Yuan2 whole project downloaded.
 onnx_model_A = 'C:/Users/Downloads/Yuan_ONNX/Yuan_part_A.onnx'  # Assign a path where the exported Yuan2 part_A model stored.
 onnx_model_B = 'C:/Users/Downloads/Yuan_ONNX/Yuan_part_B.onnx'  # Assign a path where the exported Yuan2 part_B model stored.
 
