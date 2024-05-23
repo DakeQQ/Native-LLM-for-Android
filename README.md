@@ -40,37 +40,37 @@
 # 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Qwen1.5-1.8B<br>q8f32 | 14 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Qwen1.5-1.8B<br>q8f32 | 14 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen1.5-1.8B<br>q8f32 | 9 token/s |
 | Harmony 3 | 荣耀20S | Kirin_810-CPU<br>(2*A76) | Qwen1.5-1.8B<br>q8f32 | 4.5 token/s |
 # MiniCPM - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | MiniCPM-2.7B<br>q8f32 | 7.7 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | MiniCPM-2.7B<br>q8f32 | 7.7 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 4.5 token/s |
 # 源 Yuan - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Yuan2.0-2B-Mars-hf<br>q8f32 | 10 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Yuan2.0-2B-Mars-hf<br>q8f32 | 10 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Yuan2.0-2B-Mars-hf<br>q8f32 | 5.7 token/s |
 # Octopus - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | OctopusV2-2B<br>q8f32 | 13 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | OctopusV2-2B<br>q8f32 | 13 token/s |
 # Gemma - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Gemma1.1-it-2B<br>q8f32 | 13 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Gemma1.1-it-2B<br>q8f32 | 13 token/s |
 # StableLM - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | StableLM2-1.6B-Chat<br>q8f32 | 14.9 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | StableLM2-1.6B-Chat<br>q8f32 | 14.9 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | StableLM2-1.6B-Chat<br>q8f32 | 9.2 token/s |
 | Harmony 3 | 荣耀20S | Kirin_810-CPU<br>(2*A76) | StableLM2-1.6B-Chat<br>q8f32 | 4.6 token/s |
 # Phi - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X2+A715) | Phi2-2B-Orange-V2<br>q8f32 | 8 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Phi2-2B-Orange-V2<br>q8f32 | 8 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Phi2-2B-Orange-V2<br>q8f32 | 4.9 token/s |
 # 演示结果 Demo Results
 (Qwen1.5-1.8B / 1024 Context)<br>
