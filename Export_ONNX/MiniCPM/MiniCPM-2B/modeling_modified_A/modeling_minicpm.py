@@ -1007,7 +1007,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         self.model = MiniCPMModel(config)
         self.vocab_size = config.vocab_size
         self.max_seq_len = 1024
-        self.hidden_size=config.hidden_size
+        self.hidden_size = config.hidden_size
         self.num_layers = config.num_hidden_layers // 2
         self.num_heads = config.num_attention_heads
         self.num_key_value_heads = config.num_key_value_heads
