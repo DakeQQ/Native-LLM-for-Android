@@ -911,7 +911,7 @@ class StableLmForCausalLM(StableLmPreTrainedModel):
         hidden_states = hidden_states[:ids_len, :]
         attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float32))) * attention_mask
         for i in range(self.num_layers):
-            hidden_states, self.save_kv_0[i], self.save_kv_1[i] = self.model.layers[i + self.num_layers](
+            hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i + self.num_layers](
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
                 rotary_pos_emb_cos=cos_rotary_pos_emb,
@@ -922,8 +922,8 @@ class StableLmForCausalLM(StableLmPreTrainedModel):
             )
         expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float16)
         return (torch.argmax(self.lm_head(self.model.norm(hidden_states[-1, :]))),
-                torch.cat((torch.stack(self.save_kv_0), expand_space), dim=-2),
-                torch.cat((torch.stack(self.save_kv_1), expand_space), dim=-2))
+                torch.cat((torch.stack(self.save_key), expand_space), dim=-2),
+                torch.cat((torch.stack(self.save_value), expand_space), dim=-2))
 
     def prepare_inputs_for_generation(
             self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
