@@ -45,8 +45,7 @@ model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
 print('Export part_A start ...')
 torch.onnx.export(
     model, (
-        input_ids, attention_mask, past_key_states, past_values_states,
-        history_len, ids_len),
+        input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
     onnx_model_A,
     input_names=[
         'input_ids',
@@ -68,8 +67,7 @@ shutil.copyfile(modified_path_B, model_folder_path + "/modeling_phi.py")
 model = AutoModelForCausalLM.from_pretrained(model_folder_path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
 torch.onnx.export(
     model, (
-        hidden_state_B, attention_mask, past_key_states, past_values_states,
-        history_len, ids_len),
+        hidden_state_B, attention_mask, past_key_states, past_values_states, history_len, ids_len),
     onnx_model_B,
     input_names=[
         'hidden_state_B',
@@ -83,6 +81,13 @@ torch.onnx.export(
     do_constant_folding=True,
     opset_version=17)
 del model
+del past_key_states
+del past_values_states
+del position_ids
+del theta
+del idx_theta
+del cos_rotary_pos_emb
+del sin_rotary_pos_emb
 print('Export part_B done!')
 
 print('\nStart running the Phi by ONNXRuntime.')
