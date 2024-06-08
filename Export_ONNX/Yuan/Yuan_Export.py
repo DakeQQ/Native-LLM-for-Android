@@ -66,6 +66,14 @@ torch.onnx.export(
     do_constant_folding=True,
     opset_version=17)
 del model
+del past_key_states
+del past_values_states
+del position_ids
+del theta
+del idx_theta
+del cos_rotary_pos_emb
+del sin_rotary_pos_emb
+del before_hidden_states
 print('Export Part_A done!')
 
 print('Export Part_B start ...')
