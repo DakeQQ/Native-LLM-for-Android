@@ -48,8 +48,7 @@ model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
 print('Part_A export start ...')
 torch.onnx.export(
     model, (
-        input_ids, attention_mask, past_key_states, past_values_states,
-        history_len, ids_len),
+        input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
     onnx_model_A,
     input_names=[
         'input_ids',
@@ -71,8 +70,7 @@ model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, de
 print('Part_B export start ...')
 torch.onnx.export(
     model, (
-        last_hidden_state, attention_mask, past_key_states, past_values_states,
-        history_len, ids_len),
+        last_hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
     onnx_model_B,
     input_names=[
         'last_hidden_state',
@@ -86,6 +84,13 @@ torch.onnx.export(
     do_constant_folding=True,
     opset_version=17)
 del model
+del past_key_states
+del past_values_states
+del position_ids
+del theta
+del idx_theta
+del cos_rotary_pos_emb
+del sin_rotary_pos_emb
 print('Part_B export done!')
 
 print('\nStart running the MiniCPM by ONNX Runtime.')
