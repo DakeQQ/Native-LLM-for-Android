@@ -5,16 +5,17 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
 
-path = 'C:/Users/Downloads/Qwen1.5-1.8B-Chat'  # Set the folder path where the Qwen whole project downloaded.
+path = 'C:/Users/Downloads/Qwen2-1.5B-Instruct'  # Set the folder path where the Qwen whole project downloaded.
 
 # Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
 modified_path = './modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_qwen2.py stored.
 onnx_model = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
+transformers_qwen2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/qwen2/modeling_qwen2.py'  # The original modeling_qwen2.py path which was stored in the transformers python package.
 
 # Load the model
-shutil.copyfile(modified_path, path + "/modeling_qwen2.py")
+shutil.copyfile(modified_path, transformers_qwen2_path)
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 1000, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 998, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
@@ -43,8 +44,7 @@ model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
 print('Export start ...')
 torch.onnx.export(
     model, (
-        input_ids, attention_mask, past_key_states, past_values_states,
-        history_len, ids_len),
+        input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
     onnx_model,
     input_names=[
         'input_ids',
@@ -58,6 +58,13 @@ torch.onnx.export(
     do_constant_folding=True,
     opset_version=17)
 del model
+del past_key_states
+del past_values_states
+del position_ids
+del theta
+del idx_theta
+del cos_rotary_pos_emb
+del sin_rotary_pos_emb
 print('Export done!')
 
 print('\nStart running the Qwen by ONNXRuntime.')
