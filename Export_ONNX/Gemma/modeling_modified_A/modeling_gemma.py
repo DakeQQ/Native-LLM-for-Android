@@ -518,9 +518,9 @@ class GemmaSdpaAttention(GemmaAttention):
         save_value_states = value_states
         key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
         value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        return self.o_proj(torch.matmul(nn.functional.dropout(nn.functional.softmax(
+        return self.o_proj(torch.matmul(nn.functional.softmax(
             torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin),
-                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32)),
+                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32),
             value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states.half(), save_value_states.half()
 
 
