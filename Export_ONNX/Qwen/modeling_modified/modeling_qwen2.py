@@ -181,16 +181,12 @@ class Qwen2MLP(nn.Module):
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int, num_key_value_heads, head_dim) -> torch.Tensor:
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
     num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
     """
-    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
-    if n_rep == 1:
-        return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
-    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+    return hidden_states[:, None, :, :].expand(num_key_value_heads, n_rep, hidden_states.shape[-2], head_dim).reshape(num_key_value_heads * n_rep,  hidden_states.shape[-2], head_dim)
 
 
 class Qwen2Attention(nn.Module):
@@ -249,12 +245,14 @@ class Qwen2Attention(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states.float(), (key_states * rotary_pos_emb_cos) + (rotate_half(key_states) * rotary_pos_emb_sin)), dim=-2)
+        key_states = torch.cat((past_key_states.float(), key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin), dim=-2)
         value_states = torch.cat((past_value_states.float(), self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
-        return self.o_proj(torch.matmul(nn.functional.softmax(
-            torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin),
-                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
-            dtype=torch.float32), value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), key_states.half(), value_states.half()
+        save_key_states = key_states
+        save_value_states = value_states
+        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
+        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
+        return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin, key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32),
+            value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states.half(), save_value_states.half()
 
 
 class Qwen2FlashAttention2(Qwen2Attention):
