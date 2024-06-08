@@ -43,8 +43,7 @@ model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
 print('Export start ...')
 torch.onnx.export(
     model, (
-        input_ids, attention_mask, past_key_states, past_values_states,
-        history_len, ids_len),
+        input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
     onnx_model_A,
     input_names=[
         'input_ids',
@@ -58,8 +57,14 @@ torch.onnx.export(
     do_constant_folding=True,
     opset_version=17)
 del model
+del past_key_states
+del past_values_states
+del position_ids
+del theta
+del idx_theta
+del cos_rotary_pos_emb
+del sin_rotary_pos_emb
 print('Export done!')
-
 
 print('\nStart running the MiniCPM by ONNX Runtime.')
 print('Now loading . . . it could cost minutes.\n')
