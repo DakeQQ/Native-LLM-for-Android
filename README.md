@@ -42,9 +42,9 @@
 # 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Qwen2-1.5B<br>q8f32 | 20.5 token/s |
-| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen2-1.5B<br>q8f32 | 12.5 token/s|
-| Harmony 3 | 荣耀20S | Kirin_810-CPU<br>(2*A76) | Qwen2-1.5B<br>q8f32 | 6.5 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Qwen2-1.5B-Instruct<br>q8f32 | 20.5 token/s |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen2-1.5B-Instruct<br>q8f32 | 12.5 token/s|
+| Harmony 3 | 荣耀20S | Kirin_810-CPU<br>(2*A76) | Qwen2-1.5B-Instruct<br>q8f32 | 6.5 token/s |
 # MiniCPM - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
