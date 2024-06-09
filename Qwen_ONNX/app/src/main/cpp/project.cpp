@@ -32,9 +32,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                                                      jboolean add_prompt,
                                                      jboolean clear) {
     if (add_prompt) {
-        if (clear) {
-            clear_history();
-        }
+        // if (clear) {
+        //     clear_history();  // Open for "Chat" model.
+        // }
+        clear_history(); // Do clear every time for "Instruct" model.
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = tokenizer->encode(query);
         get_ids.insert(get_ids.begin(), {151644, 872, 198});  // Chat prompt head
