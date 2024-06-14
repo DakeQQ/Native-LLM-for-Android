@@ -298,12 +298,12 @@ class StableLmAttention(nn.Module):
             key_states[..., : self.rotary_emb.dim],
             key_states[..., self.rotary_emb.dim:],
         )
-        key_states = torch.cat((past_key_states.float(), torch.cat((key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin, key_pass), dim=-1)), dim=-2)
-        value_states = torch.cat((past_value_states.float(), self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
+        key_states = torch.cat((past_key_states, torch.cat((key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin, key_pass), dim=-1).half()), dim=-2)
+        value_states = torch.cat((past_value_states, self.v_proj(hidden_states).half().view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         return self.o_proj(torch.matmul(nn.functional.softmax(
             torch.matmul(torch.cat((query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin, query_pass), dim=-1),
-                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
-            dtype=torch.float32), value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), key_states.half(), value_states.half()
+                         key_states.transpose(1, 2).float()) * self.head_dim_factor + attention_mask, dim=-1,
+            dtype=torch.float32), value_states.float()).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), key_states, value_states
 
 
 class StableLmSdpaAttention(StableLmAttention):
@@ -906,8 +906,8 @@ class StableLmForCausalLM(StableLmPreTrainedModel):
             ids_len: torch.LongTensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         kv_seq_len = ids_len + history_len
-        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :]
-        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :]
+        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
+        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
         hidden_states = self.model.embed_tokens(input_ids[:ids_len])
