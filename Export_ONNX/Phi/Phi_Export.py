@@ -37,8 +37,8 @@ theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_di
 idx_theta = position_ids * theta
 cos_rotary_pos_emb = torch.cos(idx_theta)
 sin_rotary_pos_emb = torch.sin(idx_theta)
-cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0)
-sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0)
+cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0).half()
+sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
 model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
 model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
 
