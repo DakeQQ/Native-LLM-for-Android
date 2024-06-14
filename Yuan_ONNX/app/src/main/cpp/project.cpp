@@ -190,7 +190,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
     {
         void *max_logit_id;
         ort_runtime_B->GetTensorMutableData(output_tensors_B[0], &max_logit_id);
-        input_ids[0] = static_cast<int32_t>(reinterpret_cast<int64_t *>(max_logit_id)[0]);
+        input_ids[0] = reinterpret_cast<int32_t*>(max_logit_id)[0];
         history_len += ids_len;
         if (add_prompt)
         {
