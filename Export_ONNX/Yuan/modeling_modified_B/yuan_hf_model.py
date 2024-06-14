@@ -272,7 +272,7 @@ class YuanAttention(nn.Module):
             before_hidden_states: Optional[torch.FloatTensor] = None,
             control_factor: Optional[torch.LongTensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        value_states = torch.cat((past_value_states.float(), self.v_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)), dim=-2)
+        value_states = torch.cat((past_value_states, self.v_proj(hidden_states).half().view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)), dim=-2)
         save_hidden_states = torch.cat((before_hidden_states[:, -1:, :], hidden_states[:, -1:, :]), dim=1) * control_factor
         hidden_states = torch.cat((hidden_states, torch.zeros((1, 1, self.hidden_size), dtype=torch.float32)), dim=1)
         save_hidden_states[:, :, :] += hidden_states[:, hidden_states.shape[1] - 3 + control_factor: hidden_states.shape[1] - 1, :] * (1 - control_factor)
@@ -281,10 +281,10 @@ class YuanAttention(nn.Module):
         (query_states, key_states) = torch.chunk(torch.cat([self.q_proj(hidden_states), self.k_proj(hidden_states)], dim=-1).view(ids_len, self.num_heads, self.num_heads_2), 2, dim=-1)
         query_states = query_states.transpose(0, 1)
         key_states = key_states.transpose(0, 1)
-        key_states = torch.cat((past_key_states.float(), (key_states * rotary_pos_emb_cos) + (rotate_half(key_states) * rotary_pos_emb_sin)), dim=-2)
+        key_states = torch.cat((past_key_states, (key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin).half()), dim=-2)
         return self.o_proj(torch.matmul(nn.functional.softmax(
-            torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin), key_states.transpose(1, 2)) * self.softmax_scale + attention_mask, dim=-1,
-            dtype=torch.float32), value_states).transpose(0, 1).reshape(1, ids_len, self.hidden_size)), key_states.half(), value_states.half(), save_hidden_states.half()
+            torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin), key_states.transpose(1, 2).float()) * self.softmax_scale + attention_mask, dim=-1,
+            dtype=torch.float32), value_states.float()).transpose(0, 1).reshape(1, ids_len, self.hidden_size)), key_states, value_states, save_hidden_states.half()
 
 
 class YuanDecoderLayer(nn.Module):
@@ -320,7 +320,7 @@ class YuanDecoderLayer(nn.Module):
             past_key_states=past_key_states,
             past_value_states=past_value_states,
             ids_len=ids_len,
-            before_hidden_states=before_hidden_states,
+            before_hidden_states=before_hidden_states.float(),
             control_factor=control_factor
         )
         hidden_states_temp = hidden_states_temp + hidden_states
