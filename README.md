@@ -17,7 +17,8 @@
 9. To export the model on your own, please go to the 'Export_ONNX' folder, follow the comments to set the folder path, and then execute the ***_Export.py Python script. Next, quantize / optimize the onnx model by yourself.
 10. During the export process of MiniCPM-V, the Resampler always reports an error 'aten::_upsample_bilinear2d_aa' operator not supported, therefore, it is temporarily infeasible to use vision interaction.
 11. Updated on June 3, 2024, to use fp16 for caching past_key_values, resulting in approximately 20% faster response time compared to the previous version.
-12. See more projects: https://dakeqq.github.io/overview/
+12. It is not recommended to use onnxruntime.tools.convert_onnx_models_to_ort to convert to the *.ort format because it will automatically add Cast operators that changes fp16 multiplication to fp32.
+13. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。目前支持:
    - 通义千问2-Instruct: 0.5B, 1.5B ...
@@ -37,19 +38,20 @@
 9. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
 10. 想自行导出模型请前往“Export_ONNX”文件夹，按照注释操作设定文件夹路径，然后执行 ***_Export.py的python脚本。下一步，自己动手量化或优化导出的ONNX模型。
 11. 在导出MiniCPM-V的过程中, Resampler总报错“aten::_upsample_bilinear2d_aa”算子不支持，因此暂时无法使用多模态交互。
-12. 2024.6月3日更新，改使用fp16缓存past_key_values，回复速度比旧版快约20%
-13. 看更多項目: https://dakeqq.github.io/overview/
+12. 2024.6月3日更新，改使用fp16缓存past_key_values，回复速度比旧版快约20%。
+13. 不建议使用onnxruntime.tools.convert_onnx_models_to_ort转成*.ort格式，因为它会自动添加Cast算子将fp16乘法转成fp32。
+14. 看更多項目: https://dakeqq.github.io/overview/
 # 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Qwen2-1.5B-Instruct<br>q8f32 | 20.5 token/s |
-| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen2-1.5B-Instruct<br>q8f32 | 12.5 token/s|
-| Harmony 3 | 荣耀20S | Kirin_810-CPU<br>(2*A76) | Qwen2-1.5B-Instruct<br>q8f32 | 6.5 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Qwen2-1.5B-Instruct<br>q8f32 | 21 token/s |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s|
+| Harmony 3 | 荣耀20S | Kirin_810-CPU<br>(2*A76) | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s |
 # MiniCPM - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | MiniCPM-2.7B<br>q8f32 | 9.2 token/s |
-| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 5.5 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | MiniCPM-2.7B<br>q8f32 | 9.5 token/s |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 6 token/s |
 # 源 Yuan - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
@@ -62,7 +64,7 @@
 # Gemma - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Gemma1.1-it-2B<br>q8f32 | 15.5 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Gemma1.1-it-2B<br>q8f32 | 16 token/s |
 # StableLM - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
