@@ -89,7 +89,7 @@ class Qwen2RMSNorm(nn.Module):
 
     def forward(self, hidden_states):
         return self.weight * hidden_states * torch.rsqrt(
-            hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon).to(torch.float32)
+            hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
 
 
 # Copied from transformers.models.llama.modeling_llama.LlamaRotaryEmbedding with Llama->Qwen2
