@@ -661,16 +661,16 @@ class MiniCPMSdpaAttention(MiniCPMAttention):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states.float(), key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin), dim=-2)
-        value_states = torch.cat((past_value_states.float(), self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
+        key_states = torch.cat((past_key_states, (key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin).half()), dim=-2)
+        value_states = torch.cat((past_value_states, self.v_proj(hidden_states).half().view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         save_key_states = key_states
         save_value_states = value_states
-        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
+        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim).float()
+        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim).float()
         return self.o_proj(torch.matmul(nn.functional.softmax(
             torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin,
                          key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
-            dtype=torch.float32), value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states.half(), save_value_states.half()
+            dtype=torch.float32), value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states, save_value_states
 
 
 MINICPM_ATTENTION_CLASSES = {
@@ -1049,8 +1049,8 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
             ids_len: torch.LongTensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         kv_seq_len = ids_len + history_len
-        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :]
-        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :]
+        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
+        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
         hidden_states = self.model.embed_tokens(input_ids[:ids_len]) * self.config.scale_emb
@@ -1066,7 +1066,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
                 ids_len=ids_len
             )
         expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float16)
-        return (torch.argmax(self.lm_head(self.model.norm(hidden_states[-1, :]) * self.factor)),
+        return (torch.argmax(self.lm_head(self.model.norm(hidden_states[-1, :]))),
                 torch.cat((torch.stack(self.save_key), expand_space), dim=-2),
                 torch.cat((torch.stack(self.save_value), expand_space), dim=-2))
 
