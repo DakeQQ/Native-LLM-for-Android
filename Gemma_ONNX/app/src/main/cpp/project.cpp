@@ -11,7 +11,7 @@ inline static std::string get_output_words(const int& id) {
 inline static void clear_history() {
     save_index = 0;
     history_len = 0;
-    attention_mask = -999999999.f;
+    attention_mask = half(-65504.f);
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
     std::fill(input_ids.begin(), input_ids.end(), 0);
@@ -111,7 +111,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 &input_tensors_B[0]);
         ort_runtime_B->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void*>(&attention_mask), sizeof(float),
+                reinterpret_cast<void*>(&attention_mask), sizeof(half),
                 input_dims_B[1].data(), input_dims_B[1].size(), input_types_B[1],
                 &input_tensors_B[1]);
         if (add_prompt) {
@@ -182,7 +182,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         if (add_prompt) {
             ids_len = 1;
             response_count = 0;
-            attention_mask = 0.f;
+            attention_mask = half(0.f);
         }
     }
     if ((input_ids[0] != end_id_0) && (response_count < single_chat_limit) && (history_len < max_token_history)) {
@@ -193,7 +193,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         save_max_logit_position[response_count] = end_id_0;
         response_count += 1;
         num_ids_per_chat[save_index] += response_count;
-        attention_mask = -999999999.f;
+        attention_mask = half(-65504.f);
         history_len = 0;
         input_ids[0] = start_id;
         if (save_index > 0) {
