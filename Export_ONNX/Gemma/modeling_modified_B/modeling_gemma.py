@@ -512,16 +512,16 @@ class GemmaSdpaAttention(GemmaAttention):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states.float(), key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin), dim=-2)
-        value_states = torch.cat((past_value_states.float(), self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
+        key_states = torch.cat((past_key_states, (key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin).half()), dim=-2)
+        value_states = torch.cat((past_value_states, self.v_proj(hidden_states).half().view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         save_key_states = key_states
         save_value_states = value_states
-        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
+        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim).float()
+        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim).float()
         return self.o_proj(torch.matmul(nn.functional.softmax(
             torch.matmul((query_states * rotary_pos_emb_cos) + (rotate_half(query_states) * rotary_pos_emb_sin),
                          key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32),
-            value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states.half(), save_value_states.half()
+            value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states, save_value_states
 
 
 GEMMA_ATTENTION_CLASSES = {
@@ -971,8 +971,8 @@ class GemmaForCausalLM(GemmaPreTrainedModel):
             ids_len: torch.LongTensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         kv_seq_len = ids_len + history_len
-        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :]
-        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :]
+        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
+        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
         attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float32))) * attention_mask
