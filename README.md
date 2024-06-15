@@ -77,5 +77,5 @@
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Phi2-2B-Orange-V2<br>q8f32 | 9.5 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Phi2-2B-Orange-V2<br>q8f32 | 5.8 token/s |
 # 演示结果 Demo Results
-(Qwen1.5-1.8B / 1024 Context)<br>
+(Qwen2-1.5B / 1024 Context)<br>
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
