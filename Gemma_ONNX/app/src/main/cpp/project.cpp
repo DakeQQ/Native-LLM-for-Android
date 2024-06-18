@@ -286,6 +286,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
+        ort_runtime_A->AddSessionConfigEntry(session_options_A,
+                                             "optimization.disable_specified_optimizers",
+                                             "NchwcTransformer");   // For Arm
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
@@ -496,10 +499,13 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
                                              "1");  // 0 for low power
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.force_spinning_stop",
                                              "0");  // 1 for low power
-        ort_runtime_B->SetSessionGraphOptimizationLevel(session_options_B, ORT_ENABLE_BASIC);  // Use ORT_ENABLE_BASIC to keep calculations in FP16; otherwise, ONNXRuntime will automatically add Cast operators to convert to FP32.
+        ort_runtime_B->SetSessionGraphOptimizationLevel(session_options_B, ORT_ENABLE_ALL);
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
+        ort_runtime_B->AddSessionConfigEntry(session_options_B,
+                                             "optimization.disable_specified_optimizers",
+                                             "NchwcTransformer");   // For Arm
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
@@ -713,6 +719,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
+        ort_runtime_C->AddSessionConfigEntry(session_options_C,
+                                             "optimization.disable_specified_optimizers",
+                                             "NchwcTransformer");   // For Arm
         ort_runtime_C->AddSessionConfigEntry(session_options_C, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
