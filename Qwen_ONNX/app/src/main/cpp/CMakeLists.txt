@@ -13,7 +13,8 @@ add_compile_options(
         -ffast-math
         -ffp-model=fast
         -ffp-contract=fast
-        -march=armv8.7-a+fp16fml+dotprod+i8mm
+        -funsafe-math-optimizations
+        -march=armv8.7a+fp16fml+i8mm+dotprod+crypto+simd
 #        -mtune=cortex-x2  # If use -mtune for X* core series, do not set the -mcpu, it will crash.
         -mtune=cortex-a76  # Replace with your chip
         -mcpu=cortex-a76+cortex-a55 # Replace with your chip
