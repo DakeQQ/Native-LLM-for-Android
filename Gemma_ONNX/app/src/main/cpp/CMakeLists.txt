@@ -13,10 +13,11 @@ add_compile_options(
         -ffast-math
         -ffp-model=fast
         -ffp-contract=fast
-        -march=armv8.7-a+fp16fml+dotprod+i8mm
-        -mtune=cortex-a715
-#        -mtune=cortex-a76  # Replace with your chip
-#        -mcpu=cortex-a76+cortex-a55 # Replace with your chip
+        -funsafe-math-optimizations
+        -march=armv8.7a+fp16fml+i8mm+dotprod+crypto+simd
+#        -mtune=cortex-a715
+        -mtune=cortex-a76  # Replace with your chip
+        -mcpu=cortex-a76+cortex-a55 # Replace with your chip
         -fPIC
         -fopenmp
         -fomit-frame-pointer
