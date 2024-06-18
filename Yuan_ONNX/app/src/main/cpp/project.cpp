@@ -561,6 +561,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "optimization.minimal_build_optimizations",
                                              ""); // Keep empty for full optimization
+        ort_runtime_B->AddSessionConfigEntry(session_options_B,
+                                             "optimization.disable_specified_optimizers",
+                                             "NchwcTransformer");   // For Arm
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.disable_prepacking",
                                              "0"); // 0 for enable
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
