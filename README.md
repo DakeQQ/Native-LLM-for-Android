@@ -52,6 +52,7 @@
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | MiniCPM-2.7B<br>q8f32 | 9.5 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-2.7B<br>q8f32 | 6 token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | MiniCPM-1.3B<br>q8f32 | 16.5 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | MiniCPM-1.3B<br>q8f32 | 11 token/s |
 # 源 Yuan - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
