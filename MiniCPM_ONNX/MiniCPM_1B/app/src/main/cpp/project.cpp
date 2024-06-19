@@ -41,8 +41,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         }
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = tokenizer->encode(query);
-        get_ids.insert(get_ids.begin(), {1, 1709, 26458, 59400}); // Chat prompt head
-        get_ids.insert(get_ids.end(), {1709, 59359, 26458, 59400});    // Chat prompt tail
+        get_ids.insert(get_ids.begin(), {1,  1772, 11096,  5704, 29982,  1836, 59388,  2342,  1772,  3762, 5704}); // Chat prompt head
+        get_ids.insert(get_ids.end(), {5, 59361, 11096,  5704, 29982, 43686, 59388,  2342, 1772,  3762,  5704, 59320});    // Chat prompt tail
         ids_len = get_ids.size();
         num_ids_per_chat[save_index] = ids_len;
         if (save_index > 0)
