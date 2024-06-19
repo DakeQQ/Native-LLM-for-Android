@@ -61,9 +61,6 @@ public class MainActivity extends AppCompatActivity {
         if (!Load_Models_A(mgr,false,false,false,false,false,false)) {
             addHistory(ChatMessage.TYPE_SERVER, load_failed);
         }
-        if (!Load_Models_B(mgr,false,false,false,false,false,false)) {
-            addHistory(ChatMessage.TYPE_SERVER, load_failed);
-        }
         Copy_from_Asset_to_Cache(file_name_vocab, mgr);
         Pre_Process();
         Start_Chat();
@@ -181,6 +178,5 @@ public class MainActivity extends AppCompatActivity {
     }
     private native boolean Pre_Process();
     private native boolean Load_Models_A(AssetManager assetManager, boolean USE_GPU, boolean FP16, boolean USE_NNAPI, boolean USE_XNNPACK, boolean USE_QNN, boolean USE_DSP_NPU);
-    private native boolean Load_Models_B(AssetManager assetManager, boolean USE_GPU, boolean FP16, boolean USE_NNAPI, boolean USE_XNNPACK, boolean USE_QNN, boolean USE_DSP_NPU);
     private static native String Run_LLM(String Query, boolean add_prompt, boolean clear);
 }
