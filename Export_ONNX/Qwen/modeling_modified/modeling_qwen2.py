@@ -88,8 +88,8 @@ class Qwen2RMSNorm(nn.Module):
         self.variance_epsilon = torch.tensor([eps], dtype=torch.float16)
 
     def forward(self, hidden_states):
-        return self.weight * hidden_states * torch.rsqrt(
-            hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+        return (self.weight.half() * hidden_states * torch.rsqrt(
+            hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)).float()
 
 
 # Copied from transformers.models.llama.modeling_llama.LlamaRotaryEmbedding with Llama->Qwen2
@@ -252,7 +252,7 @@ class Qwen2Attention(nn.Module):
         key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
         value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin, key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float16),
-            value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).float().contiguous()), save_key_states, save_value_states
+            value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).float().contiguous()).half(), save_key_states, save_value_states
 
 
 class Qwen2FlashAttention2(Qwen2Attention):
@@ -680,7 +680,7 @@ class Qwen2DecoderLayer(nn.Module):
             ids_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         hidden_states_temp, past_key_states, past_value_states = self.self_attn(
-            hidden_states=self.input_layernorm(hidden_states.half()),
+            hidden_states=self.input_layernorm(hidden_states),
             attention_mask=attention_mask,
             rotary_pos_emb_cos=rotary_pos_emb_cos,
             rotary_pos_emb_sin=rotary_pos_emb_sin,
@@ -689,7 +689,7 @@ class Qwen2DecoderLayer(nn.Module):
             ids_len=ids_len,
         )
         hidden_states_temp = hidden_states_temp + hidden_states
-        return (hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp.half())),) + (
+        return (hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp)).half(),) + (
             past_key_states,) + (past_value_states,)
 
 
@@ -1040,9 +1040,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :]
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
-        hidden_states = self.model.embed_tokens(input_ids[:ids_len])
-        temp = torch.ones([1, ids_len, kv_seq_len], dtype=torch.float16)
-        attention_mask = (temp - torch.tril(temp)) * attention_mask
+        hidden_states = self.model.embed_tokens(input_ids[:ids_len]).half()
+        attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float16))) * attention_mask
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i](
                 hidden_states=hidden_states,
