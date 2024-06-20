@@ -284,7 +284,7 @@ class YuanAttention(nn.Module):
         key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin), dim=-2)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin,
                          key_states.transpose(1, 2)) * self.softmax_scale + attention_mask, dim=-1,
-            dtype=torch.float32), value_states).transpose(0, 1).reshape(1, ids_len, self.hidden_size).float().contiguous()), key_states, value_states, save_hidden_states.half()
+            dtype=torch.float32), value_states).transpose(0, 1).reshape(1, ids_len, self.hidden_size).float().contiguous()).half(), key_states, value_states, save_hidden_states.half()
 
 
 class YuanDecoderLayer(nn.Module):
@@ -313,7 +313,7 @@ class YuanDecoderLayer(nn.Module):
             control_factor: Optional[torch.LongTensor] = None,
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         hidden_states_temp, past_key_states, past_value_states, save_hidden_states = self.self_attn(
-            hidden_states=self.input_layernorm(hidden_states.half()),
+            hidden_states=self.input_layernorm(hidden_states),
             attention_mask=attention_mask,
             rotary_pos_emb_cos=rotary_pos_emb_cos,
             rotary_pos_emb_sin=rotary_pos_emb_sin,
@@ -324,7 +324,7 @@ class YuanDecoderLayer(nn.Module):
             control_factor=control_factor
         )
         hidden_states_temp = hidden_states_temp + hidden_states
-        return (hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp.half())),) + (
+        return (hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp)).half(),) + (
             past_key_states,) + (past_value_states,) + (save_hidden_states,)
 
 
@@ -790,9 +790,8 @@ class YuanForCausalLM(YuanPreTrainedModel):
         sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :]
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
-        hidden_states = self.model.embed_tokens(input_ids[:, :ids_len])
-        temp = torch.ones([1, ids_len, kv_seq_len], dtype=torch.float16)
-        attention_mask = (temp - torch.tril(temp)) * attention_mask
+        hidden_states = self.model.embed_tokens(input_ids[:, :ids_len]).half()
+        attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float16))) * attention_mask
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i], self.save_hidden[i] = self.model.layers[i](
                 hidden_states=hidden_states,
