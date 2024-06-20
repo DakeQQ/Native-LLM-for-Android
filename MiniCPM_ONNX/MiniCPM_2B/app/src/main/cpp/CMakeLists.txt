@@ -14,7 +14,7 @@ add_compile_options(
         -ffp-model=fast
         -ffp-contract=fast
         -funsafe-math-optimizations
-        -march=armv8.7a+fp16fml+i8mm+dotprod+crypto+simd
+        -march=armv8.7a+fp16fml+i8mm+dotprod+crypto+simd+tme
 #        -mtune=cortex-x3
         -mtune=cortex-a76  # Replace with your chip
         -mcpu=cortex-a76+cortex-a55 # Replace with your chip
