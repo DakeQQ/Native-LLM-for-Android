@@ -1055,8 +1055,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
         hidden_states = hidden_states[:ids_len, :]
-        temp = torch.ones([1, ids_len, kv_seq_len], dtype=torch.float16)
-        attention_mask = (temp - torch.tril(temp)) * attention_mask
+        attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float16))) * attention_mask
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i + self.num_layers](
                 hidden_states=hidden_states,
