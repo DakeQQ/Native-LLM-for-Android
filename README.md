@@ -18,7 +18,9 @@
 10. During the export process of MiniCPM-V, the Resampler always reports an error 'aten::_upsample_bilinear2d_aa' operator not supported, therefore, it is temporarily infeasible to use vision interaction.
 11. Updated on June 3, 2024, to use fp16 for caching past_key_values, resulting in approximately 20% faster response time compared to the previous version.
 12. It is not recommended to use onnxruntime.tools.convert_onnx_models_to_ort to convert to the *.ort format because it will automatically add Cast operators that changes fp16 multiplication to fp32.
-13. See more projects: https://dakeqq.github.io/overview/
+13. The quantization method for the model can be seen in the folder "Do_Quantize".
+14. The q4(uint4) quantization method is not currently recommended because the "MatMulNBits" operator in ONNX Runtime is performing poorly.
+15. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。目前支持:
    - 通义千问2-Instruct: 0.5B, 1.5B ...
@@ -40,7 +42,9 @@
 11. 在导出MiniCPM-V的过程中, Resampler总报错“aten::_upsample_bilinear2d_aa”算子不支持，因此暂时无法使用多模态交互。
 12. 2024.6月3日更新，改使用fp16缓存past_key_values，回复速度比旧版快约20%。
 13. 不建议使用onnxruntime.tools.convert_onnx_models_to_ort转成*.ort格式，因为它会自动添加Cast算子将fp16乘法转成fp32。
-14. 看更多項目: https://dakeqq.github.io/overview/
+14. 模型的量化方法可以在文件夹 "Do_Quantize" 中查看。
+15. 现在不建议使用q4(uint4)量化方法, 因为ONNX Runtime的运算符"MatMulNBits"表现不佳。
+16. 看更多項目: https://dakeqq.github.io/overview/
 # 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
