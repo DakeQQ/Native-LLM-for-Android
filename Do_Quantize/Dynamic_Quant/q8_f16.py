@@ -32,7 +32,7 @@ quantize_dynamic(
                    'WeightSymmetric': True,             # True for inference speed. False may keep more accuracy.
                    'EnableSubgraph': True,              # True for more quant.
                    'ForceQuantizeNoInputCheck': False,  # True for more quant.
-                   'MatMulConstBOnly': False            # True for more quant. Sometime, the inference speed may get worse.
+                   'MatMulConstBOnly': False            # False for more quant. Sometime, the inference speed may get worse.
                    },
     nodes_to_exclude=None,                              # Specify the node names to exclude quant process. Example: nodes_to_exclude={'/Gather'}
     use_external_data_format=False                      # Save the model into two parts.
