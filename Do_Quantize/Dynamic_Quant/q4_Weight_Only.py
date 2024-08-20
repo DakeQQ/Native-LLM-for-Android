@@ -26,7 +26,7 @@ block_size = 256            # [32, 64, 128, 256]; A smaller block_size yields gr
 symmetric = False           # False may get more accuracy.
 accuracy_level = 2          # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 bits = 4                    # [2, 4, 8]
-quant_method = 'gptq'       # ["default", "hqq", "rtn", "gptq"];
+quant_method = 'default'       # ["default", "hqq", "rtn", "gptq"];
 quant_format = 'QOperator'  # ["QOperator", "QDQ"]; QOperator format quantizes the model with quantized operators directly.  QDQ format quantize the model by inserting DeQuantizeLinear before the MatMul.,
 nodes_to_exclude = ''       # Specify the unsupported op type, for example: ReduceMean
 # Call subprocess may get permission failed on Windows system.
