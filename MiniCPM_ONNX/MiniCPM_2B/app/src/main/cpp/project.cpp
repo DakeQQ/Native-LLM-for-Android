@@ -11,7 +11,8 @@ inline static std::string get_output_words(const int& id) {
 inline static void clear_history() {
     save_index = 0;
     history_len = 0;
-    attention_mask = half(-65504.f);
+//    attention_mask = Ort::Float16_t(-65504.f);
+    attention_mask = -65504.f;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
     std::fill(input_ids.begin(), input_ids.end(), 0);
@@ -20,7 +21,7 @@ inline static void clear_history() {
 extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz) {
-    tokenizer.reset(new Sentencepiece);
+    tokenizer = std::make_unique<Sentencepiece>();
     tokenizer->load(vocab_file);
     return JNI_TRUE;
 }
@@ -39,8 +40,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         std::vector<int32_t> get_ids = tokenizer->encode(query);
         get_ids.insert(get_ids.begin(), {1, 1786, 4194, 95388});  // Chat prompt head
         get_ids.insert(get_ids.end(), {95396, 10850, 95388});  // Chat prompt tail
-        ids_len = get_ids.size();
-        num_ids_per_chat[save_index] = ids_len;
+        ids_len = static_cast<int64_t> (get_ids.size());
+        num_ids_per_chat[save_index] = static_cast<int> (ids_len);
         if (save_index > 0) {
             accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
             if (accumulate_num_ids[save_index] > next_chat_buffer) {
@@ -90,11 +91,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 &input_tensors_A[0]);
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void*>(&attention_mask), sizeof(half),
+                reinterpret_cast<void*>(&attention_mask), sizeof(float),
+//                reinterpret_cast<void*>(&attention_mask), sizeof(Ort::Float16_t),
                 input_dims_A[1].data(), input_dims_A[1].size(), input_types_A[1],
                 &input_tensors_A[1]);
         if (add_prompt) {
-            past_key_values.resize(past_key_value_size, half(0.f));
+            std::vector<Ort::Float16_t> past_key_values(past_key_value_size, Ort::Float16_t(0.f));
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
                     reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
@@ -108,13 +110,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         } else {
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<half*> (key_states_A)),
+                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (key_states_A)),
                     past_key_values_buffer_size,
                     input_dims_A[2].data(), input_dims_A[2].size(), input_types_A[2],
                     &input_tensors_A[2]);
             ort_runtime_A->CreateTensorWithDataAsOrtValue(
                     memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<half*> (value_states_A)),
+                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (value_states_A)),
                     past_key_values_buffer_size,
                     input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
                     &input_tensors_A[3]);
@@ -149,7 +151,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 &input_tensors_B[0]);
         ort_runtime_B->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void*>(&attention_mask), sizeof(half),
+                reinterpret_cast<void*>(&attention_mask), sizeof(float),
+//                reinterpret_cast<void*>(&attention_mask), sizeof(Ort::Float16_t),
                 input_dims_B[1].data(), input_dims_B[1].size(), input_types_B[1],
                 &input_tensors_B[1]);
         if (add_prompt) {
@@ -166,13 +169,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         } else {
             ort_runtime_B->CreateTensorWithDataAsOrtValue(
                     memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<half*> (key_states_B)),
+                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (key_states_B)),
                     past_key_values_buffer_size,
                     input_dims_B[2].data(), input_dims_B[2].size(), input_types_B[2],
                     &input_tensors_B[2]);
             ort_runtime_B->CreateTensorWithDataAsOrtValue(
                     memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<half*> (value_states_B)),
+                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (value_states_B)),
                     past_key_values_buffer_size,
                     input_dims_B[3].data(), input_dims_B[3].size(), input_types_B[3],
                     &input_tensors_B[]);
@@ -203,7 +206,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         if (add_prompt) {
             ids_len = 1;
             response_count = 0;
-            attention_mask = half(0.f);
+    //        attention_mask = Ort::Float16_t(0.f);
+            attention_mask = 0.f;
         }
     }
     if ((input_ids[0] != end_id_0) && (response_count < single_chat_limit) && (history_len < max_token_history)) {
@@ -214,7 +218,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         save_max_logit_position[response_count] = end_id_0;
         response_count += 1;
         num_ids_per_chat[save_index] += response_count;
-        attention_mask = half(-65504.f);
+//        attention_mask = Ort::Float16_t(-65504.f);
+        attention_mask = -65504.f;
         history_len = 0;
         input_ids[0] = start_id;
         if (save_index > 0) {
@@ -264,7 +269,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     OrtSessionOptions *session_options_A;
     {
         std::vector<char> fileBuffer;
-        size_t fileSize;
+        off_t fileSize;
         if (asset_manager != nullptr) {
             AAssetManager* mgr = AAssetManager_fromJava(env, asset_manager);
             AAsset* asset = AAssetManager_open(mgr,file_name_A.c_str(), AASSET_MODE_BUFFER);
@@ -343,6 +348,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "session.use_device_allocator_for_initializers",
                                              "1");  // Use it to lower memory usage.
+        ort_runtime_A->AddSessionConfigEntry(session_options_A,
+                                             "session.qdq_matmulnbits_accuracy_level",
+                                             "2");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
         std::vector<const char*> option_keys = {};
         std::vector<const char*> option_values = {};
         if (use_qnn) {  // It needs the permission of HTP hardware, and then follow the onnx document to generate the specific format to run on HTP.
@@ -482,7 +490,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
     OrtSessionOptions *session_options_B;
     {
         std::vector<char> fileBuffer;
-        size_t fileSize;
+        off_t fileSize;
         if (asset_manager != nullptr) {
             AAssetManager* mgr = AAssetManager_fromJava(env, asset_manager);
             AAsset* asset = AAssetManager_open(mgr,file_name_B.c_str(), AASSET_MODE_BUFFER);
@@ -561,6 +569,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.use_device_allocator_for_initializers",
                                              "1");  // Use it to lower memory usage.
+        ort_runtime_B->AddSessionConfigEntry(session_options_B,
+                                             "session.qdq_matmulnbits_accuracy_level",
+                                             "2");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
         std::vector<const char*> option_keys = {};
         std::vector<const char*> option_values = {};
         if (use_qnn) {  // It needs the permission of HTP hardware, and then follow the onnx document to generate the specific format to run on HTP.
