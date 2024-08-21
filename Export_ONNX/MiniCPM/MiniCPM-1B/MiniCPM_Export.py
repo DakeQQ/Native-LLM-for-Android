@@ -13,7 +13,7 @@ onnx_model_A = 'C:/Users/Downloads/MiniCPM_ONNX/MiniCPM_1B.onnx'  # Assign a pat
 
 # Load the model
 shutil.copyfile(modified_path, path + "/modeling_minicpm.py")
-model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).float().eval()
+model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
 max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1010, at the same time.
 num_heads = model.config.num_attention_heads
 head_dim = model.config.hidden_size // num_heads
@@ -36,8 +36,8 @@ theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_di
 idx_theta = position_ids * theta
 cos_rotary_pos_emb = torch.cos(idx_theta)
 sin_rotary_pos_emb = torch.sin(idx_theta)
-cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0).half()
-sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
+cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0)
+sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0)
 model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
 model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
 
