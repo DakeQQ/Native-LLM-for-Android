@@ -6,9 +6,7 @@
 #include "onnxruntime_cxx_api.h"
 #include "nnapi_provider_factory.h"
 #include "tokenizer.hpp"
-#include "half.hpp"
 
-using half_float::half;
 
 const OrtApi *ort_runtime_A;
 OrtSession *session_model_A;
@@ -35,7 +33,8 @@ int response_count = 0;
 int save_index = 0;
 int64_t history_len = 0;
 int64_t ids_len = 0;
-half attention_mask = half(-65504.f);
+//Ort::Float16_t attention_mask = Ort::Float16_t(-65504.f);
+float attention_mask = -65504.f;
 const std::string file_name_A = "MiniCPM_2B_dpo_1024_A.ort";
 const std::string file_name_B = "MiniCPM_2B_dpo_1024_B.ort";
 const int max_token_history = 1024; // Please set this value to match the model name flag.
@@ -45,7 +44,7 @@ const int past_key_value_size = 46080 * max_token_history; // 20 * 36 * 64
 const int single_chat_limit = 341;                         // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
 const int next_chat_buffer = max_token_history - single_chat_limit;
 const int input_ids_buffer_size = max_token_history * sizeof(int32_t);
-const int past_key_values_buffer_size = past_key_value_size * sizeof(half);
+const int past_key_values_buffer_size = past_key_value_size * sizeof(Ort::Float16_t);
 const int hidden_state_buffer_size = max_token_history * 2304 * sizeof(float); // hidden_size=2304
 std::vector<int32_t> input_ids(max_token_history, 0);
 std::vector<int> accumulate_num_ids(30, 0); // Just make sure the size is enough before reaching max_token_history.
