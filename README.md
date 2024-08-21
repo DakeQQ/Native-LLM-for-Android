@@ -15,11 +15,10 @@
 8. The tokenizer.cpp and tokenizer.hpp files originated from the mnn-llm repository.
 9. To export the model on your own, please go to the 'Export_ONNX' folder, follow the comments to set the folder path, and then execute the ***_Export.py Python script. Next, quantize / optimize the onnx model by yourself.
 10. During the export process of MiniCPM-V, the Resampler always reports an error 'aten::_upsample_bilinear2d_aa' operator not supported, therefore, it is temporarily infeasible to use vision interaction.
-11. Updated on June 3, 2024, to use fp16 for caching past_key_values, resulting in approximately 20% faster response time compared to the previous version.
-12. If use onnxruntime.tools.convert_onnx_models_to_ort to convert to the *.ort format, it will automatically add Cast operators that changes fp16 multiplication to fp32.
-13. The quantization method for the model can be seen in the folder "Do_Quantize".
-14. The q4(uint4) quantization method is not currently recommended because the "MatMulNBits" operator in ONNX Runtime is performing poorly.
-15. See more projects: https://dakeqq.github.io/overview/
+11. If use onnxruntime.tools.convert_onnx_models_to_ort to convert to the *.ort format, it will automatically add Cast operators that changes fp16 multiplication to fp32.
+12. The quantization method for the model can be seen in the folder "Do_Quantize".
+13. The q4(uint4) quantization method is not currently recommended because the "MatMulNBits" operator in ONNX Runtime is performing poorly.
+14. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。目前支持:
    - 通义千问2-Instruct: 0.5B, 1.5B ...
@@ -38,11 +37,10 @@
 9. tokenizer.cpp和tokenizer.hpp文件源自mnn-llm仓库。
 10. 想自行导出模型请前往“Export_ONNX”文件夹，按照注释操作设定文件夹路径，然后执行 ***_Export.py的python脚本。下一步，自己动手量化或优化导出的ONNX模型。
 11. 在导出MiniCPM-V的过程中, Resampler总报错“aten::_upsample_bilinear2d_aa”算子不支持，因此暂时无法使用多模态交互。
-12. 2024.6月3日更新，改使用fp16缓存past_key_values，回复速度比旧版快约20%。
-13. 若使用onnxruntime.tools.convert_onnx_models_to_ort转成*.ort格式，它会自动添加Cast算子将fp16乘法转成fp32。
-14. 模型的量化方法可以在文件夹 "Do_Quantize" 中查看。
-15. 现在不建议使用q4(uint4)量化方法, 因为ONNX Runtime的运算符"MatMulNBits"表现不佳。
-16. 看更多項目: https://dakeqq.github.io/overview/
+12. 若使用onnxruntime.tools.convert_onnx_models_to_ort转成*.ort格式，它会自动添加Cast算子将fp16乘法转成fp32。
+13. 模型的量化方法可以在文件夹 "Do_Quantize" 中查看。
+14. 现在不建议使用q4(uint4)量化方法, 因为ONNX Runtime的运算符"MatMulNBits"表现不佳。
+15. 看更多項目: https://dakeqq.github.io/overview/
 # 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
