@@ -6,6 +6,7 @@
 #include "onnxruntime_cxx_api.h"
 #include "nnapi_provider_factory.h"
 #include "tokenizer.hpp"
+#include "onnxruntime_float16.h"
 
 
 const OrtApi *ort_runtime_A;
