@@ -25,8 +25,8 @@ hidden_size = model.config.hidden_size
 # Generate dummies for torch.onnx.export()
 input_ids = torch.ones(max_seq_len, dtype=torch.int32)
 attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
-ids_len = torch.zeros(1, dtype=torch.long) + 10  # "10" is just a dummy value.
-history_len = torch.zeros(1, dtype=torch.long) + 10  # "10" is just a dummy value.
+ids_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
+history_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
 past_key_states = torch.zeros((num_layers, num_key_value_heads, max_seq_len, head_dim), dtype=torch.float16)
 past_values_states = past_key_states
 position_ids = torch.zeros((max_seq_len, 1), dtype=torch.float32)
