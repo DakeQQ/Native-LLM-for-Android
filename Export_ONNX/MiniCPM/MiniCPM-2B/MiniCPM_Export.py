@@ -28,8 +28,8 @@ hidden_size = model.config.hidden_size
 # Generate dummies for torch.onnx.export()
 input_ids = torch.ones(max_seq_len, dtype=torch.int32)
 attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
-ids_len = torch.zeros(1, dtype=torch.long) + 10  # "10" is just a dummy value.
-history_len = torch.zeros(1, dtype=torch.long) + 10  # "10" is just a dummy value.
+ids_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
+history_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
 past_key_states = torch.zeros((num_layers, num_key_value_heads, max_seq_len, head_dim), dtype=torch.float16)
 past_values_states = past_key_states
 last_hidden_state = torch.ones((max_seq_len, hidden_size), dtype=torch.float32)
@@ -61,8 +61,6 @@ model.register_buffer("embed_data", embed_data)
 del position_ids
 del theta
 del idx_theta
-del cos_rotary_pos_emb
-del sin_rotary_pos_emb
 del embed_data
 del data
 del scale
@@ -91,6 +89,8 @@ print('Part_A export done!')
 # Reload for part B
 shutil.copyfile(modified_path_B, path + "/modeling_minicpm.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
+model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
+model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
 print('Part_B export start ...')
 torch.onnx.export(
     model, (
@@ -108,6 +108,8 @@ torch.onnx.export(
     do_constant_folding=True,
     opset_version=17)
 del model
+del cos_rotary_pos_emb
+del sin_rotary_pos_emb
 del last_hidden_state
 del attention_mask
 del past_key_states
