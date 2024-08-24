@@ -80,135 +80,29 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
         }
     }
-    std::vector<half> past_key_values;
+    ort_runtime_A->Run(session_model_A, nullptr, input_names_A.data(),
+                       (const OrtValue *const *)input_tensors_A.data(),
+                       input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
+                       output_tensors_A.data());
+    input_tensors_B[0] = output_tensors_A[0];
+    input_tensors_A[2] = output_tensors_A[1];
+    input_tensors_A[3] = output_tensors_A[2];
+    ort_runtime_B->Run(session_model_B, nullptr, input_names_B.data(),
+                       (const OrtValue *const *) input_tensors_B.data(),
+                       input_tensors_B.size(), output_names_B.data(), output_names_B.size(),
+                       output_tensors_B.data());
+    input_tensors_B[2] = output_tensors_B[1];
+    input_tensors_B[3] = output_tensors_B[2];
     {
-        OrtMemoryInfo *memory_info;
-        ort_runtime_A->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
-        ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(input_ids.data()), input_ids_buffer_size,
-                input_dims_A[0].data(), input_dims_A[0].size(), input_types_A[0],
-                &input_tensors_A[0]);
-        ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(&attention_mask), sizeof(float),
-//                reinterpret_cast<void*>(&attention_mask), sizeof(Ort::Float16_t),
-                input_dims_A[1].data(), input_dims_A[1].size(), input_types_A[1],
-                &input_tensors_A[1]);
-        if (add_prompt) {
-            std::vector<Ort::Float16_t> past_key_values(past_key_value_size, Ort::Float16_t(0.f));
-            ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
-                    input_dims_A[2].data(), input_dims_A[2].size(), input_types_A[2],
-                    &input_tensors_A[2]);
-            ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
-                    input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
-                    &input_tensors_A[3]);
-        } else {
-            ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (key_states_A)),
-                    past_key_values_buffer_size,
-                    input_dims_A[2].data(), input_dims_A[2].size(), input_types_A[2],
-                    &input_tensors_A[2]);
-            ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (value_states_A)),
-                    past_key_values_buffer_size,
-                    input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
-                    &input_tensors_A[3]);
-        }
-        ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(&history_len), sizeof(int64_t),
-                input_dims_A[4].data(), input_dims_A[4].size(), input_types_A[4],
-                &input_tensors_A[4]);
-        ort_runtime_A->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(&ids_len), sizeof(int64_t),
-                input_dims_A[5].data(), input_dims_A[5].size(), input_types_A[5],
-                &input_tensors_A[5]);
-        ort_runtime_A->ReleaseMemoryInfo(memory_info);
-        ort_runtime_A->Run(session_model_A, nullptr, input_names_A.data(),
-                           (const OrtValue *const *) input_tensors_A.data(),
-                           input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
-                           output_tensors_A.data());
-    }
-    {
-        void* last_hidden_state;
-        ort_runtime_A->GetTensorMutableData(output_tensors_A[0], &last_hidden_state);
-        ort_runtime_A->GetTensorMutableData(output_tensors_A[1], &key_states_A);
-        ort_runtime_A->GetTensorMutableData(output_tensors_A[2], &value_states_A);
-        OrtMemoryInfo *memory_info;
-        ort_runtime_B->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
-        ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(reinterpret_cast<float*> (last_hidden_state)), hidden_state_buffer_size,
-                input_dims_B[0].data(), input_dims_B[0].size(), input_types_B[0],
-                &input_tensors_B[0]);
-        ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(&attention_mask), sizeof(float),
-//                reinterpret_cast<void*>(&attention_mask), sizeof(Ort::Float16_t),
-                input_dims_B[1].data(), input_dims_B[1].size(), input_types_B[1],
-                &input_tensors_B[1]);
-        if (add_prompt) {
-            ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
-                    input_dims_B[2].data(), input_dims_B[2].size(), input_types_B[2],
-                    &input_tensors_B[2]);
-            ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(past_key_values.data()), past_key_values_buffer_size,
-                    input_dims_B[3].data(), input_dims_B[3].size(), input_types_B[3],
-                    &input_tensors_B[3]);
-        } else {
-            ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (key_states_B)),
-                    past_key_values_buffer_size,
-                    input_dims_B[2].data(), input_dims_B[2].size(), input_types_B[2],
-                    &input_tensors_B[2]);
-            ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                    memory_info,
-                    reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (value_states_B)),
-                    past_key_values_buffer_size,
-                    input_dims_B[3].data(), input_dims_B[3].size(), input_types_B[3],
-                    &input_tensors_B[]);
-        }
-        ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(&history_len), sizeof(int64_t),
-                input_dims_B[4].data(), input_dims_B[44].size(), input_types_B[4],
-                &input_tensors_B[4]);
-        ort_runtime_B->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                reinterpret_cast<void*>(&ids_len), sizeof(int64_t),
-                input_dims_B[5].data(), input_dims_B[7].size(), input_types_B[5],
-                &input_tensors_B[5]);
-        ort_runtime_B->ReleaseMemoryInfo(memory_info);
-        ort_runtime_B->Run(session_model_B, nullptr, input_names_B.data(),
-                           (const OrtValue *const *) input_tensors_B.data(),
-                           input_tensors_B.size(), output_names_B.data(), output_names_B.size(),
-                           output_tensors_B.data());
-    }
-    {
-        void* max_logit_id;
-        ort_runtime_B->GetTensorMutableData(output_tensors_B[0], &max_logit_id);
-        ort_runtime_B->GetTensorMutableData(output_tensors_B[1], &key_states_B);
-        ort_runtime_B->GetTensorMutableData(output_tensors_B[2], &value_states_B);
+        void *max_logit_id;
+        ort_runtime_A->GetTensorMutableData(output_tensors_B[0], &max_logit_id);
         input_ids[0] = reinterpret_cast<int32_t*>(max_logit_id)[0];
-        history_len += ids_len;
-        if (add_prompt) {
-            ids_len = 1;
-            response_count = 0;
-    //        attention_mask = Ort::Float16_t(0.f);
-            attention_mask = 0.f;
-        }
+    }
+    if (add_prompt) {
+        ids_len = 1;
+        response_count = 0;
+//            attention_mask = Ort::Float16_t(0.f);
+        attention_mask = 0.f;
     }
     if ((input_ids[0] != end_id_0) && (response_count < single_chat_limit) && (history_len < max_token_history)) {
         save_max_logit_position[response_count] = input_ids[0];
@@ -470,6 +364,41 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->GetTensorShapeElementCount(tensor_info, &tensor_size);
         if (typeinfo) ort_runtime_A->ReleaseTypeInfo(typeinfo);
     }
+    OrtMemoryInfo *memory_info;
+    ort_runtime_A->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
+    ort_runtime_A->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(input_ids.data()), input_ids_buffer_size,
+            input_dims_A[0].data(), input_dims_A[0].size(), input_types_A[0],
+            &input_tensors_A[0]);
+    ort_runtime_A->CreateTensorWithDataAsOrtValue(
+            memory_info,
+//        reinterpret_cast<void *>(&attention_mask), sizeof(Ort::Float16_t),
+            reinterpret_cast<void *>(&attention_mask), sizeof(float),
+            input_dims_A[1].data(), input_dims_A[1].size(), input_types_A[1],
+            &input_tensors_A[1]);
+    std::vector<Ort::Float16_t> past_key_values(past_key_value_size, Ort::Float16_t(0.f));
+    ort_runtime_A->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            input_dims_A[2].data(), input_dims_A[2].size(), input_types_A[2],
+            &input_tensors_A[2]);
+    ort_runtime_A->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
+            &input_tensors_A[3]);
+    ort_runtime_A->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(&history_len), sizeof(int64_t),
+            input_dims_A[4].data(), input_dims_A[4].size(), input_types_A[4],
+            &input_tensors_A[4]);
+    ort_runtime_A->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(&ids_len), sizeof(int64_t),
+            input_dims_A[5].data(), input_dims_A[5].size(), input_types_A[5],
+            &input_tensors_A[5]);
+    ort_runtime_A->ReleaseMemoryInfo(memory_info);
     return JNI_TRUE;
 }
 
@@ -691,5 +620,41 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->GetTensorShapeElementCount(tensor_info, &tensor_size);
         if (typeinfo) ort_runtime_B->ReleaseTypeInfo(typeinfo);
     }
+    OrtMemoryInfo *memory_info;
+    ort_runtime_B->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
+    std::vector<Ort::Float16_t> hidden_state_B(max_token_history * hidden_size, Ort::Float16_t(0.f));
+    ort_runtime_B->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (hidden_state_B.data())), hidden_state_buffer_size,
+            input_dims_B[0].data(), input_dims_B[0].size(), input_types_B[0],
+            &input_tensors_B[0]);
+    ort_runtime_B->CreateTensorWithDataAsOrtValue(
+            memory_info,
+//        reinterpret_cast<void *>(&attention_mask), sizeof(Ort::Float16_t),
+            reinterpret_cast<void *>(&attention_mask), sizeof(float),
+            input_dims_B[1].data(), input_dims_B[1].size(), input_types_B[1],
+            &input_tensors_B[1]);
+    std::vector<Ort::Float16_t> past_key_values(past_key_value_size, Ort::Float16_t(0.f));
+    ort_runtime_B->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            input_dims_B[2].data(), input_dims_B[2].size(), input_types_B[2],
+            &input_tensors_B[2]);
+    ort_runtime_B->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            input_dims_B[3].data(), input_dims_B[3].size(), input_types_B[3],
+            &input_tensors_B[3]);
+    ort_runtime_B->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(&history_len), sizeof(int64_t),
+            input_dims_B[4].data(), input_dims_B[4].size(), input_types_B[4],
+            &input_tensors_B[4]);
+    ort_runtime_B->CreateTensorWithDataAsOrtValue(
+            memory_info,
+            reinterpret_cast<void *>(&ids_len), sizeof(int64_t),
+            input_dims_B[5].data(), input_dims_B[5].size(), input_types_B[5],
+            &input_tensors_B[5]);
+    ort_runtime_B->ReleaseMemoryInfo(memory_info);
     return JNI_TRUE;
 }
