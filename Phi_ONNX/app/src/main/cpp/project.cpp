@@ -617,12 +617,10 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
     }
     OrtMemoryInfo *memory_info;
     ort_runtime_B->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
-//    std::vector<Ort::Float16_t> hidden_state_B(hidden_size, Ort::Float16_t(0.f));
-    std::vector<float> hidden_state_B(hidden_size, 0.f);
+    std::vector<Ort::Float16_t> hidden_state_B(max_token_history * hidden_size, Ort::Float16_t(0.f));
     ort_runtime_B->CreateTensorWithDataAsOrtValue(
             memory_info,
-//            reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (hidden_state_B.data())), hidden_state_buffer_size,
-            reinterpret_cast<void*>(reinterpret_cast<float*> (hidden_state_B.data())), hidden_state_buffer_size,
+            reinterpret_cast<void*>(reinterpret_cast<Ort::Float16_t*> (hidden_state_B.data())), hidden_state_buffer_size,
             input_dims_B[0].data(), input_dims_B[0].size(), input_types_B[0],
             &input_tensors_B[0]);
     ort_runtime_B->CreateTensorWithDataAsOrtValue(
