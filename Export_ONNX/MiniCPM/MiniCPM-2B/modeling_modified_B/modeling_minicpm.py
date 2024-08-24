@@ -104,7 +104,7 @@ def _make_causal_mask(
 
 # @torch.jit.script  # type: ignore
 def rms_layernorm(hidden: torch.Tensor, weight: torch.Tensor, eps: torch.Tensor):
-    return hidden * weight * torch.rsqrt(hidden.pow(2).mean(dim=-1, keepdim=True) + eps)
+    return hidden * weight * torch.rsqrt((hidden * hidden).mean(dim=-1, keepdim=True) + eps)
 
 
 class MiniCPMRMSNorm(nn.Module):
