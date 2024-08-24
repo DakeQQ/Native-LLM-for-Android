@@ -5,7 +5,7 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
 
-model_folder_path = 'C:/Users/Downloads/Phi3-mini-instruct'  # set the folder path where the Phi whole project downloaded.
+model_folder_path = 'C:/Users/Downloads/Phi3.5-mini-instruct'  # set the folder path where the Phi whole project downloaded.
 modified_path_A = 'C:./modeling_modified_A/modeling_phi3.py'  # The path where store the modified part_A modeling_phi.py
 modified_path_B = 'C:./modeling_modified_B/modeling_phi3.py'  # The path where store the modified part_B modeling_phi.py
 onnx_model_A = 'C:/Users/Downloads/Phi_ONNX/part_A/Phi_A.onnx'  # Assign a path where the exported part_A Phi model stored.
