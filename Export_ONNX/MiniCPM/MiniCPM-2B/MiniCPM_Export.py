@@ -32,7 +32,7 @@ ids_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
 history_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
 past_key_states = torch.zeros((num_layers, num_key_value_heads, max_seq_len, head_dim), dtype=torch.float16)
 past_values_states = past_key_states
-last_hidden_state = torch.ones((max_seq_len, hidden_size), dtype=torch.float32)
+last_hidden_state = torch.ones((max_seq_len, hidden_size), dtype=torch.float16)
 position_ids = torch.zeros((max_seq_len, 1), dtype=torch.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
