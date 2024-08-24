@@ -118,7 +118,7 @@ print('\nStart running the Phi by ONNXRuntime.')
 print('Now loading . . . it could cost minutes.\n')
 
 # Run the exported model by ONNX Runtime
-query = "What's the tallest mountain in Mars? What's the height in meter difference between the Earth tallest mountain?"
+query = "What is the tallest mountain on Mars, and how does its height compare to the tallest mountain on Earth in meters?"
 max_single_chat_length = 341  # It a adjustable value, but must less than max_seq_len.
 tokenizer = AutoTokenizer.from_pretrained(model_folder_path, trust_remote_code=True)
 
