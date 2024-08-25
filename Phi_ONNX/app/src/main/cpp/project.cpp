@@ -11,7 +11,8 @@ inline static std::string get_output_words(const int& id) {
 inline static void clear_history() {
     save_index = 0;
     history_len = 0;
-    attention_mask = -999999999.f;
+//    attention_mask = Ort::Float16_t(-65504.f);
+    attention_mask = -65504.f;
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
     std::fill(input_ids.begin(), input_ids.end(), 0);
@@ -33,13 +34,14 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz,
                                                      jboolean add_prompt,
                                                      jboolean clear) {
     if (add_prompt) {
-        // if (clear) {
-        //     clear_history();  // Open for "Chat" model.
-        // }
-        clear_history(); // Do clear every time for "Instruct" model.
+        if (clear) {
+            clear_history();
+        }
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = tokenizer->encode(query);
-        get_ids.insert(get_ids.begin(), {32006, 887, 526, 263, 8444, 20255, 29889, 32007, 32010, });  // Chat prompt head
+        // System hint: "<|system|>\nYou are a helpful assistant.<|end|>\n" = {32006, 887, 526, 263, 8444, 20255, 29889, 32007}.
+        // You can prepend these IDs to the start of the chat prompt.
+        get_ids.insert(get_ids.begin(), {32010});  // Chat prompt head
         get_ids.insert(get_ids.end(), {32007, 32001});  // Chat prompt tail
         ids_len = static_cast<int64_t> (get_ids.size());
         num_ids_per_chat[save_index] = static_cast<int> (ids_len);
