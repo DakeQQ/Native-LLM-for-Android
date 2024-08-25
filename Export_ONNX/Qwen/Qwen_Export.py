@@ -4,6 +4,7 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
+import gc
 
 path = 'C:/Users/Downloads/Qwen2-1.5B-Instruct'  # Set the folder path where the Qwen whole project downloaded.
 
@@ -63,6 +64,7 @@ del embed_data
 del data
 del scale
 del zero_point
+gc.collect()
 
 print('Export start ...')
 torch.onnx.export(
@@ -87,7 +89,7 @@ del past_key_states
 del past_values_states
 del history_len
 del ids_len
-
+gc.collect()
 print('Export done!')
 
 print('\nStart running the Qwen by ONNXRuntime.')
