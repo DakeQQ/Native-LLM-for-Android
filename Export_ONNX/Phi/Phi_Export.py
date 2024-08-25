@@ -4,6 +4,8 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
+import gc
+
 
 model_folder_path = 'C:/Users/Downloads/Phi3.5-mini-instruct'  # set the folder path where the Phi whole project downloaded.
 modified_path_A = 'C:./modeling_modified_A/modeling_phi3.py'  # The path where store the modified part_A modeling_phi.py
@@ -80,6 +82,7 @@ torch.onnx.export(
     opset_version=17)
 del model
 del input_ids
+gc.collect()
 print('Part_A export done!')
 
 # Reload for part B
@@ -112,6 +115,7 @@ del past_key_states
 del past_values_states
 del history_len
 del ids_len
+gc.collect()
 print('Part_B export done!')
 
 print('\nStart running the Phi by ONNXRuntime.')
