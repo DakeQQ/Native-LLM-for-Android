@@ -32,7 +32,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String first_talk = "请输入问题 Enter Questions";
     private static final String load_failed = "模型加载失败。\nModel loading failed.";
     private static final String over_inputs = "一次输入太多单词 \nInput too many words at once.";
-    private static final String file_name_vocab = "vocab_Gemma11.txt";
+    private static final String file_name_vocab = "vocab_Gemma.txt";
     private boolean clear_flag = false;
     private static boolean chatting = false;
 
