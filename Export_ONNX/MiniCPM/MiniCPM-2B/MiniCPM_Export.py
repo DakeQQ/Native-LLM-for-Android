@@ -6,6 +6,7 @@ import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
+import gc
 
 path = 'C:/Users/Downloads/MiniCPM-2B-dpo-fp32'  # Set the folder path where the MiniCPM whole project downloaded.
 
@@ -65,6 +66,7 @@ del embed_data
 del data
 del scale
 del zero_point
+gc.collect()
 
 print('Part_A export start ...')
 torch.onnx.export(
@@ -84,6 +86,7 @@ torch.onnx.export(
     opset_version=17)
 del model
 del input_ids
+gc.collect()
 print('Part_A export done!')
 
 # Reload for part B
@@ -116,7 +119,7 @@ del past_key_states
 del past_values_states
 del history_len
 del ids_len
-
+gc.collect()
 print('Part_B export done!')
 
 print('\nStart running the MiniCPM by ONNX Runtime.')
