@@ -33,8 +33,6 @@ const int end_id_1 = 151645;
 const int past_key_value_size = 7168 * max_token_history; // 28 * 2 * 128, Remember edit the value if using others param size model.
 const int single_chat_limit = 341;                        // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
 const int next_chat_buffer = max_token_history - single_chat_limit;
-const int input_ids_buffer_size = max_token_history * sizeof(int32_t);
-const int past_key_values_buffer_size = past_key_value_size * sizeof(Ort::Float16_t);
 std::vector<int32_t> input_ids(max_token_history, 0);
 std::vector<int> accumulate_num_ids(30, 0); // Just make sure the size is enough before reaching max_token_history.
 std::vector<int> num_ids_per_chat(30, 0);   // Same size with accumulate_num_ids.
