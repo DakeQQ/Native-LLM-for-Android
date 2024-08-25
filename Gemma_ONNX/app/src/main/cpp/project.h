@@ -49,11 +49,11 @@ const std::string file_name_A = "Gemma_2B_1024_A.ort";
 const std::string file_name_B = "Gemma_2B_1024_B.ort";
 const std::string file_name_C = "Gemma_2B_1024_C.ort";
 const int max_token_history = 1024;  // Please set this value to match the model name flag.
-const int hidden_size = 2048;
+const int hidden_size = 2304;
 const int start_id = 2;
 const int end_id_0 = 1;
 const int end_id_1 = 107;
-const int past_key_value_size = 4608 * max_token_history;  // 18 * 256
+const int past_key_value_size = 26624 * max_token_history;  // 4 * 26 * 256
 const int single_chat_limit = 341; // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
 const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int32_t> input_ids(max_token_history, 0);
