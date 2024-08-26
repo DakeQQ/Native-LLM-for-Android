@@ -90,8 +90,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                        input_tensors_B.size(), output_names_B.data(), output_names_B.size(),
                        output_tensors_B.data());
     input_tensors_C[0] = output_tensors_B[0];
-    input_tensors_B[1] = output_tensors_B[1];
-    input_tensors_B[2] = output_tensors_B[2];
+    input_tensors_B[2] = output_tensors_B[1];
+    input_tensors_B[3] = output_tensors_B[2];
     ort_runtime_C->Run(session_model_C, nullptr, input_names_C.data(),
                        (const OrtValue *const *) input_tensors_C.data(),
                        input_tensors_C.size(), output_names_C.data(), output_names_C.size(),
