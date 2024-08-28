@@ -95,7 +95,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
     input_tensors_B[3] = output_tensors_B[2];
     {
         void *max_logit_id;
-        ort_runtime_A->GetTensorMutableData(output_tensors_B[0], &max_logit_id);
+        ort_runtime_B->GetTensorMutableData(output_tensors_B[0], &max_logit_id);
         input_ids[0] = reinterpret_cast<int32_t*>(max_logit_id)[0];
     }
     if (add_prompt) {
