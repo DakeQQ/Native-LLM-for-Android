@@ -114,7 +114,7 @@ class Gemma2RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.zeros(dim))
 
     def _norm(self, x):
-        return x * torch.rsqrt((x * x).mean(-1, keepdim=True) + self.eps)
+        return x / (torch.sqrt((x * x).mean(-1, keepdim=True)) + self.eps)
 
     def forward(self, x):
         # Llama does x.to(float16) * w whilst Gemma2 is (x * w).to(float16)
