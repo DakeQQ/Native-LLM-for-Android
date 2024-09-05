@@ -88,7 +88,7 @@ class Phi3RMSNorm(nn.Module):
         self.variance_epsilon = torch.tensor([eps], dtype=torch.float32)
 
     def forward(self, hidden_states):
-        return self.weight * hidden_states * torch.rsqrt((hidden_states * hidden_states).mean(-1, keepdim=True) + self.variance_epsilon)
+        return self.weight * hidden_states / (torch.sqrt((hidden_states * hidden_states).mean(-1, keepdim=True)) + self.variance_epsilon)
 
 
 # Copied from transformers.models.llama.modeling_llama._get_unpad_data
