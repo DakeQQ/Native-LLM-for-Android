@@ -1017,6 +1017,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         self.save_key = [None] * self.num_layers
         self.save_value = [None] * self.num_layers
         self.attention_mask = (1.0 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.float32)))
+        self.expand_space_B = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len, self.head_dim), dtype=torch.float16)
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1065,10 +1066,10 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
                 past_value_states=past_value_states[i],
                 ids_len=ids_len
             )
-        expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float16)
+        expand_space_B = self.expand_space_B[:, :, kv_seq_len:, :]
         return (torch.argmax(self.lm_head(self.model.norm(hidden_states[-1]))).int(),
-                torch.cat((torch.stack(self.save_key), expand_space), dim=-2),
-                torch.cat((torch.stack(self.save_value), expand_space), dim=-2))
+                torch.cat((torch.stack(self.save_key), expand_space_B), dim=-2),
+                torch.cat((torch.stack(self.save_value), expand_space_B), dim=-2))
 
 
     def prepare_inputs_for_generation(
