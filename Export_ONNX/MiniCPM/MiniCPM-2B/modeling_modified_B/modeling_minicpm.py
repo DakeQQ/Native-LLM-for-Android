@@ -1016,6 +1016,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         self.lm_head = nn.Linear(self.hidden_size, self.vocab_size, bias=False)
         self.save_key = [None] * self.num_layers
         self.save_value = [None] * self.num_layers
+        self.attention_mask = (1.0 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.float32)))
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1053,7 +1054,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         past_key_states = past_key_states[:, :, :history_len, :]
         past_value_states = past_value_states[:, :, :history_len, :]
         hidden_states = hidden_states[:ids_len, :].float()
-        attention_mask = (1.0 - torch.tril(torch.ones([1, ids_len, kv_seq_len], dtype=torch.float32))) * attention_mask
+        attention_mask = self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i + self.num_layers](
                 hidden_states=hidden_states,
