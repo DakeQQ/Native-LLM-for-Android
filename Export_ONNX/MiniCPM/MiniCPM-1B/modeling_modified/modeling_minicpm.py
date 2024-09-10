@@ -1068,7 +1068,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
                 past_value_states=past_value_states[i],
                 ids_len=ids_len
             )
-        expand_space = self.expand_space[:, :, :(self.max_seq_len - kv_seq_len), :]
+        expand_space = self.expand_space[:, :, kv_seq_len:, :]
         return (torch.argmax(self.lm_head(self.model.norm(hidden_states[-1]))).int(),
                 torch.cat((torch.stack(self.save_key), expand_space), dim=-2),
                 torch.cat((torch.stack(self.save_value), expand_space), dim=-2))
