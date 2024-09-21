@@ -1,5 +1,6 @@
 import os
 import onnx
+import subprocess
 import onnx.version_converter
 from onnxsim import simplify
 from onnxruntime.quantization import QuantType, quantize_dynamic
@@ -19,6 +20,7 @@ quanted_model_path = os.path.join(quanted_folder_path, "Model_quanted.onnx")    
 # del model
 
 # Preprocess, it also cost alot of memory during preprocess, you can close this command and keep quanting. Call subprocess may get permission failed on Windows system.
+subprocess.run([f'python -m onnxruntime.quantization.preprocess --auto_merge --all_tensors_to_one_file --input {model_path} --output {quanted_folder_path}'], shell=True)
 subprocess.run([f'python -m onnxruntime.quantization.preprocess --auto_merge --all_tensors_to_one_file --input {model_path} --output {quant_model_path}'], shell=True)
 
 # Start Weight-Only Quantize
