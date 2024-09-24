@@ -71,7 +71,7 @@ if not is_large_model:
         perform_optimization=True,      # True for more optimize.
         skip_fuse_bn=False,             # False for more optimize.
         skip_constant_folding=False,    # False for more optimize.
-        skip_shape_inference=False,     # False for more optimize but may get errors.
+        skip_shape_inference=True,      # False for more optimize but may get errors.
         mutable_initializer=False       # False for static initializer.
     )
     onnx.save(model, quanted_model_path)
@@ -114,7 +114,7 @@ if not is_large_model:
         perform_optimization=True,      # True for more optimize.
         skip_fuse_bn=False,             # False for more optimize.
         skip_constant_folding=False,    # False for more optimize.
-        skip_shape_inference=False,     # False for more optimize but may get errors.
+        skip_shape_inference=True,      # False for more optimize but may get errors.
         mutable_initializer=False       # False for static initializer.
     )
     onnx.save(model, quanted_model_path)
