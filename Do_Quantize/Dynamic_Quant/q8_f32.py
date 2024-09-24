@@ -18,7 +18,7 @@ model_path = os.path.join(original_folder_path, "Model.onnx")                   
 quanted_model_path = os.path.join(quanted_folder_path, "Model_quanted.onnx")     # The quanted model stored path.
 download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                        # Set the folder path where the LLM whole project downloaded, otherwise set "NONE".
 use_gpu = True                                                                   # If true, the transformers.optimizer will remain the FP16 processes.
-provider = 'CPUExecutionProvider'
+provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider', 'CoreMLExecutionProvider']
 
 
 # Preprocess, it also cost alot of memory during preprocess, you can close this command and keep quanting. Call subprocess may get permission failed on Windows system.
