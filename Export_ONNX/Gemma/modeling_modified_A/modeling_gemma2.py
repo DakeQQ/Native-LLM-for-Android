@@ -119,7 +119,7 @@ class Gemma2RMSNorm(nn.Module):
     def forward(self, x):
         # Llama does x.to(float16) * w whilst Gemma2 is (x * w).to(float16)
         # See https://github.com/huggingface/transformers/pull/29402
-        return self._norm(x) * (1.0 + self.weight)
+        return self._norm(x) * self.weight
 
     def extra_repr(self):
         return f"{tuple(self.weight.shape)}, eps={self.eps}"
@@ -153,9 +153,10 @@ class Gemma2RotaryEmbedding(nn.Module):
         return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
 
 
-def rotate_half(x):
+def rotate_half(x, head_dim_half):
     """Rotates half the hidden dims of the input."""
-    return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+    x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
@@ -200,12 +201,12 @@ class Gemma2MLP(nn.Module):
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
 
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int, num_key_value_heads, head_dim) -> torch.Tensor:
+def repeat_kv(kv_states, num_key_value_groups, num_key_value_heads_mul_groups, head_dim, kv_seq_len):
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
     num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
     """
-    return hidden_states[:, None, :, :].expand(num_key_value_heads, n_rep, hidden_states.shape[-2], head_dim).reshape(num_key_value_heads * n_rep,  hidden_states.shape[-2], head_dim)
+    return kv_states.unsqueeze(1).expand(-1, num_key_value_groups, -1, -1).contiguous().view(num_key_value_heads_mul_groups, kv_seq_len, head_dim)
 
 
 class Gemma2Attention(nn.Module):
@@ -232,6 +233,8 @@ class Gemma2Attention(nn.Module):
         self.rope_theta = config.rope_theta
         self.is_causal = True
         self.scaling = config.query_pre_attn_scalar**-0.5
+        self.head_dim_half = self.head_dim // 2
+        self.num_key_value_heads_mul_groups = self.num_key_value_heads * self.num_key_value_groups
 
         if self.hidden_size % self.num_heads != 0:
             raise ValueError(
@@ -493,19 +496,18 @@ class Gemma2SdpaAttention(Gemma2Attention):
             rotary_pos_emb_sin: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
-            ids_len: Optional[torch.LongTensor] = None
+            ids_len: Optional[torch.LongTensor] = None,
+            kv_seq_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states, (key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin).half()), dim=-2)
+        key_states = torch.cat((past_key_states, (key_states * rotary_pos_emb_cos + rotate_half(key_states, self.head_dim_half) * rotary_pos_emb_sin).half()), dim=-2)
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).half().view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         save_key_states = key_states
         save_value_states = value_states
-        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        return self.o_proj(torch.matmul(nn.functional.softmax(
-            torch.tanh(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin,
-                                    key_states.transpose(1,2).float()) * self.scaling) * self.config.attn_logit_softcapping
+        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim, kv_seq_len)
+        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim, kv_seq_len)
+        return self.o_proj(torch.matmul(nn.functional.softmax(torch.tanh(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states, self.head_dim_half) * rotary_pos_emb_sin, key_states.transpose(1,2).float()) * self.scaling) * self.config.attn_logit_softcapping
             + attention_mask, dim=-1, dtype=torch.float32), value_states.float()).transpose(0, 1).contiguous().view(ids_len, -1)), save_key_states, save_value_states
 
 
@@ -541,7 +543,8 @@ class Gemma2DecoderLayer(nn.Module):
             rotary_pos_emb_sin: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
-            ids_len: Optional[torch.LongTensor] = None
+            ids_len: Optional[torch.LongTensor] = None,
+            kv_seq_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         hidden_states_temp, past_key_states, past_value_states = self.self_attn(
             hidden_states=self.input_layernorm(hidden_states),
@@ -551,6 +554,7 @@ class Gemma2DecoderLayer(nn.Module):
             past_key_states=past_key_states,
             past_value_states=past_value_states,
             ids_len=ids_len,
+            kv_seq_len=kv_seq_len
         )
         hidden_states_temp = self.post_attention_layernorm(hidden_states_temp) + hidden_states
         return (hidden_states_temp + self.post_feedforward_layernorm(self.mlp(self.pre_feedforward_layernorm(hidden_states_temp))),) + (
