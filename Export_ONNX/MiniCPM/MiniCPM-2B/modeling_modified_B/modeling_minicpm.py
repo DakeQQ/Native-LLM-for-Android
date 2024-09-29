@@ -206,9 +206,10 @@ class MiniCPMDynamicNTKScalingRotaryEmbedding(MiniCPMRotaryEmbedding):
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
 
-def rotate_half(x):
+def rotate_half(x, head_dim_half):
     """Rotates half the hidden dims of the input."""
-    return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+    x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
@@ -297,6 +298,7 @@ class MiniCPMAttention(nn.Module):
         self.rope_theta = config.rope_theta
         self.is_causal = True
         self.head_dim_factor = torch.tensor([1.0 / math.sqrt(self.head_dim)], dtype=torch.float32)
+        self.head_dim_half = self.head_dim // 2
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -664,12 +666,10 @@ class MiniCPMSdpaAttention(MiniCPMAttention):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin), dim=-2)
+        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states, self.head_dim_half) * rotary_pos_emb_sin), dim=-2)
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
-        return self.o_proj(torch.matmul(nn.functional.softmax(
-            torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin,
-                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
-            dtype=torch.float32), value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), key_states.half(), value_states.half()
+        return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states, self.head_dim_half) * rotary_pos_emb_sin,
+                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(ids_len, self.hidden_size)), key_states.half(), value_states.half()
 
 
 MINICPM_ATTENTION_CLASSES = {
