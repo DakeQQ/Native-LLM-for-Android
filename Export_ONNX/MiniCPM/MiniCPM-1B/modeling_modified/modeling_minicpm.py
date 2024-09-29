@@ -206,9 +206,10 @@ class MiniCPMDynamicNTKScalingRotaryEmbedding(MiniCPMRotaryEmbedding):
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
 
-def rotate_half(x):
+def rotate_half(x, head_dim_half):
     """Rotates half the hidden dims of the input."""
-    return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+    x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
@@ -261,13 +262,13 @@ class MiniCPMMLP(nn.Module):
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
 
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int, num_key_value_heads, head_dim) -> torch.Tensor:
+def repeat_kv(kv_states, num_key_value_groups, num_key_value_heads_mul_groups, head_dim, kv_seq_len):
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
     num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
     """
-    return hidden_states[:, None, :, :].expand(num_key_value_heads, n_rep, hidden_states.shape[-2], head_dim).reshape(
-        num_key_value_heads * n_rep, hidden_states.shape[-2], head_dim)
+    return kv_states.unsqueeze(1).expand(-1, num_key_value_groups, -1, -1).contiguous().view(num_key_value_heads_mul_groups, kv_seq_len, head_dim)
+
 
 
 class MiniCPMAttention(nn.Module):
@@ -294,6 +295,8 @@ class MiniCPMAttention(nn.Module):
         self.rope_theta = config.rope_theta
         self.is_causal = True
         self.head_dim_factor = torch.tensor([1.0 / math.sqrt(self.head_dim)], dtype=torch.float32)
+        self.head_dim_half = self.head_dim // 2
+        self.num_key_value_heads_mul_groups = self.num_key_value_heads * self.num_key_value_groups
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -657,20 +660,19 @@ class MiniCPMSdpaAttention(MiniCPMAttention):
             rotary_pos_emb_sin: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
-            ids_len: Optional[torch.LongTensor] = None
+            ids_len: Optional[torch.LongTensor] = None,
+            kv_seq_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin), dim=-2)
+        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states, self.head_dim_half) * rotary_pos_emb_sin), dim=-2)
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         save_key_states = key_states.half()
         save_value_states = value_states.half()
-        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        return self.o_proj(torch.matmul(nn.functional.softmax(
-            torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin,
-                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1,
-            dtype=torch.float32), value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states, save_value_states
+        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim, kv_seq_len)
+        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim, kv_seq_len)
+        return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states, self.head_dim_half) * rotary_pos_emb_sin,
+                         key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(ids_len, self.hidden_size)), save_key_states, save_value_states
 
 
 MINICPM_ATTENTION_CLASSES = {
@@ -703,6 +705,7 @@ class MiniCPMDecoderLayer(nn.Module):
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
             ids_len: Optional[torch.LongTensor] = None,
+            kv_seq_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Self Attention
         hidden_states_temp, past_key_states, past_value_states = self.self_attn(
@@ -712,7 +715,8 @@ class MiniCPMDecoderLayer(nn.Module):
             rotary_pos_emb_sin=rotary_pos_emb_sin,
             past_key_states=past_key_states,
             past_value_states=past_value_states,
-            ids_len=ids_len
+            ids_len=ids_len,
+            kv_seq_len=kv_seq_len
         )
         hidden_states_temp = hidden_states + hidden_states_temp * self.scale_factor
         return ((hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp)) * self.scale_factor,) + (past_key_states,) +
@@ -1065,7 +1069,8 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
                 rotary_pos_emb_sin=sin_rotary_pos_emb,
                 past_key_states=past_key_states[i],
                 past_value_states=past_value_states[i],
-                ids_len=ids_len
+                ids_len=ids_len,
+                kv_seq_len=kv_seq_len
             )
         expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len, self.head_dim), dtype=torch.float16)
         return (torch.argmax(self.lm_head(self.model.norm(hidden_states[-1]))).int(),
