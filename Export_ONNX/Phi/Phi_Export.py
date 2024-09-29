@@ -16,7 +16,7 @@ onnx_model_B = 'C:/Users/Downloads/Phi_ONNX/part_B/Phi_B.onnx'  # Assign a path 
 # Load the model
 shutil.copyfile(modified_path_A, model_folder_path + "/modeling_phi3.py")
 model = AutoModelForCausalLM.from_pretrained(model_folder_path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_phi.py on line 1054, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_phi.py on line 1060, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
