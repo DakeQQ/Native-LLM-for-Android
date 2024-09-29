@@ -12,7 +12,7 @@ transformers_gemma2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packag
 # Load the model
 shutil.copyfile(modified_path_B, transformers_gemma2_path)
 model = AutoModelForCausalLM.from_pretrained(model_folder_path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_gemma2.py on line 864, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_gemma2.py on line 868, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.head_dim
@@ -37,6 +37,12 @@ cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1)
 sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
 model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
 model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
+model.model.norm.weight.data += 1.0
+for i in range(num_layers):
+    model.model.layers._modules[f'{i}'].input_layernorm.weight.data += 1.0
+    model.model.layers._modules[f'{i}'].post_attention_layernorm.weight.data += 1.0
+    model.model.layers._modules[f'{i}'].pre_feedforward_layernorm.weight.data += 1.0
+    model.model.layers._modules[f'{i}'].post_feedforward_layernorm.weight.data += 1.0
 
 print('Export Part_B start ...')
 torch.onnx.export(
