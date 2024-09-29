@@ -15,7 +15,7 @@ onnx_model_A = 'C:/Users/Downloads/MiniCPM_ONNX/MiniCPM_1B.onnx'  # Assign a pat
 # Load the model
 shutil.copyfile(modified_path, path + "/modeling_minicpm.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1010, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1014, at the same time.
 num_heads = model.config.num_attention_heads
 head_dim = model.config.hidden_size // num_heads
 num_key_value_heads = model.config.num_key_value_heads
