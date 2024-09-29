@@ -308,7 +308,7 @@ class Phi3Attention(nn.Module):
             ids_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         qkv = self.qkv_proj(hidden_states)
-        q, k, v = torch.split(qkv, [self.query_pos, self.query_pos_plus_kv_factor, qkv.shape[-1]], dim=-1)
+        q, k, v = torch.split(qkv, [self.query_pos, self.key_pos, self.value_pos], dim=-1)
         query_states = q.view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = k.view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
         key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states, self.head_dim_half) * rotary_pos_emb_sin), dim=-2)
