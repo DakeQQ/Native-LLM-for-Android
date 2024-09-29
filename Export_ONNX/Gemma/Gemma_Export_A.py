@@ -12,7 +12,7 @@ transformers_gemma2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packag
 # Load the model
 shutil.copyfile(modified_path_A, transformers_gemma2_path)
 model = AutoModelForCausalLM.from_pretrained(model_folder_path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_gemma2.py on line 864, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_gemma2.py on line 868, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.head_dim
