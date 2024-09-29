@@ -177,9 +177,10 @@ class Phi3LongRoPEScaledRotaryEmbedding(Phi3RotaryEmbedding):
 
 
 # Copied from transformers.models.llama.modeling_llama.rotate_half
-def rotate_half(x):
+def rotate_half(x, head_dim_half):
     """Rotates half the hidden dims of the input."""
-    return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+    x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
 
 
 # Copied from transformers.models.llama.modeling_llama.apply_rotary_pos_emb
@@ -266,6 +267,8 @@ class Phi3Attention(nn.Module):
         self.query_pos = self.num_heads * self.head_dim
         self.head_dim_factor = torch.tensor([1.0 / math.sqrt(self.head_dim)], dtype=torch.float32)
         self.kv_factor = self.num_key_value_heads * self.head_dim
+        self.query_pos_plus_kv_factor = self.query_pos + self.kv_factor
+        self.head_dim_half = self.head_dim // 2
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -277,6 +280,8 @@ class Phi3Attention(nn.Module):
         self.o_proj = nn.Linear(self.query_pos, self.hidden_size, bias=False)
         self.qkv_proj = nn.Linear(self.hidden_size, op_size, bias=False)
         self._init_rope()
+        self.key_pos = op_size - self.query_pos - self.kv_factor
+        self.value_pos = op_size - self.key_pos - self.query_pos
 
     def _init_rope(self):
         if self.rope_scaling is None:
@@ -303,12 +308,13 @@ class Phi3Attention(nn.Module):
             ids_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         qkv = self.qkv_proj(hidden_states)
-        query_states = qkv[..., :self.query_pos].view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
-        key_states = qkv[..., self.query_pos : self.query_pos + self.kv_factor].view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin),  dim=-2)
-        value_states = torch.cat((past_value_states, qkv[..., self.query_pos + self.kv_factor :].view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
-        return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin,
-                                                                           key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), key_states.half(), value_states.half()
+        q, k, v = torch.split(qkv, [self.query_pos, self.query_pos_plus_kv_factor, qkv.shape[-1]], dim=-1)
+        query_states = q.view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
+        key_states = k.view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
+        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states, self.head_dim_half) * rotary_pos_emb_sin), dim=-2)
+        value_states = torch.cat((past_value_states, v.view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
+        return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states, self.head_dim_half) * rotary_pos_emb_sin,
+            key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(ids_len, self.hidden_size)), key_states.half(), value_states.half()
 
 
 class Phi3FlashAttention2(Phi3Attention):
