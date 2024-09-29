@@ -129,9 +129,10 @@ class Qwen2RotaryEmbedding(nn.Module):
 
 
 # Copied from transformers.models.llama.modeling_llama.rotate_half
-def rotate_half(x):
+def rotate_half(x, head_dim_half):
     """Rotates half the hidden dims of the input."""
-    return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+    x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
 
 
 # Copied from transformers.models.llama.modeling_llama.apply_rotary_pos_emb
@@ -180,12 +181,12 @@ class Qwen2MLP(nn.Module):
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int, num_key_value_heads, head_dim) -> torch.Tensor:
+def repeat_kv(kv_states, num_key_value_groups, num_key_value_heads_mul_groups, head_dim, kv_seq_len):
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
     num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
     """
-    return hidden_states[:, None, :, :].expand(num_key_value_heads, n_rep, hidden_states.shape[-2], head_dim).reshape(num_key_value_heads * n_rep,  hidden_states.shape[-2], head_dim)
+    return kv_states.unsqueeze(1).expand(-1, num_key_value_groups, -1, -1).contiguous().view(num_key_value_heads_mul_groups, kv_seq_len, head_dim)
 
 
 class Qwen2Attention(nn.Module):
@@ -215,6 +216,8 @@ class Qwen2Attention(nn.Module):
         self.is_causal = True
         self.attention_dropout = config.attention_dropout
         self.head_dim_factor = torch.tensor([1.0 / math.sqrt(self.head_dim)], dtype=torch.float32)
+        self.head_dim_half = self.head_dim // 2
+        self.num_key_value_heads_mul_groups = self.num_key_value_heads * self.num_key_value_groups
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -240,18 +243,19 @@ class Qwen2Attention(nn.Module):
             rotary_pos_emb_sin: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
-            ids_len: Optional[torch.LongTensor] = None
+            ids_len: Optional[torch.LongTensor] = None,
+            kv_seq_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_states = self.q_proj(hidden_states).view(ids_len, self.num_heads, self.head_dim).transpose(0, 1)
         key_states = self.k_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)
-        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states) * rotary_pos_emb_sin), dim=-2)
+        key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states, self.head_dim_half) * rotary_pos_emb_sin), dim=-2)
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(ids_len, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         save_key_states = key_states.half()
         save_value_states = value_states.half()
-        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim)
-        return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states) * rotary_pos_emb_sin, key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32),
-            value_states).transpose(0, 1).reshape(ids_len, self.hidden_size).contiguous()), save_key_states, save_value_states
+        key_states = repeat_kv(key_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim, kv_seq_len)
+        value_states = repeat_kv(value_states, self.num_key_value_groups, self.num_key_value_heads, self.head_dim, kv_seq_len)
+        return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states, self.head_dim_half) * rotary_pos_emb_sin, key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32),
+            value_states).transpose(0, 1).contiguous().view(ids_len, self.hidden_size)), save_key_states, save_value_states
 
 
 class Qwen2FlashAttention2(Qwen2Attention):
@@ -676,7 +680,8 @@ class Qwen2DecoderLayer(nn.Module):
             rotary_pos_emb_sin: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
-            ids_len: Optional[torch.LongTensor] = None
+            ids_len: Optional[torch.LongTensor] = None,
+            kv_seq_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         hidden_states_temp, past_key_states, past_value_states = self.self_attn(
             hidden_states=self.input_layernorm(hidden_states),
@@ -686,6 +691,7 @@ class Qwen2DecoderLayer(nn.Module):
             past_key_states=past_key_states,
             past_value_states=past_value_states,
             ids_len=ids_len,
+            kv_seq_len=kv_seq_len
         )
         hidden_states_temp = hidden_states_temp + hidden_states
         return (hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp)),) + (
@@ -1003,7 +1009,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         self.lm_head = nn.Linear(self.hidden_size, self.vocab_size, bias=False)
         self.save_key = [None] * self.num_layers
         self.save_value = [None] * self.num_layers
-        self.attention_mask = (1.0 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
+        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1051,7 +1057,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 rotary_pos_emb_sin=sin_rotary_pos_emb,
                 past_key_states=past_key_states[i],
                 past_value_states=past_value_states[i],
-                ids_len=ids_len)
+                ids_len=ids_len,
+                kv_seq_len=kv_seq_len)
         expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float16)
         return (torch.argmax(self.lm_head(self.model.norm(hidden_states[-1]))).int(),
                 torch.cat((torch.stack(self.save_key), expand_space), dim=-2),
