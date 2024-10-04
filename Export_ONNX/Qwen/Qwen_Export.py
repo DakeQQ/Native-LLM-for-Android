@@ -6,20 +6,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
 import gc
 
-# path = 'C:/Users/Downloads/Qwen2-1.5B-Instruct'  # Set the folder path where the Qwen whole project downloaded.
-#
-# # Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
-# modified_path = './modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_qwen2.py stored.
-# onnx_model_A = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
-# transformers_qwen2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/qwen2/modeling_qwen2.py'  # The original modeling_qwen2.py path which was stored in the transformers python package.
+path = 'C:/Users/Downloads/Qwen2-1.5B-Instruct'  # Set the folder path where the Qwen whole project downloaded.
 
-path = '/Users/jzhan378/Downloads/Qwen2-0.5B-Instruct'  # Set the folder path where the Qwen whole project downloaded.
 # Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
-modified_path = '/Users/jzhan378/Downloads/Native-LLM-for-Android-main-4/Export_ONNX/Qwen/modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_qwen2.py stored.
-onnx_model_A = '/Users/jzhan378/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
-transformers_qwen2_path = '/Users/jzhan378/PycharmProjects/pythonProject/.venv/lib/python3.11/site-packages/transformers/models/qwen2/modeling_qwen2.py'  # The original modeling_qwen2.py path which was stored in the transformers python package.
-
-
+modified_path = './modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_qwen2.py stored.
+onnx_model_A = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
+transformers_qwen2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/qwen2/modeling_qwen2.py'  # The original modeling_qwen2.py path which was stored in the transformers python package.
 
 # Load the model
 shutil.copyfile(modified_path, transformers_qwen2_path)
