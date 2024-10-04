@@ -63,7 +63,7 @@ if download_path == "NONE":
     num_heads = 0    # default
     hidden_size = 0  # default
 else:
-    model = AutoModelForCausalLM.from_pretrained(download_path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True).eval()
     num_heads = model.config.num_attention_heads
     hidden_size = model.config.hidden_size
     del model
