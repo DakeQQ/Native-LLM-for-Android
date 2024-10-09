@@ -128,12 +128,13 @@ else:
 # transformers.optimizer
 model = optimize_model(quanted_model_path,
                        use_gpu=use_gpu,
-                       opt_level=99,  # opt_level != 0, may disable the fp16 operators
+                       opt_level=99,
                        num_heads=num_heads,
                        hidden_size=hidden_size,
                        provider=provider,
                        verbose=False,
                        model_type='bert')
+model.convert_float_to_float16()
 model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
 del model
 gc.collect()
