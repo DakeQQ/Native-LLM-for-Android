@@ -216,7 +216,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                                              "0");  // 0 for enable
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "optimization.enable_gelu_approximation",
-                                             "0");  // Set 0 is better for this model
+                                             "1");  // Set 1 is better for this model
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
@@ -449,7 +449,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
                                              "0");  // 0 for enable
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "optimization.enable_gelu_approximation",
-                                             "0");  // Set 0 is better for this model
+                                             "1");  // Set 1 is better for this model
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
@@ -705,7 +705,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jobject
                                              "0");  // 0 for enable
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "optimization.enable_gelu_approximation",
-                                             "0");  // Set 0 is better for this model
+                                             "1");  // Set 1 is better for this model
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
