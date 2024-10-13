@@ -209,11 +209,14 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
+        ort_runtime_A->AddSessionConfigEntry(session_options_A,
+                                             "optimization.disable_specified_optimizers",
+                                             "NchwcTransformer");   // For Arm
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "optimization.enable_gelu_approximation",
-                                             "0");  // Set 0 is better for this model
+                                             "1");  // Set 0 is better for this model
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
@@ -462,11 +465,14 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
+        ort_runtime_B->AddSessionConfigEntry(session_options_B,
+                                             "optimization.disable_specified_optimizers",
+                                             "NchwcTransformer");   // For Arm
         ort_runtime_B->AddSessionConfigEntry(session_options_B, "session.disable_prepacking",
                                              "0");  // 0 for enable
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "optimization.enable_gelu_approximation",
-                                             "0");  // Set 0 is better for this model
+                                             "1");  // Set 0 is better for this model
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "mlas.enable_gemm_fastmath_arm64_bfloat16",
                                              "1");  //
