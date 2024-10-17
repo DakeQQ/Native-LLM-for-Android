@@ -44,16 +44,17 @@ del zero_point
 gc.collect()
 
 print('Export Part_A start ...')
-torch.onnx.export(
-    model, (
-        input_ids, ids_len),
-    onnx_model_A,
-    input_names=[
-        'input_ids',
-        'ids_len'
-    ],
-    output_names=['hidden_state'],
-    do_constant_folding=True,
-    opset_version=17)
+with torch.inference_mode():
+    torch.onnx.export(
+        model, (
+            input_ids, ids_len),
+        onnx_model_A,
+        input_names=[
+            'input_ids',
+            'ids_len'
+        ],
+        output_names=['hidden_state'],
+        do_constant_folding=True,
+        opset_version=17)
 print('Part_A Done!')
 
