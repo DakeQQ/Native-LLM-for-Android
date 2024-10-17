@@ -84,21 +84,22 @@ del zero_point
 gc.collect()
 
 print('Export start ...')
-torch.onnx.export(
-    model, (
-        input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
-    onnx_model_A,
-    input_names=[
-        'input_ids',
-        'attention_mask',
-        'past_key_states',
-        'past_values_states',
-        'history_len',
-        'ids_len'
-    ],
-    output_names=['max_logit_id', 'past_key_states', 'past_values_states'],
-    do_constant_folding=True,
-    opset_version=17)
+with torch.inference_mode():
+    torch.onnx.export(
+        model, (
+            input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
+        onnx_model_A,
+        input_names=[
+            'input_ids',
+            'attention_mask',
+            'past_key_states',
+            'past_values_states',
+            'history_len',
+            'ids_len'
+        ],
+        output_names=['max_logit_id', 'past_key_states', 'past_values_states'],
+        do_constant_folding=True,
+        opset_version=17)
 del model
 del input_ids
 del attention_mask
