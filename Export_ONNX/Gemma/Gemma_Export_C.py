@@ -30,15 +30,16 @@ hidden_size = model.config.hidden_size
 last_hidden_state = torch.zeros(hidden_size, dtype=torch.float32)
 
 print('Export Part_C start ...')
-torch.onnx.export(
-    model, last_hidden_state,
-    onnx_model_C,
-    input_names=[
-        'last_hidden_state'
-    ],
-    output_names=['max_logit_ids'],
-    do_constant_folding=True,
-    opset_version=17)
+with torch.inference_mode():
+    torch.onnx.export(
+        model, last_hidden_state,
+        onnx_model_C,
+        input_names=[
+            'last_hidden_state'
+        ],
+        output_names=['max_logit_ids'],
+        do_constant_folding=True,
+        opset_version=17)
 del model
 del last_hidden_state
 gc.collect()
