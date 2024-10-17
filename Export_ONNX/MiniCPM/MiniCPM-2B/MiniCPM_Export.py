@@ -86,21 +86,22 @@ del zero_point
 gc.collect()
 
 print('Part_A export start ...')
-torch.onnx.export(
-    model, (
-        input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
-    onnx_model_A,
-    input_names=[
-        'input_ids',
-        'attention_mask',
-        'past_key_states',
-        'past_values_states',
-        'history_len',
-        'ids_len'
-    ],
-    output_names=['last_hidden_state', 'past_key_states', 'past_values_states'],
-    do_constant_folding=True,
-    opset_version=17)
+with torch.inference_mode():
+    torch.onnx.export(
+        model, (
+            input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
+        onnx_model_A,
+        input_names=[
+            'input_ids',
+            'attention_mask',
+            'past_key_states',
+            'past_values_states',
+            'history_len',
+            'ids_len'
+        ],
+        output_names=['last_hidden_state', 'past_key_states', 'past_values_states'],
+        do_constant_folding=True,
+        opset_version=17)
 del model
 del input_ids
 gc.collect()
@@ -130,21 +131,22 @@ for i in range(num_layers):
 
 
 print('Part_B export start ...')
-torch.onnx.export(
-    model, (
-        last_hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
-    onnx_model_B,
-    input_names=[
-        'last_hidden_state',
-        'attention_mask',
-        'past_key_states',
-        'past_values_states',
-        'history_len',
-        'ids_len'
-    ],
-    output_names=['max_logit_id', 'past_key_states', 'past_values_states'],
-    do_constant_folding=True,
-    opset_version=17)
+with torch.inference_mode():
+    torch.onnx.export(
+        model, (
+            last_hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
+        onnx_model_B,
+        input_names=[
+            'last_hidden_state',
+            'attention_mask',
+            'past_key_states',
+            'past_values_states',
+            'history_len',
+            'ids_len'
+        ],
+        output_names=['max_logit_id', 'past_key_states', 'past_values_states'],
+        do_constant_folding=True,
+        opset_version=17)
 del model
 del cos_rotary_pos_emb
 del sin_rotary_pos_emb
