@@ -62,19 +62,20 @@ for i in range(num_layers):
     del layer_attn.v_proj
 
 print('Export Part_B start ...')
-torch.onnx.export(
-    model, (
-        hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
-    onnx_model_B,
-    input_names=[
-        'hidden_state',
-        'attention_mask',
-        'past_key_states',
-        'past_values_states',
-        'history_len',
-        'ids_len'
-    ],
-    output_names=['last_hidden_state', 'past_key_states', 'past_values_states'],
-    do_constant_folding=True,
-    opset_version=17)
+with torch.inference_mode():
+    torch.onnx.export(
+        model, (
+            hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
+        onnx_model_B,
+        input_names=[
+            'hidden_state',
+            'attention_mask',
+            'past_key_states',
+            'past_values_states',
+            'history_len',
+            'ids_len'
+        ],
+        output_names=['last_hidden_state', 'past_key_states', 'past_values_states'],
+        do_constant_folding=True,
+        opset_version=17)
 print('Part_B Done!')
