@@ -30,7 +30,7 @@ hidden_size = model.config.hidden_size
 last_hidden_state = torch.zeros(hidden_size, dtype=torch.float32)
 
 print('Export Part_C start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, last_hidden_state,
         onnx_model_C,
