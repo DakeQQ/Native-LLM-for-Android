@@ -70,7 +70,7 @@ del scale
 del zero_point
 
 print('Part_A export start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, (
             input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
@@ -102,7 +102,7 @@ for i in range(num_layers):
     model.model.layers._modules[f'{i}'].post_attention_layernorm.weight.data *= sqrt_hidden_size
 
 print('Part_B export start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, (
             last_hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
