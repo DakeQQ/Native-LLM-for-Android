@@ -44,7 +44,7 @@ del zero_point
 gc.collect()
 
 print('Export Part_A start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, (
             input_ids, ids_len),
