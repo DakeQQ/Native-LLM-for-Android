@@ -62,7 +62,7 @@ for i in range(num_layers):
     del layer_attn.v_proj
 
 print('Export Part_B start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, (
             hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
