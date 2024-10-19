@@ -84,7 +84,7 @@ del zero_point
 gc.collect()
 
 print('Export start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, (
             input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
