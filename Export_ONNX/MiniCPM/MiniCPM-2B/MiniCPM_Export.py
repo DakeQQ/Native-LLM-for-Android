@@ -86,7 +86,7 @@ del zero_point
 gc.collect()
 
 print('Part_A export start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, (
             input_ids, attention_mask, past_key_states, past_values_states, history_len, ids_len),
@@ -131,7 +131,7 @@ for i in range(num_layers):
 
 
 print('Part_B export start ...')
-with torch.inference_mode():
+with torch.no_grad():
     torch.onnx.export(
         model, (
             last_hidden_state, attention_mask, past_key_states, past_values_states, history_len, ids_len),
