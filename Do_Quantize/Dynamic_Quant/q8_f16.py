@@ -112,7 +112,12 @@ model = optimize_model(quanted_model_path,
                        provider=provider,
                        verbose=False,
                        model_type='bert')
-model.convert_float_to_float16()
+model.convert_float_to_float16(
+    keep_io_types=True,
+    force_fp16_initializers=True,
+    use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
+    op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range']
+)
 model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
 del model
 gc.collect()
