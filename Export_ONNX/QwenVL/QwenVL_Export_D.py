@@ -223,7 +223,7 @@ if use_vision:
             in_name_C2: ids_len
         })
 end_time = time.time()
-print(f'\nImage Process Complete.\n\nTime Cost: {(end_time - start_time)}')
+print(f'\nImage Process Complete. Time Cost: {(end_time - start_time)}')
 print('\nTest Question: ' + query + "\n\nQwenVL Answering:\n")
 
 while num_decode < max_single_chat_length:
