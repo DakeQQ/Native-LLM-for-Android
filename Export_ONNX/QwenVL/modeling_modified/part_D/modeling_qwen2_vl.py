@@ -68,7 +68,7 @@ try:
     from export_config import MAX_SEQ_LENGTH
 except:
     # Default Values if import failed
-    MAX_SEQ_LENGTH = 1024  # The max token length. Note, this value include the 10 tokens for system prompt and 720 tokens for image prompt. Hence, only (MAX_SEQ_LENGTH - 730) tokens for query + response.
+    MAX_SEQ_LENGTH = 1024  # The max token length. Note, this value include the 10 tokens for system prompt and (HEIGHT_FACTOR * WIDTH_FACTOR) tokens for image prompt. Hence, only (MAX_SEQ_LENGTH - (HEIGHT_FACTOR * WIDTH_FACTOR) - 10) tokens for query + response.
 
 @dataclass
 class Qwen2VLCausalLMOutputWithPast(ModelOutput):
