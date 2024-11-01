@@ -7,7 +7,7 @@ import shutil
 import gc
 import os
 try:
-    from export_config import INPUT_IMAGE_SIZE, IMAGE_RESIZE, MAX_SEQ_LENGTH
+    from export_config import INPUT_IMAGE_SIZE, IMAGE_RESIZE, MAX_SEQ_LENGTH, HEIGHT_FACTOR, WIDTH_FACTOR
 except:
     # Default Values if import failed
     INPUT_IMAGE_SIZE = [720, 1280]                                      # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
@@ -53,7 +53,8 @@ with torch.inference_mode():
     past_value_states = past_key_states
     history_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
     ids_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
-    image_pad_len = torch.tensor([720], dtype=torch.long)  # "720" is not a dummy value. It a model parameter.
+    image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
+    image_pad_len = torch.tensor([image_embed_size], dtype=torch.long)
     ids_len = ids_len + image_pad_len
     hidden_states = torch.ones((ids_len, hidden_size), dtype=torch.float32)
     position_ids = torch.ones((3, 1, ids_len), dtype=torch.float32)
