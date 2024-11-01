@@ -183,7 +183,7 @@ if is_valid_image_path(image_path):
 else:
     use_vision = False
 
-prompt = f"\n<|im_start|>user\n<|vision_start|><|vision_end|>{query}.<|im_end|>\n<|im_start|>assistant\n"
+prompt = f"\n<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n<|im_start|>assistant\n"
 token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros(ids_len, dtype=np.int32)
