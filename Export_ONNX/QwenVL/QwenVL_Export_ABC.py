@@ -89,9 +89,10 @@ with torch.inference_mode():
     ids_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
     history_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
     attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
-    image_embed = torch.ones((WIDTH_FACTOR * HEIGHT_FACTOR, hidden_size), dtype=torch.float32)
+    image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
+    image_embed = torch.ones((image_embed_size, hidden_size), dtype=torch.float32)
     pixel_values = torch.ones([1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.float32)
-    image_pad_len = torch.tensor([720], dtype=torch.long)  # "720" is not a dummy value. It a model parameter.
+    image_pad_len = torch.tensor([image_embed_size], dtype=torch.long)
     ids_len = ids_len + image_pad_len
     kv_seq_len = ids_len + history_len
     input_ids = torch.ones(ids_len, dtype=torch.int32)
