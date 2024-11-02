@@ -64,14 +64,14 @@ class QwenVL_PartC(torch.nn.Module):
         fill_id = torch.arange(self.prompt_head_len, self.start_id, dtype=torch.int16)
         for i in range(self.start_id, self.image_factor_plus, WIDTH_FACTOR):
             self.position_ids[2, :, i: i + WIDTH_FACTOR] = fill_id
-
         self.fill_tail_position = torch.arange(self.start_id, max_seq_len, dtype=torch.int16).repeat(3, 1, 1)
+        self.position_ids_2 = torch.ones((3, 1, 1), dtype=torch.float32) - self.image_factor + WIDTH_FACTOR
 
     def forward(self, hidden_states, image_embed, ids_len):
         part_1, part_2 = torch.split(hidden_states, [self.prompt_head_len, hidden_states.shape[0] - self.prompt_head_len], dim=0)
         position_ids = self.position_ids[:, :, :ids_len]
         position_ids[:, :, self.image_factor_plus:] = self.fill_tail_position[:, :, :ids_len - self.image_factor_plus]
-        return torch.cat((part_1, image_embed, part_2), dim=0), position_ids.float()
+        return torch.cat((part_1, image_embed, part_2), dim=0), position_ids.float(), self.position_ids_2 + ids_len
 
 
 # Load the model
@@ -163,7 +163,7 @@ with torch.inference_mode():
             'image_embed',
             'ids_len'
         ],
-        output_names=['hidden_states_out', 'position_ids'],
+        output_names=['hidden_states_out', 'position_ids', 'position_ids_2'],
         dynamic_axes={
             'hidden_states': {0: 'ids_len'},
             'hidden_states_out': {0: 'ids_len'},
