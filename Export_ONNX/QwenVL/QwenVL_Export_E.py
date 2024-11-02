@@ -207,9 +207,7 @@ if use_vision:
 kv_seq_len = np.array([ids_len[0] + history_len[0]], dtype=np.int64)
 num_decode = 0
 
-# Start to run LLM
-print('\nStart to Process the Image...')
-start_time = time.time()    
+# Start to run LLM 
 hidden_states, _ = ort_session_B.run(
     [out_name_B0, out_name_B1],
     {
@@ -225,6 +223,8 @@ position_ids, position_ids_2, attention_mask = ort_session_C.run(
     })
 
 if use_vision:
+    print('\nStart to Process the Image...')
+    start_time = time.time()   
     image_embed = ort_session_A.run(
         [out_name_A0],
         {in_name_A0: pixel_values})[0]
@@ -235,8 +235,9 @@ if use_vision:
             in_name_D1: image_embed,
             in_name_D2: ids_len
         })
-end_time = time.time()
-print(f'\nImage Process Complete. Time Cost: {(end_time - start_time)}')
+    end_time = time.time()
+    print(f'\nImage Process Complete. Time Cost: {(end_time - start_time)}')
+    
 print('\nTest Question: ' + query + "\n\nQwenVL Answering:\n")
 
 while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
