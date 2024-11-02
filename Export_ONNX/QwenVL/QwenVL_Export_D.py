@@ -155,6 +155,7 @@ in_name_C1 = in_name_C[1].name
 in_name_C2 = in_name_C[2].name
 out_name_C0 = out_name_C[0].name
 out_name_C1 = out_name_C[1].name
+out_name_C2 = out_name_C[2].name
 
 ort_session_D = onnxruntime.InferenceSession(onnx_model_D, sess_options=session_opts, providers=['CPUExecutionProvider'])
 in_name_D = ort_session_D.get_inputs()
@@ -216,8 +217,8 @@ hidden_states, position_ids, attention_mask = ort_session_B.run(
     })
 
 if use_vision:
-    hidden_states, position_ids = ort_session_C.run(
-        [out_name_C0, out_name_C1],
+    hidden_states, position_ids, position_ids_2 = ort_session_C.run(
+        [out_name_C0, out_name_C1, out_name_C2],
         {
             in_name_C0: hidden_states,
             in_name_C1: image_embed,
@@ -247,8 +248,7 @@ while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
         ids_len[0] = 1
         input_ids = np.array([token_id], dtype=np.int32)
         kv_seq_len[0] = ids_len[0] + history_len[0]
-        pos_ids = position_ids[:, 0, -1] + 1
-        hidden_states, position_ids, attention_mask = ort_session_B.run(
+        hidden_states, position_ids_B, attention_mask = ort_session_B.run(
             [out_name_B0, out_name_B1, out_name_B2],
             {
                 in_name_B0: input_ids,
@@ -256,7 +256,13 @@ while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
                 in_name_B2: kv_seq_len,
                 in_name_B3: np.array([0.0], dtype=np.float32)
             })
-        position_ids[:, 0, -1] = pos_ids
+        if use_vision:
+            if num_decode == 1:
+                position_ids = position_ids_2
+            else:
+                position_ids += 1
+        else:
+            position_ids = position_ids_B
         print(tokenizer.decode(token_id), end="", flush=True)
 
 print(f"\n\nText Generate Speed: {num_decode / (time.time() - end_time):.3f} token/s")
