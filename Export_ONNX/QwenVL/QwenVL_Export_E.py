@@ -209,12 +209,7 @@ num_decode = 0
 
 # Start to run LLM
 print('\nStart to Process the Image...')
-start_time = time.time()
-if use_vision:
-    image_embed = ort_session_A.run(
-        [out_name_A0],
-        {in_name_A0: pixel_values})[0]
-
+start_time = time.time()    
 hidden_states, _ = ort_session_B.run(
     [out_name_B0, out_name_B1],
     {
@@ -230,6 +225,9 @@ position_ids, position_ids_2, attention_mask = ort_session_C.run(
     })
 
 if use_vision:
+    image_embed = ort_session_A.run(
+        [out_name_A0],
+        {in_name_A0: pixel_values})[0]
     hidden_states, position_ids, position_ids_2 = ort_session_D.run(
         [out_name_D0, out_name_D1, out_name_D2],
         {
