@@ -260,11 +260,10 @@ while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
             position_ids = position_ids_2
             history_len += ids_len[0]
             ids_len[0] = 1
-            kv_seq_len[0] = history_len[0] + 1
         else:
             history_len += 1
             position_ids += 1
-            kv_seq_len += 1
+        kv_seq_len += 1
         hidden_states, attention_mask = ort_session_B.run(
             [out_name_B0, out_name_B1],
             {
