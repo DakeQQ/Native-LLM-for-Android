@@ -239,7 +239,7 @@ if use_vision:
     print(f'\nImage Process Complete. Time Cost: {(end_time - start_time)}')
     
 print('\nTest Question: ' + query + "\n\nQwenVL Answering:\n")
-
+end_time = time.time()
 while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
     token_id, past_key_states, past_values_states = ort_session_E.run(
         [out_name_E0, out_name_E1, out_name_E2],
