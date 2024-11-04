@@ -1654,7 +1654,7 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             self.patch_size,
             self.patch_size
         )
-        return self.visual(pixel_values)
+        return self.visual(pixel_values).half()
 
     def prepare_inputs_for_generation(
         self,
