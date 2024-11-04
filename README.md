@@ -1,6 +1,7 @@
 # Native-LLM-for-Android
 1. Demonstration of running a native LLM on Android device. Now support:
-    - Qwen2.5-Instruct: 0.5B, 1.5B ...
+    - Qwen2.5-Instruct: 0.5B, 1.5B
+    - Qwen2VL: 2B
     - MiniCPM-DPO/SFT: 1B, 2.7B
     - Yuan2.0: update soon...
     - Gemma2-it: 2B...
@@ -20,7 +21,8 @@
 13. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。目前支持:
-   - 通义千问2.5-Instruct: 0.5B, 1.5B ...
+   - 通义千问2.5-Instruct: 0.5B, 1.5B
+   - 通义千问2VL: 2B
    - MiniCPM-DPO/SFT: 1B, 2.7B
    - 源2.0: update soon...
    - Gemma2-it: 2B
@@ -39,6 +41,11 @@
 12. 模型的量化方法可以在文件夹 "Do_Quantize" 中查看。
 13. 现在不建议使用q4(uint4)量化方法, 因为ONNX Runtime的运算符"MatMulNBits"表现不佳。
 14. 看更多項目: https://dakeqq.github.io/overview/
+# 通义千问VL QwenVL - 性能 Performance
+| OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
+|:-------:|:-------:|:-------:|:-------:|:-------:|
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Qwen2VL-2B<br>q8f32 | 15 token/s |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Qwen2VL-2B<br>q8f32 | 9 token/s|
 # 通义千问 Qwen - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
