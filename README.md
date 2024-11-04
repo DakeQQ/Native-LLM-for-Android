@@ -18,7 +18,8 @@
 10. If use onnxruntime.tools.convert_onnx_models_to_ort to convert to the *.ort format, it will automatically add Cast operators that changes fp16 multiplication to fp32.
 11. The quantization method for the model can be seen in the folder "Do_Quantize".
 12. The q4(uint4) quantization method is not currently recommended because the "MatMulNBits" operator in ONNX Runtime is performing poorly.
-13. See more projects: https://dakeqq.github.io/overview/
+13. 2024/11/04/ Update the Qwen2VL-2B, a kind of vision LLM.
+14. See more projects: https://dakeqq.github.io/overview/
 # 安卓本地运行LLM
 1. 在Android设备上运行本地LLM的演示。目前支持:
    - 通义千问2.5-Instruct: 0.5B, 1.5B
@@ -40,7 +41,8 @@
 11. 若使用onnxruntime.tools.convert_onnx_models_to_ort转成*.ort格式，它会自动添加Cast算子将fp16乘法转成fp32。
 12. 模型的量化方法可以在文件夹 "Do_Quantize" 中查看。
 13. 现在不建议使用q4(uint4)量化方法, 因为ONNX Runtime的运算符"MatMulNBits"表现不佳。
-14. 看更多項目: https://dakeqq.github.io/overview/
+14. 2024/11/04/更新Qwen2VL-2B。
+15. 看更多項目: https://dakeqq.github.io/overview/
 # 通义千问VL QwenVL - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
@@ -80,5 +82,7 @@
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Phi2-2B-Orange-V2<br>q8f32 | 9.5 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Phi2-2B-Orange-V2<br>q8f32 | 5.8 token/s |
 # 演示结果 Demo Results
+(Qwen2VL-2B / 1024 Context)<br>
+![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_QwenVL.gif?raw=true)
 (Qwen2-1.5B / 1024 Context)<br>
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
