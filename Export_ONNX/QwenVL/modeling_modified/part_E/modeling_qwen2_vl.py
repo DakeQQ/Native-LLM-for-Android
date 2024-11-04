@@ -1253,6 +1253,7 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         self.save_value = [None] * self.num_layers
         self.rotary_emb = Qwen2VLRotaryEmbedding(config=config)
         self.rope_scaling = config.rope_scaling["mrope_section"] * 2
+        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1453,14 +1454,20 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             past_key_states: torch.FloatTensor,
             past_value_states: torch.FloatTensor,
             history_len: torch.LongTensor,
-            kv_seq_len: torch.LongTensor,
-            position_ids: torch.FloatTensor
+            ids_len: torch.LongTensor,
+            position_ids: torch.FloatTensor,
+            pos_factor: torch.FloatTensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        kv_seq_len = ids_len + history_len
+        hidden_states = hidden_states[:ids_len].float()
+        position_ids[:, :, 0] += pos_factor
+        position_ids = position_ids[:, :, :ids_len].float()
         cos_rotary_pos_emb, sin_rotary_pos_emb = self.rotary_emb(position_ids)
         cos_rotary_pos_emb = torch.cat([m[i % 3] for i, m in enumerate(cos_rotary_pos_emb.split(self.rope_scaling, dim=-1))], dim=-1)
         sin_rotary_pos_emb = torch.cat([m[i % 3] for i, m in enumerate(sin_rotary_pos_emb.split(self.rope_scaling, dim=-1))], dim=-1)
         past_key_states = past_key_states[:, :, :history_len, :].float()
         past_value_states = past_value_states[:, :, :history_len, :].float()
+        attention_mask = self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask.float()
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i](
                 hidden_states=hidden_states,
