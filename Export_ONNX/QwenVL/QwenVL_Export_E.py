@@ -60,10 +60,11 @@ with torch.inference_mode():
     image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
     image_pad_len = torch.tensor([image_embed_size], dtype=torch.long)
     ids_len = ids_len + image_pad_len
-    hidden_states = torch.ones((ids_len, hidden_size), dtype=torch.float32)
-    position_ids = torch.ones((3, 1, ids_len), dtype=torch.float32)
+    hidden_states = torch.ones((max_seq_len, hidden_size), dtype=torch.float16)
+    position_ids = torch.ones((3, 1, max_seq_len), dtype=torch.float16)
     kv_seq_len = ids_len + history_len
-    attention_mask = torch.ones((1, ids_len, kv_seq_len), dtype=torch.float32)
+    attention_mask = torch.tensor([-65504.0], dtype=torch.float16)
+    pos_factor = torch.tensor(0.0, dtype=torch.float16)
 
     sqrt_hidden_size = torch.sqrt(torch.tensor(hidden_size, dtype=torch.float32))
     model.model.norm.weight.data *= sqrt_hidden_size
@@ -85,7 +86,7 @@ with torch.inference_mode():
     print('\nExport Part_E Start...')
     torch.onnx.export(
         model,
-        (hidden_states, attention_mask, past_key_states, past_value_states, history_len, kv_seq_len, position_ids),
+        (hidden_states, attention_mask, past_key_states, past_value_states, history_len, ids_len, position_ids, pos_factor),
         onnx_model_E,
         input_names=[
             'hidden_states',
@@ -93,15 +94,11 @@ with torch.inference_mode():
             'past_key_states',
             'past_value_states',
             'history_len',
-            'kv_seq_len',
-            'position_ids'
+            'ids_len',
+            'position_ids',
+            'pos_factor'
         ],
         output_names=['max_logit_ids', 'past_key_states', 'past_value_states'],
-        dynamic_axes={
-            'hidden_states': {0: 'ids_len'},
-            'attention_mask': {1: 'ids_len', 2: 'kv_seq_len'},
-            'position_ids': {2: 'ids_len'}
-        },
         do_constant_folding=True,
         opset_version=17
     )
@@ -147,16 +144,12 @@ out_name_B = ort_session_B.get_outputs()
 in_name_B0 = in_name_B[0].name
 in_name_B1 = in_name_B[1].name
 out_name_B0 = out_name_B[0].name
-out_name_B1 = out_name_B[1].name
 
 ort_session_C = onnxruntime.InferenceSession(onnx_model_C, sess_options=session_opts, providers=['CPUExecutionProvider'])
 in_name_C = ort_session_C.get_inputs()
 out_name_C = ort_session_C.get_outputs()
 in_name_C0 = in_name_C[0].name
-in_name_C1 = in_name_C[1].name
 out_name_C0 = out_name_C[0].name
-out_name_C1 = out_name_C[1].name
-out_name_C2 = out_name_C[2].name
 
 ort_session_D = onnxruntime.InferenceSession(onnx_model_D, sess_options=session_opts, providers=['CPUExecutionProvider'])
 in_name_D = ort_session_D.get_inputs()
@@ -164,9 +157,10 @@ out_name_D = ort_session_D.get_outputs()
 in_name_D0 = in_name_D[0].name
 in_name_D1 = in_name_D[1].name
 in_name_D2 = in_name_D[2].name
+in_name_D3 = in_name_D[3].name
+in_name_D4 = in_name_D[4].name
 out_name_D0 = out_name_D[0].name
 out_name_D1 = out_name_D[1].name
-out_name_D2 = out_name_D[2].name
 
 ort_session_E = onnxruntime.InferenceSession(onnx_model_E, sess_options=session_opts, providers=['CPUExecutionProvider'])
 in_name_E = ort_session_E.get_inputs()
@@ -178,6 +172,7 @@ in_name_E3 = in_name_E[3].name
 in_name_E4 = in_name_E[4].name
 in_name_E5 = in_name_E[5].name
 in_name_E6 = in_name_E[6].name
+in_name_E7 = in_name_E[7].name
 out_name_E0 = out_name_E[0].name
 out_name_E1 = out_name_E[1].name
 out_name_E2 = out_name_E[2].name
@@ -195,49 +190,56 @@ else:
     use_vision = False
 
 prompt = f"\n<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n<|im_start|>assistant\n"
+prompt_head_len = np.array([5], dtype=np.int64)
+image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
 token = tokenizer(prompt, return_tensors='pt')['input_ids']
-ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
-input_ids = np.zeros(ids_len, dtype=np.int32)
-input_ids[:] = token[0, :]
+ids_len = np.array([token.shape[1]], dtype=np.int64)
+input_ids = np.zeros(max_seq_len, dtype=np.int32)
+input_ids[:ids_len[0]] = token[0, :]
 history_len = np.zeros(1, dtype=np.int64)
 past_key_states = np.zeros((num_layers, num_key_value_heads, max_seq_len, head_dim), dtype=np.float16)
 past_values_states = past_key_states
-if use_vision:
-    ids_len = np.array([ids_len[0] + image_pad_len[0]], dtype=np.int64)
-kv_seq_len = np.array([ids_len[0] + history_len[0]], dtype=np.int64)
+attention_mask = np.array([-65504.0], dtype=np.float16)
+pos_factor = np.array([0.0], dtype=np.float16)
+pos_factor_v = 1 - image_embed_size + WIDTH_FACTOR
+dummy = np.array(0, dtype=np.int32)
 num_decode = 0
 
-# Start to run LLM 
-hidden_states, _ = ort_session_B.run(
-    [out_name_B0, out_name_B1],
+# Start to run LLM
+hidden_states = ort_session_B.run(
+    [out_name_B0],
     {
         in_name_B0: input_ids,
-        in_name_B1: kv_seq_len
-    })
+        in_name_B1: ids_len
+    })[0]
 
-position_ids, position_ids_2, attention_mask = ort_session_C.run(
-    [out_name_C0, out_name_C1, out_name_C2],
+position_ids = ort_session_C.run(
+    [out_name_C0],
     {
-        in_name_C0: ids_len,
-        in_name_C1: kv_seq_len
+        in_name_C0: dummy
     })
 
 if use_vision:
     print('\nStart to Process the Image...')
-    start_time = time.time()   
+    start_time = time.time()
     image_embed = ort_session_A.run(
         [out_name_A0],
         {in_name_A0: pixel_values})[0]
-    hidden_states, position_ids, position_ids_2 = ort_session_D.run(
-        [out_name_D0, out_name_D1, out_name_D2],
+    ids_len += image_embed_size
+    split_factor = np.array(max_seq_len - ids_len[0] - image_embed_size, dtype=np.int32)
+    ids_len_minus = np.array(ids_len[0] - prompt_head_len[0], dtype=np.int32)
+    hidden_states, position_ids = ort_session_D.run(
+        [out_name_D0, out_name_D1],
         {
             in_name_D0: hidden_states,
             in_name_D1: image_embed,
-            in_name_D2: ids_len
+            in_name_D2: ids_len,
+            in_name_D3: ids_len_minus,
+            in_name_D4: split_factor
         })
     end_time = time.time()
     print(f'\nImage Process Complete. Time Cost: {(end_time - start_time)}')
-    
+
 print('\nTest Question: ' + query + "\n\nQwenVL Answering:\n")
 end_time = time.time()
 while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
@@ -249,27 +251,33 @@ while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
             in_name_E2: past_key_states,
             in_name_E3: past_values_states,
             in_name_E4: history_len,
-            in_name_E5: kv_seq_len,
+            in_name_E5: ids_len,
             in_name_E6: position_ids,
+            in_name_E7: pos_factor
         })
     if (token_id == 151643) | (token_id == 151645):  # the stop_id in Qwen is "151643" & "151645"
         break
     else:
         num_decode += 1
         if num_decode < 2:
-            position_ids = position_ids_2
             history_len += ids_len[0]
             ids_len[0] = 1
+            attention_mask = np.array([0.0], dtype=np.float16)
+            if use_vision:
+                pos_factor = np.array(pos_factor_v + ids_len[0], dtype=np.float16)
+            else:
+                pos_factor = np.array(history_len[0] + 1, dtype=np.float16)
         else:
             history_len += 1
-            position_ids += 1
-        kv_seq_len += 1
-        hidden_states, attention_mask = ort_session_B.run(
-            [out_name_B0, out_name_B1],
+            pos_factor += 1
+        input_ids[0] = token_id
+        hidden_states = ort_session_B.run(
+            [out_name_B0],
             {
-                in_name_B0: np.array([token_id], dtype=np.int32),
-                in_name_B1: kv_seq_len
-            })
+                in_name_B0: input_ids,
+                in_name_B1: ids_len
+            })[0]
         print(tokenizer.decode(token_id), end="", flush=True)
 
 print(f"\n\nText Generate Speed: {num_decode / (time.time() - end_time):.3f} token/s")
+
