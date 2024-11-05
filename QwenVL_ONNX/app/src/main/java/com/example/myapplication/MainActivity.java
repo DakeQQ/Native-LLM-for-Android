@@ -410,7 +410,7 @@ public class MainActivity extends AppCompatActivity {
                     Run_LLM_AD(pixel_values);
                     runOnUiThread(() -> {
                         @SuppressLint("DefaultLocale")
-                        String formattedTimeCost = String.format("%.4f", (System.currentTimeMillis() - image_embed_count) / 1000.f);
+                        String formattedTimeCost = String.format("%.4f", (System.currentTimeMillis() - image_embed_count) * 0.001f);
                         addHistory(ChatMessage.TYPE_SERVER, "Image Process Complete. \n\nTime Cost: " + formattedTimeCost + " seconds\n\n");
                     });
                 }
