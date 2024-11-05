@@ -47,7 +47,7 @@ adb pull /system/lib64/ld-android.so ./app/src/main/assets
 
 ## Step 2: Get Required Libraries from the Official QNN SDK
 
-You need additional libraries from the official Qualcomm AI Engine Direct SDK (QNN SDK, demo version: 2.24.*). Download the SDK from the official website, and locate the libraries in the `2.24.*/lib/aarch64-android` directory. Ensure the SDK version matches the one used for compiling the `libonnxruntime.so` library.
+You need additional libraries from the official Qualcomm AI Engine Direct SDK (QNN SDK, demo version: 2.28.*). Download the SDK from the official website, and locate the libraries in the `2.28.*/lib/aarch64-android` directory. Ensure the SDK version matches the one used for compiling the `libonnxruntime.so` library.
 
 **Note:** To obtain the latest SDK version, you must use the 'Qualcomm® Package Manager' (QPM3); otherwise, you will receive another version via the direct download link.<br> 
 **Note:** Find your device from here: https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-50/overview.html#supported-snapdragon-devices
