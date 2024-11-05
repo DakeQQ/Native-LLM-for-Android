@@ -117,14 +117,14 @@ const int WIDTH_FACTOR = 10;
 const int HEIGHT_FACTOR = 10;
 const int prompt_head_len = 5;
 const int hidden_size = 1536;
-const int max_token_history = 1024; // Please set this value to match the model name flag.
+const int max_token_history = 1024;                                       // Please set this value to match the exported model.
 const int end_id_0 = 151643;
 const int end_id_1 = 151645;
-const int past_key_value_size = 7168 * max_token_history; // 28 * 2 * 128, Remember edit the value if using others param size model.
-const int single_chat_limit = 341;                        // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
-const int next_chat_buffer = max_token_history - single_chat_limit;
+const int past_key_value_size = 7168 * max_token_history;                 // 28 * 2 * 128, Remember edit the value if using others param size model.
 const int64_t image_pad_len = WIDTH_FACTOR * HEIGHT_FACTOR;
 const int64_t pos_factor_v = 1 - image_pad_len + WIDTH_FACTOR;
+const int single_chat_limit = 341 + image_pad_len;                        // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
+const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int> input_ids(max_token_history, 0);
 std::vector<int> ids_exclude_image(max_token_history, 0);
 std::vector<int> accumulate_num_ids(30, 0); // Just make sure the size is enough before reaching max_token_history.
