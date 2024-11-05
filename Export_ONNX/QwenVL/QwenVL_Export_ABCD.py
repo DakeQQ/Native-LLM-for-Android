@@ -84,7 +84,7 @@ class QwenVL_PartD(torch.nn.Module):
 # Load the model
 with torch.inference_mode():
     model = Qwen2VLForConditionalGeneration.from_pretrained(path, torch_dtype=torch.float32, device_map="cpu", low_cpu_mem_usage=True)
-    max_seq_len = MAX_SEQ_LENGTH  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 1001, at the same time.
+    max_seq_len = MAX_SEQ_LENGTH
     num_heads = model.config.num_attention_heads
     num_key_value_heads = model.config.num_key_value_heads
     head_dim = model.config.hidden_size // num_heads
