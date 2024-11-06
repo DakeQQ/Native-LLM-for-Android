@@ -121,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
 //        Copy_from_Asset_to_Cache("libdl_android.so", mgr);
 //        Copy_from_Asset_to_Cache("ld-android.so", mgr);
         if (!Load_Models_E(mgr,false,false,false, false)
-                || !Load_Models_A(mgr,false,false,false, false)  // Only Model_A can ust NPU-HTP, and it very time consume during App launching (QNN code building).
+                || !Load_Models_A(mgr,false,false,false, false)  // Only Model_A can use NPU-HTP, but it very time consume during App launching (QNN code building).
                 || !Load_Models_B(mgr,false,false,false, false)
                 || !Load_Models_C(mgr,false,false,false, false)
                 || !Load_Models_D(mgr,false,false,false, false)) {
