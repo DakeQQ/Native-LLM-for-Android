@@ -7,6 +7,7 @@
     - Gemma2-it: 2B...
     - StableLM2-Chat/Zephyr: update soon...
     - Phi3.5-mini-instruct: 3.8B
+    - Llama-3.2-Instruct: 1B
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. After downloading, place the model into the assets folder.
 4. Remember to decompress the *.so zip file stored in the libs/arm64-v8a folder.
@@ -29,6 +30,7 @@
    - Gemma2-it: 2B
    - StableLM2-Chat/Zephyr: update soon...
    - Phi3.5-mini-instruct: 3.8B
+   - Llama-3.2-Instruct: 1B
 2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
 3. 百度: https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake 提取码: dake
 4. 下载后，请将模型文件放入assets文件夹。
@@ -81,6 +83,11 @@
 |:-------:|:-------:|:-------:|:-------:|:-------:|
 | Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) | Phi2-2B-Orange-V2<br>q8f32 | 9.5 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Phi2-2B-Orange-V2<br>q8f32 | 5.8 token/s |
+# Llama - 性能 Performance
+| OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
+|:-------:|:-------:|:-------:|:-------:|:-------:|
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) |Llama3.2-1B-Instruct<br>q8f32 | Testing token/s |
+| Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Llama3.2-1B-Instruct<br>q8f32 | 15 token/s |
 # 演示结果 Demo Results
 (Qwen2VL-2B / 1024 Context)<br>
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_QwenVL.gif?raw=true)
