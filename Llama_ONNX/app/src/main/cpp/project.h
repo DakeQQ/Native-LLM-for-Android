@@ -18,7 +18,7 @@ std::vector<ONNXTensorElementDataType> input_types_A;
 std::vector<ONNXTensorElementDataType> output_types_A;
 std::vector<OrtValue *> input_tensors_A;
 std::vector<OrtValue *> output_tensors_A;
-std::unique_ptr<Tokenizer> tokenizer;
+Tokenizer* tokenizer;
 int response_count = 0;
 int save_index = 0;
 int64_t history_len = 0;
