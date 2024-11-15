@@ -24,8 +24,8 @@ inline static void clear_history()
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz)
 {
-    tokenizer = std::make_unique<Tiktoken>();
-    tokenizer->load(vocab_file);
+    std::unique_ptr<Tokenizer> temp = std::make_unique<Tiktoken>();
+    tokenizer = temp->createTokenizer(vocab_file); 
     return JNI_TRUE;
 }
 
