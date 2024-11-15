@@ -139,7 +139,7 @@ out_name_A1 = out_name_A[1].name
 out_name_A2 = out_name_A[2].name
 
 # Pre-process inputs
-prompt = f'<|start_header_id|>user<|end_header_id|>\n{query}<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>\n'
+prompt = f'<|start_header_id|>user<|end_header_id|>\n\n{query}<|eot_id|>\n\n<|start_header_id|>assistant<|end_header_id|>\n\n'
 token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros(max_seq_len, dtype=np.int32)
