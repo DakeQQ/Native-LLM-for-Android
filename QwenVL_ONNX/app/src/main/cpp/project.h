@@ -18,15 +18,15 @@ const char* computeShaderSource = "#version 320 es\n"
                                   "layout(std430, binding = 1) buffer Output {\n"
                                   "    int result[camera_height * camera_width];\n"  // pixelCount
                                   "} outputData;\n"
-                                  "const vec3 bias = vec3(0.0, -0.5, -0.5);\n"
-                                  "const mat3 YUVtoRGBMatrix = mat3(255.0, 0.0, 1.402 * 255.0, "
-                                  "                                 255.0, -0.344136 * 255.0, -0.714136 * 255.0, "
-                                  "                                 255.0, 1.772 * 255.0, 0.0);\n"
+                                  "const vec3 bias = vec3(-0.2, -0.5, -0.2);\n"
+                                  "const mat3 YUVtoRGBMatrix = mat3(127.5, 0.0, 1.402 * 127.5, "
+                                  "                                 127.5, -0.344136 * 127.5, -0.714136 * 127.5, "
+                                  "                                 127.5, 1.772 * 127.5, 0.0);\n"
                                   "void main() {\n"
                                   "    ivec2 texelPos = ivec2(gl_GlobalInvocationID.xy);\n"
-                                  "    vec3 rgb = clamp(YUVtoRGBMatrix * (texelFetch(yuvTex, texelPos, 0).rgb + bias), 0.0, 255.0);\n"
+                                  "    ivec3 rgb = clamp(ivec3(YUVtoRGBMatrix * (texelFetch(yuvTex, texelPos, 0).rgb + bias)), -128, 127) + 128;\n"
                                   // Use int8 packing the pixels, it would be 1.6 times faster than using float32 buffer.
-                                  "    outputData.result[texelPos.x * camera_height + (camera_height - texelPos.y - 1)] = (int(rgb.b * 0.55) << 16) | (int(rgb.r * 0.5) << 8) | (int(rgb.g * 1.4));\n"
+                                  "    outputData.result[texelPos.x * camera_height + (camera_height - texelPos.y - 1)] = (rgb.b << 16) | (rgb.r << 8) | (rgb.g);\n"
                                   "}";
 // OpenGL Setting
 GLuint pbo_A = 0;
