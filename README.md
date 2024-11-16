@@ -86,7 +86,7 @@
 # Llama - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
-| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) |Llama3.2-1B-Instruct<br>q8f32 | Testing token/s |
+| Android 13 | Nubia Z50 | 8_Gen2-CPU<br>(X3+A715) |Llama3.2-1B-Instruct<br>q8f32 | 25 token/s |
 | Harmony 4 | P40 | Kirin_990_5G-CPU<br>(2*A76) | Llama3.2-1B-Instruct<br>q8f32 | 16 token/s |
 # 演示结果 Demo Results
 (Qwen2VL-2B / 1024 Context)<br>
