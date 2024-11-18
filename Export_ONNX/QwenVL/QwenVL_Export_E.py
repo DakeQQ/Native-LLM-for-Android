@@ -112,10 +112,7 @@ with torch.inference_mode():
     del kv_seq_len
     del position_ids
     gc.collect()
-    print('\nExport Part_E Done!')
-
-print('\nStart running the QwenVL by ONNXRuntime.')
-print('\nNow loading . . . it could cost minutes.')
+    print('\nExport Part_E Done!\n\nStart running the QwenVL by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
 # Run the exported model by ONNX Runtime
 max_single_chat_length = 341  # It a adjustable value, but must less than max_seq_len.
