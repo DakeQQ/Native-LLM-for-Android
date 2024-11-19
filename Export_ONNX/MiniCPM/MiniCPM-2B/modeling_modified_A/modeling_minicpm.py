@@ -104,7 +104,7 @@ def _make_causal_mask(
 
 # @torch.jit.script  # type: ignore
 def rms_layernorm(hidden: torch.Tensor, weight: torch.Tensor, eps: torch.Tensor):
-    return weight * hidden / torch.norm(hidden, p=2, dim=-1, keepdim=True)
+    return hidden * weight / torch.sqrt((hidden * hidden).mean(dim=-1, keepdim=True) + eps)
 
 
 class MiniCPMRMSNorm(nn.Module):
@@ -310,12 +310,6 @@ class MiniCPMAttention(nn.Module):
         self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
-        self.num_query = self.num_heads * self.head_dim
-        self.kv_factor = self.num_key_value_heads * self.head_dim
-        self.op_size = self.num_query + 2 * self.kv_factor
-        self.qkv_proj = nn.Linear(self.hidden_size, self.op_size, bias=False)
-        self.num_key = self.op_size - self.num_query - self.kv_factor
-        self.num_value = self.op_size - self.num_key - self.num_query
         self._init_rope()
 
     def _init_rope(self):
@@ -670,11 +664,10 @@ class MiniCPMSdpaAttention(MiniCPMAttention):
             past_value_states: Optional[torch.FloatTensor] = None,
             ids_len: Optional[torch.LongTensor] = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        query_states, key_states, value_states = torch.split(self.qkv_proj(hidden_states),[self.num_query, self.num_key, self.num_value], dim=-1)
-        query_states = query_states.view(-1, self.num_heads, self.head_dim).transpose(0, 1)
-        key_states = key_states.view(-1, self.num_key_value_heads, self.head_dim).transpose(0, 1)
+        query_states = self.q_proj(hidden_states).view(-1, self.num_heads, self.head_dim).transpose(0, 1)
+        key_states = self.k_proj(hidden_states).view(-1, self.num_key_value_heads, self.head_dim).transpose(0, 1)
         key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos + rotate_half(key_states, self.head_dim_half) * rotary_pos_emb_sin), dim=-2)
-        value_states = torch.cat((past_value_states, value_states.view(-1, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
+        value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(-1, self.num_key_value_heads, self.head_dim).transpose(0, 1)), dim=-2)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(query_states * rotary_pos_emb_cos + rotate_half(query_states, self.head_dim_half) * rotary_pos_emb_sin,
                          key_states.transpose(1, 2)) * self.head_dim_factor + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(-1, self.hidden_size)), key_states.half(), value_states.half()
 
