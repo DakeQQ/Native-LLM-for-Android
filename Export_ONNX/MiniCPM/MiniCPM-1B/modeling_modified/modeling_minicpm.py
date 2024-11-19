@@ -311,7 +311,7 @@ class MiniCPMAttention(nn.Module):
         self.num_query = self.num_heads * self.head_dim
         self.kv_factor = self.num_key_value_heads * self.head_dim
         self.op_size = self.num_query + 2 * self.kv_factor
-        self.qkv_proj = nn.Linear(self.hidden_size, self.op_size, bias=True)
+        self.qkv_proj = nn.Linear(self.hidden_size, self.op_size, bias=False)
         self.num_key = self.op_size - self.num_query - self.kv_factor
         self.num_value = self.op_size - self.num_key - self.num_query
         self._init_rope()
