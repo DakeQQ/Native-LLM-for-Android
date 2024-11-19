@@ -19,7 +19,7 @@ onnx_model_B = 'C:/Users/Downloads/MiniCPM_ONNX_B/MiniCPM_part_B.onnx'  # Assign
 # Load the model
 shutil.copyfile(modified_path_A, path + "/modeling_minicpm.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1015, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_minicpm.py on line 1007, at the same time.
 num_heads = model.config.num_attention_heads
 head_dim = model.config.hidden_size // num_heads
 num_key_value_heads = model.config.num_key_value_heads
@@ -45,21 +45,6 @@ cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1)
 sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
 model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
 model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
-
-
-sqrt_hidden_size = torch.sqrt(torch.tensor(hidden_size, dtype=torch.float32))
-model.model.norm.weight.data *= sqrt_hidden_size
-for i in range(num_layers):
-    model.model.layers._modules[f'{i}'].input_layernorm.weight.data *= sqrt_hidden_size
-    model.model.layers._modules[f'{i}'].post_attention_layernorm.weight.data *= sqrt_hidden_size
-
-    layer_attn = model.model.layers._modules[f'{i}'].self_attn
-    qkv_weight = torch.cat([layer_attn.q_proj.weight.data, layer_attn.k_proj.weight.data, layer_attn.v_proj.weight.data], dim=0)
-    layer_attn.qkv_proj = torch.nn.Linear(qkv_weight.shape[1], qkv_weight.shape[0], bias=True)
-    layer_attn.qkv_proj.weight.data.copy_(qkv_weight)
-    del layer_attn.q_proj
-    del layer_attn.k_proj
-    del layer_attn.v_proj
 
 
 def quantize_to_uint8(tensor, scale, zero_point):
@@ -110,20 +95,6 @@ shutil.copyfile(modified_path_B, path + "/modeling_minicpm.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True).eval()
 model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
 model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
-
-
-model.model.norm.weight.data *= sqrt_hidden_size
-for i in range(num_layers):
-    model.model.layers._modules[f'{i}'].input_layernorm.weight.data *= sqrt_hidden_size
-    model.model.layers._modules[f'{i}'].post_attention_layernorm.weight.data *= sqrt_hidden_size
-
-    layer_attn = model.model.layers._modules[f'{i}'].self_attn
-    qkv_weight = torch.cat([layer_attn.q_proj.weight.data, layer_attn.k_proj.weight.data, layer_attn.v_proj.weight.data], dim=0)
-    layer_attn.qkv_proj = torch.nn.Linear(qkv_weight.shape[1], qkv_weight.shape[0], bias=True)
-    layer_attn.qkv_proj.weight.data.copy_(qkv_weight)
-    del layer_attn.q_proj
-    del layer_attn.k_proj
-    del layer_attn.v_proj
 
 
 print('Part_B export start...')
