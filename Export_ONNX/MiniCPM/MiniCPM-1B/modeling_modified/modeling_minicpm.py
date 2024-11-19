@@ -1060,8 +1060,8 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
             ids_len: torch.LongTensor = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         kv_seq_len = ids_len + history_len
-        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].flaot()
-        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].flaot()
+        cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
+        sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
         past_key_states = past_key_states[:, :, :history_len, :].flaot()
         past_value_states = past_value_states[:, :, :history_len, :].flaot()
         ids = input_ids[:ids_len]
