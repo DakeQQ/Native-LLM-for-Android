@@ -1062,8 +1062,8 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         kv_seq_len = ids_len + history_len
         cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
         sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
-        past_key_states = past_key_states[:, :, :history_len, :].flaot()
-        past_value_states = past_value_states[:, :, :history_len, :].flaot()
+        past_key_states = past_key_states[:, :, :history_len, :].float()
+        past_value_states = past_value_states[:, :, :history_len, :].float()
         ids = input_ids[:ids_len]
         hidden_states = self.embed_data[ids] * self.scale[ids] + self.zero_point[ids]
         attention_mask = self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask
