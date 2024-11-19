@@ -55,10 +55,8 @@ for i in range(num_layers):
 
     layer_attn = model.model.layers._modules[f'{i}'].self_attn
     qkv_weight = torch.cat([layer_attn.q_proj.weight.data, layer_attn.k_proj.weight.data, layer_attn.v_proj.weight.data], dim=0)
-    qkv_bias = torch.cat([layer_attn.q_proj.bias.data, layer_attn.k_proj.bias.data, layer_attn.v_proj.bias.data], dim=0)
     layer_attn.qkv_proj = torch.nn.Linear(qkv_weight.shape[1], qkv_weight.shape[0], bias=True)
     layer_attn.qkv_proj.weight.data.copy_(qkv_weight)
-    layer_attn.qkv_proj.bias.data.copy_(qkv_bias)
     del layer_attn.q_proj
     del layer_attn.k_proj
     del layer_attn.v_proj
@@ -121,10 +119,8 @@ for i in range(num_layers):
 
     layer_attn = model.model.layers._modules[f'{i}'].self_attn
     qkv_weight = torch.cat([layer_attn.q_proj.weight.data, layer_attn.k_proj.weight.data, layer_attn.v_proj.weight.data], dim=0)
-    qkv_bias = torch.cat([layer_attn.q_proj.bias.data, layer_attn.k_proj.bias.data, layer_attn.v_proj.bias.data], dim=0)
     layer_attn.qkv_proj = torch.nn.Linear(qkv_weight.shape[1], qkv_weight.shape[0], bias=True)
     layer_attn.qkv_proj.weight.data.copy_(qkv_weight)
-    layer_attn.qkv_proj.bias.data.copy_(qkv_bias)
     del layer_attn.q_proj
     del layer_attn.k_proj
     del layer_attn.v_proj
