@@ -378,14 +378,15 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
             input_dims_A[1].data(), input_dims_A[1].size(), input_types_A[1],
             &input_tensors_A[1]);
     std::vector<Ort::Float16_t> past_key_values(past_key_value_size, Ort::Float16_t(0.f));
+    int buffer_size = past_key_value_size * sizeof(Ort::Float16_t);
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            reinterpret_cast<void *>(past_key_values.data()), buffer_size,
             input_dims_A[2].data(), input_dims_A[2].size(), input_types_A[2],
             &input_tensors_A[2]);
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            reinterpret_cast<void *>(past_key_values.data()), buffer_size,
             input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
             &input_tensors_A[3]);
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
