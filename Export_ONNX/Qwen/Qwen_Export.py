@@ -11,7 +11,7 @@ path = 'C:/Users/Downloads/Qwen2-1.5B-Instruct'  # Set the folder path where the
 # Replace the original "modeling_llama.py" with the modified "modeling_llama.py", which stored at the folder "modeling_modified".
 modified_path = './modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_llama.py stored.
 onnx_model_A = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
-transformers_qwen2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/qwen2/modeling_llama.py'  # The original modeling_llama.py path which was stored in the transformers python package.
+transformers_qwen2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/qwen2/modeling_qwen2.py'  # The original modeling_qwen2.py path which was stored in the transformers python package.
 
 # Load the model
 shutil.copyfile(modified_path, transformers_qwen2_path)
