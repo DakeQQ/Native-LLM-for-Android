@@ -153,7 +153,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     OrtSessionOptions *session_options_A;
     {
         std::vector<char> fileBuffer;
+        std::vector<char> fileBuffer_external;
         off_t fileSize;
+        off_t fileSize_external;
         if (asset_manager != nullptr) {
             AAssetManager* mgr = AAssetManager_fromJava(env, asset_manager);
             AAsset* asset = AAssetManager_open(mgr,file_name_A.c_str(), AASSET_MODE_BUFFER);
