@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Vision LLM</string>
-    <string name="send">发送 Send</string>
-    <string name="clear">清除 Clear History</string>
-    <string name="type_your_message">请输入 Type your message…</string>
-    <string name="use_vision">视觉 USE VISION</string>
-</resources>
