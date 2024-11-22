@@ -347,7 +347,44 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jclass 
                                              "Default");  // Default = Performance; Efficient = Save Power
         std::vector<const char*> option_keys = {};
         std::vector<const char*> option_values = {};
-        if (use_xnnpack) {
+        if (use_qnn) {
+            setenv("LD_LIBRARY_PATH", cache_path, 1);
+            setenv("ADSP_LIBRARY_PATH", cache_path, 1);
+            if (use_dsp_npu) {
+                option_keys.push_back("backend_path");
+                option_values.push_back(qnn_htp_so);
+                ort_runtime_A->AddRunConfigEntry(run_options_A, "qnn.htp_perf_mode", "burst");  // Do not use "option_keys.push_back("htp_performance_mode")", it not work now. (demo version=1.18.1)
+                ort_runtime_A->AddRunConfigEntry(run_options_A, "qnn.htp_perf_mode_post_run", "burst");
+                ort_runtime_A->AddRunConfigEntry(run_options_A, "qnn.rpc_control_latency", "0");
+                option_keys.push_back("htp_graph_finalization_optimization_mode");
+                option_values.push_back("3");
+                option_keys.push_back("soc_model");
+                option_values.push_back("43");  // 0 for unknown, Find your device from here: https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-50/overview.html#supported-snapdragon-devices
+                option_keys.push_back("device_id");
+                option_values.push_back("0");  // 0 for single device
+                option_keys.push_back("vtcm_mb");
+                option_values.push_back("8");  // 0 for auto
+                option_keys.push_back("qnn_context_priority");
+                option_values.push_back("high");
+                if (use_float_model) {
+                    option_keys.push_back("enable_htp_fp16_precision");
+                    option_values.push_back("1");
+                } else {
+                    option_keys.push_back("enable_htp_fp16_precision");
+                    option_values.push_back("0");
+                    ort_runtime_A->AddSessionConfigEntry(session_options_A,
+                                                         "ep.context_enable", "1");
+                    ort_runtime_A->AddSessionConfigEntry(session_options_A,
+                                                         "ep.context_embed_mode", "1");
+                    ort_runtime_A->AddSessionConfigEntry(session_options_A,
+                                                         "ep.context_file_path", ctx_model_A);
+                }
+            } else {
+                option_keys.push_back("backend_path");
+                option_values.push_back(qnn_cpu_so);
+            }
+            ort_runtime_A->SessionOptionsAppendExecutionProvider(session_options_A, "QNN", option_keys.data(), option_values.data(), option_keys.size());
+        } else if (use_xnnpack) {
             option_keys.push_back("intra_op_num_threads");
             option_values.push_back("4");
             ort_runtime_A->SetInterOpNumThreads(session_options_A, 4);                                                // Keep the same value as above.
@@ -1011,9 +1048,6 @@ extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass clazz,
                                                             jobject asset_manager,
-                                                            jboolean use_float_model,
-                                                            jboolean use_qnn,
-                                                            jboolean use_dsp_npu,
                                                             jboolean use_xnnpack) {
     OrtStatus *status;
     OrtAllocator *allocator;
@@ -1030,9 +1064,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
             fileSize = AAsset_getLength(asset);
             fileBuffer.resize(fileSize);
             AAsset_read(asset,fileBuffer.data(),fileSize);
-            if (file_name_A_external != "NONE") {
+            if (file_name_E_external != "NONE") {
                 // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
-                AAsset* asset_ex = AAssetManager_open(mgr, file_name_A_external.c_str(), AASSET_MODE_BUFFER);
+                AAsset* asset_ex = AAssetManager_open(mgr, file_name_E_external.c_str(), AASSET_MODE_BUFFER);
                 fileSize_external = AAsset_getLength(asset_ex);
                 fileBuffer_external.resize(fileSize_external);
                 AAsset_read(asset_ex, fileBuffer_external.data(), fileSize_external);
@@ -1049,9 +1083,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
                 return JNI_FALSE;
             }
             model_file.close();
-            if (file_name_A_external != "NONE") {
+            if (file_name_E_external != "NONE") {
                 // Load external data using std::ifstream. For models with multiple external files, manually load additional files as needed.
-                std::ifstream model_file_external(storage_path + file_name_A_external, std::ios::binary | std::ios::ate);
+                std::ifstream model_file_external(storage_path + file_name_E_external, std::ios::binary | std::ios::ate);
                 if (!model_file_external.is_open()) {
                     return JNI_FALSE;
                 }
@@ -1144,44 +1178,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
                                              "Default");  // Default = Performance; Efficient = Save Power
         std::vector<const char*> option_keys = {};
         std::vector<const char*> option_values = {};
-        if (use_qnn) {
-            setenv("LD_LIBRARY_PATH", cache_path, 1);
-            setenv("ADSP_LIBRARY_PATH", cache_path, 1);
-            if (use_dsp_npu) {
-                option_keys.push_back("backend_path");
-                option_values.push_back(qnn_htp_so);
-                ort_runtime_E->AddRunConfigEntry(run_options_E, "qnn.htp_perf_mode", "burst");  // Do not use "option_keys.push_back("htp_performance_mode")", it not work now. (demo version=1.18.1)
-                ort_runtime_E->AddRunConfigEntry(run_options_E, "qnn.htp_perf_mode_post_run", "burst");
-                ort_runtime_E->AddRunConfigEntry(run_options_E, "qnn.rpc_control_latency", "0");
-                option_keys.push_back("htp_graph_finalization_optimization_mode");
-                option_values.push_back("3");
-                option_keys.push_back("soc_model");
-                option_values.push_back("43");  // 0 for unknown, Find your device from here: https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-50/overview.html#supported-snapdragon-devices
-                option_keys.push_back("device_id");
-                option_values.push_back("0");  // 0 for single device
-                option_keys.push_back("vtcm_mb");
-                option_values.push_back("8");  // 0 for auto
-                option_keys.push_back("qnn_context_priority");
-                option_values.push_back("high");
-                if (use_float_model) {
-                    option_keys.push_back("enable_htp_fp16_precision");
-                    option_values.push_back("1");
-                } else {
-                    option_keys.push_back("enable_htp_fp16_precision");
-                    option_values.push_back("0");
-                    ort_runtime_E->AddSessionConfigEntry(session_options_E,
-                                                         "ep.context_enable", "1");
-                    ort_runtime_E->AddSessionConfigEntry(session_options_E,
-                                                         "ep.context_embed_mode", "1");
-                    ort_runtime_E->AddSessionConfigEntry(session_options_E,
-                                                         "ep.context_file_path", ctx_model_E);
-                }
-            } else {
-                option_keys.push_back("backend_path");
-                option_values.push_back(qnn_cpu_so);
-            }
-            ort_runtime_E->SessionOptionsAppendExecutionProvider(session_options_E, "QNN", option_keys.data(), option_values.data(), option_keys.size());
-        } else if (use_xnnpack) {
+        if (use_xnnpack) {
             option_keys.push_back("intra_op_num_threads");
             option_values.push_back("4");
             ort_runtime_E->SetInterOpNumThreads(session_options_E, 4);                                                // Keep the same value as above.
