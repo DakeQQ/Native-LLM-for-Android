@@ -38,6 +38,13 @@ nodes_to_exclude = None     # Specify the unsupported op type, for example: Redu
 # Call subprocess may get permission failed on Windows system.
 subprocess.run([f'python -m onnxruntime.quantization.matmul_4bits_quantizer --input_model {model_path} --output_model {quanted_model_path} --block_size {block_size} --symmetric {symmetric} --accuracy_level {accuracy_level} --bits {bits} --quant_method {quant_method} --quant_format {quant_format} --nodes_to_exclude {nodes_to_exclude}'], shell=True)
 
+model_size_bytes = sys.getsizeof(onnx.load(quanted_model_path).SerializeToString())
+model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
+if model_size_gb > 2.0:
+    is_large_model = True
+else:
+    is_large_model = False
+
 
 # ONNX Model Optimizer
 if not is_large_model:
