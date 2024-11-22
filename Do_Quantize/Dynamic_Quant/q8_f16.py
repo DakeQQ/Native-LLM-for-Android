@@ -54,26 +54,6 @@ quantize_dynamic(
 )
 
 
-# Convert the fp32 to fp16
-model = onnx.load(quanted_model_path)
-model = float16.convert_float_to_float16(model,
-                                         min_positive_val=0,
-                                         max_finite_val=65504,
-                                         keep_io_types=True,        # True for keep original input format.
-                                         disable_shape_infer=False, # False for more optimize.
-                                         op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'Resize'],  # The op type list for skip the conversion. These are known unsupported op type for fp16.
-                                         node_block_list=None)      # The node name list for skip the conversion.
-model_size_bytes = sys.getsizeof(model.SerializeToString())
-model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
-if model_size_gb > 2.0:
-    is_large_model = True
-else:
-    is_large_model = False
-onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
-del model
-gc.collect()
-
-
 # ONNX Model Optimizer
 if not is_large_model:
     # onnxsim 1st
@@ -121,7 +101,7 @@ model.convert_float_to_float16(
     keep_io_types=True,
     force_fp16_initializers=True,
     use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
-    op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range']
+    op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range', 'MatMulIntegerToFloat']
 )
 model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
 del model
