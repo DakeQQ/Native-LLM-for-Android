@@ -1191,11 +1191,11 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
             ort_runtime_E->SetIntraOpNumThreads(session_options_E, 1);                                                // // Set to 1.
             ort_runtime_E->SessionOptionsAppendExecutionProvider(session_options_E, "XNNPACK", option_keys.data(), option_values.data(), option_keys.size());
         }
-        if (file_name_A_external != "NONE") {
-            const char* external_file_names[] = {file_name_A_external.c_str()};     // Add all external data file names here if your model uses multiple external files.
+        if (file_name_E_external != "NONE") {
+            const char* external_file_names[] = {file_name_E_external.c_str()};     // Add all external data file names here if your model uses multiple external files.
             const char* external_file_buffers[] = {fileBuffer_external.data()};     // Read external data into fileBuffers and add them here.
             size_t external_file_sizes[] = {fileBuffer_external.size()};            // Store the size of each fileBuffer here for multiple external data files.
-            ort_runtime_A->AddExternalInitializersFromFilesInMemory(session_options_A, external_file_names, const_cast<char**>(external_file_buffers), external_file_sizes, 1);  // '1' indicates a single external file.
+            ort_runtime_E->AddExternalInitializersFromFilesInMemory(session_options_E, external_file_names, const_cast<char**>(external_file_buffers), external_file_sizes, 1);  // '1' indicates a single external file.
         }
         status = ort_runtime_E->CreateSessionFromArray(ort_env_E, fileBuffer.data(), fileSize, session_options_E, &session_model_E);
     }
