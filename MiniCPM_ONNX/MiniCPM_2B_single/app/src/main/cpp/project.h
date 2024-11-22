@@ -37,4 +37,5 @@ std::vector<int32_t> input_ids(max_token_history, 0);
 std::vector<int> accumulate_num_ids(30, 0);                           // Just make sure the size is enough before reaching max_token_history.
 std::vector<int> num_ids_per_chat(30, 0);                             // Same size with accumulate_num_ids.
 std::vector<int> save_max_logit_position(max_token_history, 0);
+const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/";
 const std::string vocab_file = "/data/user/0/com.example.myapplication/cache/vocab_MiniCPM.txt"; // We have moved the vocab.txt from assets to the cache folder in Java process.
