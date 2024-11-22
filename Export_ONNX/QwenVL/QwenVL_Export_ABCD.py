@@ -15,7 +15,7 @@ except:
 
 path = r'/home/dake/Downloads/Qwen2-VL-2B-Instruct/'                                               # Set the folder path where the Qwen2-VL whole project downloaded.
 # Replace the original "modeling_qwen2_vl.py" with the modified "modeling_qwen2_vl.py", which stored at the folder "modeling_modified".
-modified_path_A = r'/home/dake/Downloads/QwenVL/modeling_modified/part_ABCD/modeling_qwen2_vl.py'  # The path where the modified modeling_qwen2_vl.py stored.
+modified_path_A = r'./modeling_modified/part_ABCD/modeling_qwen2_vl.py'  # The path where the modified modeling_qwen2_vl.py stored.
 onnx_model_A = r'/home/dake/Downloads/Qwen/QwenVL_A.onnx'                                          # Assign a path where the exported QwenVL model stored.
 onnx_model_B = r'/home/dake/Downloads/Qwen/QwenVL_B.onnx'
 onnx_model_C = r'/home/dake/Downloads/Qwen/QwenVL_C.onnx'
