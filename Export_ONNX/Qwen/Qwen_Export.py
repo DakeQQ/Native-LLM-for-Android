@@ -8,15 +8,15 @@ import gc
 
 path = 'C:/Users/Downloads/Qwen2-1.5B-Instruct'  # Set the folder path where the Qwen whole project downloaded.
 
-# Replace the original "modeling_llama.py" with the modified "modeling_llama.py", which stored at the folder "modeling_modified".
-modified_path = './modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_llama.py stored.
+# Replace the original "modeling_qwen2.py" with the modified "modeling_qwen2.py", which stored at the folder "modeling_modified".
+modified_path = './modeling_modified/modeling_qwen2.py'  # The path where the modified modeling_qwen2.py stored.
 onnx_model_A = 'C:/Users/Downloads/Qwen_ONNX/Qwen.onnx'  # Assign a path where the exported Qwen model stored.
 transformers_qwen2_path = 'C:/Users/dake/.conda/envs/python_311/Lib/site-packages/transformers/models/qwen2/modeling_qwen2.py'  # The original modeling_qwen2.py path which was stored in the transformers python package.
 
 # Load the model
 shutil.copyfile(modified_path, transformers_qwen2_path)
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_llama.py on line 682, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 682, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
