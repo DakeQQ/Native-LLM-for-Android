@@ -18,7 +18,7 @@ const char* computeShaderSource = "#version 320 es\n"
                                   "layout(std430, binding = 1) buffer Output {\n"
                                   "    int result[camera_height * camera_width];\n"  // pixelCount
                                   "} outputData;\n"
-                                  "const vec3 bias = vec3(-0.1, -0.5, -0.2);\n"
+                                  "const vec3 bias = vec3(-0.15, -0.5, -0.2);\n"
                                   "const mat3 YUVtoRGBMatrix = mat3(127.5, 0.0, 1.402 * 127.5, "
                                   "                                 127.5, -0.344136 * 127.5, -0.714136 * 127.5, "
                                   "                                 127.5, 1.772 * 127.5, 0.0);\n"
