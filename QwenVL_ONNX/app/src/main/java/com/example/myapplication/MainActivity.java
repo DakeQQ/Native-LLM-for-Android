@@ -100,28 +100,8 @@ public class MainActivity extends AppCompatActivity {
         answerView.setAdapter(chatAdapter);
         switch_vision = findViewById(R.id.use_vision);
         clearButton.setOnClickListener(v -> clearHistory());
-//      If use Qualcomm NPU-HTP, enable the following code.
-//        Copy_from_Asset_to_Cache("libQnnCpu.so", mgr);
-//        Copy_from_Asset_to_Cache("libQnnHtp.so", mgr);
-//        Copy_from_Asset_to_Cache("libQnnHtpPrepare.so", mgr);
-//        Copy_from_Asset_to_Cache("libQnnHtpV73Skel.so", mgr);
-//        Copy_from_Asset_to_Cache("libQnnHtpV73Stub.so", mgr);
-//        Copy_from_Asset_to_Cache("libQnnSystem.so", mgr);
-//        Copy_from_Asset_to_Cache("libcdsprpc.so", mgr);
-//        Copy_from_Asset_to_Cache("libhidlbase.so", mgr);
-//        Copy_from_Asset_to_Cache("libhardware.so", mgr);
-//        Copy_from_Asset_to_Cache("libutils.so", mgr);
-//        Copy_from_Asset_to_Cache("vendor.qti.hardware.dsp@1.0.so", mgr);
-//        Copy_from_Asset_to_Cache("libcutils.so", mgr);
-//        Copy_from_Asset_to_Cache("libdmabufheap.so", mgr);
-//        Copy_from_Asset_to_Cache("libvmmem.so", mgr);
-//        Copy_from_Asset_to_Cache("libc++.so", mgr);
-//        Copy_from_Asset_to_Cache("libbase.so", mgr);
-//        Copy_from_Asset_to_Cache("libvndksupport.so", mgr);
-//        Copy_from_Asset_to_Cache("libdl_android.so", mgr);
-//        Copy_from_Asset_to_Cache("ld-android.so", mgr);
         if (!Load_Models_E(mgr, false)
-                || !Load_Models_A(mgr, false, false, false, false)  // Only Model_A can use NPU-HTP, but it very time consume during App launching (QNN code building).
+                || !Load_Models_A(mgr, false, false, false, false)
                 || !Load_Models_B(mgr, false)
                 || !Load_Models_C(mgr, false)
                 || !Load_Models_D(mgr, false)) {
