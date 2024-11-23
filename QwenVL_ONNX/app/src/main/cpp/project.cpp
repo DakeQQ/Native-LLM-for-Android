@@ -341,7 +341,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jclass 
                                              "1");  // Use it to lower memory usage.
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "session.qdq_matmulnbits_accuracy_level",
-                                             "2");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
+                                             "4");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "ep.dynamic.workload_type",
                                              "Default");  // Default = Performance; Efficient = Save Power
@@ -558,7 +558,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jclass 
                                              "1");  // Use it to lower memory usage.
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.qdq_matmulnbits_accuracy_level",
-                                             "2");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
+                                             "4");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "ep.dynamic.workload_type",
                                              "Default");  // Default = Performance; Efficient = Save Power
@@ -751,7 +751,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jclass 
                                              "1");  // Use it to lower memory usage.
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "session.qdq_matmulnbits_accuracy_level",
-                                             "2");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
+                                             "4");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "ep.dynamic.workload_type",
                                              "Default");  // Default = Performance; Efficient = Save Power
@@ -939,7 +939,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1D(JNIEnv *env, jclass 
                                              "1");  // Use it to lower memory usage.
         ort_runtime_D->AddSessionConfigEntry(session_options_D,
                                              "session.qdq_matmulnbits_accuracy_level",
-                                             "2");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
+                                             "4");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
         ort_runtime_D->AddSessionConfigEntry(session_options_D,
                                              "ep.dynamic.workload_type",
                                              "Default");  // Default = Performance; Efficient = Save Power
@@ -1172,7 +1172,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
                                              "1");  // Use it to lower memory usage.
         ort_runtime_E->AddSessionConfigEntry(session_options_E,
                                              "session.qdq_matmulnbits_accuracy_level",
-                                             "2");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
+                                             "4");  // 0:default, 1:FP32, 2:FP16, 3:BF16, 4:INT8
         ort_runtime_E->AddSessionConfigEntry(session_options_E,
                                              "ep.dynamic.workload_type",
                                              "Default");  // Default = Performance; Efficient = Save Power
