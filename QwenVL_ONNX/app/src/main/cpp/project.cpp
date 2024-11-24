@@ -11,17 +11,6 @@ inline static std::string get_output_words(const int &id)
     return words;
 }
 
-inline static void clear_history()
-{
-    save_index = 0;
-    history_len = 0;
-    attention_mask = Ort::Float16_t(-65504.f);
-    pos_factor = Ort::Float16_t(0.f);
-    accumulate_num_ids[0] = 0;
-    num_ids_per_chat[0] = 0;
-    std::fill(input_ids.begin(), input_ids.end(), 0);
-}
-
 extern "C"
 JNIEXPORT jintArray JNICALL
 Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass clazz) {
@@ -90,61 +79,13 @@ JNIEXPORT jstring JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM_1BC(JNIEnv *env, jclass clazz, jstring jquery,
                                                          jboolean clear,
                                                          jboolean use_vision) {
-//     if (clear) {
-//         clear_history();  // Open for "Chat" model.
-//     }
-    clear_history(); // Do clear every time for "Instruct" model. We haven't supported the chat mode for QwenVL yet.
+    // We haven't supported the chat mode for QwenVL yet.
     const char *query = env->GetStringUTFChars(jquery, nullptr);
     std::vector<int32_t> get_ids = tokenizer->encode(query);
-    get_ids.insert(get_ids.begin(), {198, 151644, 872, 198, 151652, 151653});              // Chat prompt head
-    get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198});                      // Chat prompt tail
+    get_ids.insert(get_ids.begin(), {151644, 872, 198, 151652, 151653});              // Chat prompt head
+    get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198});                 // Chat prompt tail
     ids_len = static_cast<int64_t> (get_ids.size());
-    int64_t ids_len_plus;
-    std::copy(get_ids.begin(), get_ids.end(), ids_exclude_image.begin());
-    if (use_vision) {
-        get_ids.insert(get_ids.begin() + prompt_head_len, image_pad_ids.begin(), image_pad_ids.end());
-        ids_len_plus = ids_len + image_pad_len;
-    } else {
-        ids_len_plus = ids_len;
-    }
-    num_ids_per_chat[save_index] = static_cast<int> (ids_len_plus);
-    if (save_index > 0) {
-        accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
-        if (accumulate_num_ids[save_index] > next_chat_buffer) {
-            bool over_inputs = true;
-            for (int i = 0; i < save_index; i++) {
-                if (accumulate_num_ids[save_index] - accumulate_num_ids[i] <= next_chat_buffer) {
-                    std::move(input_ids.begin() + accumulate_num_ids[i], input_ids.end(), input_ids.begin());
-                    int k = i + 1;
-                    for (int j = k; j <= save_index; j++) {
-                        accumulate_num_ids[j] -= accumulate_num_ids[i];
-                    }
-                    ids_len_plus = accumulate_num_ids[save_index];
-                    std::move(get_ids.begin(), get_ids.end(), input_ids.begin() + accumulate_num_ids[save_index - 1]);
-                    std::move(num_ids_per_chat.begin() + k, num_ids_per_chat.end(), num_ids_per_chat.begin());
-                    std::move(accumulate_num_ids.begin() + k, accumulate_num_ids.end(), accumulate_num_ids.begin());
-                    save_index -= k;
-                    over_inputs = false;
-                    break;
-                }
-            }
-            if (over_inputs) {
-                clear_history();
-                return env->NewStringUTF("Over_Inputs");
-            }
-        } else {
-            std::move(get_ids.begin(), get_ids.end(), input_ids.begin() + accumulate_num_ids[save_index - 1]);
-            ids_len_plus = accumulate_num_ids[save_index];
-        }
-    } else {
-        if (num_ids_per_chat[0] >= max_token_history) {
-            clear_history();
-            return env->NewStringUTF("Over_Inputs");
-        } else {
-            accumulate_num_ids[0] = num_ids_per_chat[0];
-            std::move(get_ids.begin(), get_ids.end(), input_ids.begin());
-        }
-    }
+    std::move(get_ids.begin(), get_ids.end(), input_ids.begin());
     ort_runtime_B->Run(session_model_B, run_options_B, input_names_B.data(),
                        (const OrtValue* const*) input_tensors_B.data(),
                        input_tensors_B.size(), output_names_B.data(), output_names_B.size(),
@@ -170,11 +111,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1E(JNIEnv *env, jclass claz
     void* max_logit_id;
     ort_runtime_E->GetTensorMutableData(output_tensors_E[0], &max_logit_id);
     ids_exclude_image[0] = reinterpret_cast<int*>(max_logit_id)[0];
-    if ((ids_exclude_image[0] != end_id_0) && (ids_exclude_image[0] != end_id_1) && (response_count < single_chat_limit) && (history_len < max_token_history)) {
+    if ((ids_exclude_image[0] != end_id_0) && (ids_exclude_image[0] != end_id_1) && (history_len < max_token_history)) {
         history_len += ids_len;
         if (add_prompt) {
             ids_len = 1;
-            response_count = 0;
             attention_mask = Ort::Float16_t(0.f);
             if (use_vision) {
                 pos_factor = Ort::Float16_t(static_cast<float> (pos_factor_v + ids_len));
@@ -195,39 +135,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1E(JNIEnv *env, jclass claz
         response_count += 1;
         return env->NewStringUTF(get_output_words(ids_exclude_image[0]).c_str());
     } else {
-        save_max_logit_position[response_count] = end_id_1;
-        response_count += 1;
-        num_ids_per_chat[save_index] += response_count;
         history_len = 0;
         attention_mask = Ort::Float16_t(-65504.f);
         pos_factor = Ort::Float16_t(0.f);
-        if (save_index > 0) {
-            accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
-            if (accumulate_num_ids[save_index] > next_chat_buffer) {
-                for (int i = 0; i < save_index; i++) {
-                    if (accumulate_num_ids[save_index] - accumulate_num_ids[i] <= next_chat_buffer) {
-                        std::move(input_ids.begin() + accumulate_num_ids[i], input_ids.end(), input_ids.begin());
-                        int k = i + 1;
-                        for (int j = k; j <= save_index; j++) {
-                            accumulate_num_ids[j] -= accumulate_num_ids[i];
-                        }
-                        std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count, input_ids.begin() + accumulate_num_ids[save_index] - response_count);
-                        std::move(num_ids_per_chat.begin() + k, num_ids_per_chat.end(), num_ids_per_chat.begin());
-                        std::move(accumulate_num_ids.begin() + k, accumulate_num_ids.end(), accumulate_num_ids.begin());
-                        save_index -= i;
-                        return env->NewStringUTF("END");
-                    }
-                }
-                clear_history();
-            } else {
-                std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count, input_ids.begin() + accumulate_num_ids[save_index] - response_count);
-                save_index += 1;
-            }
-        } else {
-            std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count, input_ids.begin() + accumulate_num_ids[0]);
-            accumulate_num_ids[0] = num_ids_per_chat[0];
-            save_index += 1;
-        }
         return env->NewStringUTF("END");
     }
 }
@@ -294,7 +204,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jclass 
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "session.force_spinning_stop",
                                              "0");  // 1 for low power
-        ort_runtime_A->SetSessionGraphOptimizationLevel(session_options_A, ORT_ENABLE_ALL);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_ALL instead of ORT_ENABLE_ALL.
+        ort_runtime_A->SetSessionGraphOptimizationLevel(session_options_A, ORT_ENABLE_EXTENDED);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_EXTENDED instead of ORT_ENABLE_ALL.
         ort_runtime_A->AddSessionConfigEntry(session_options_A,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
@@ -511,7 +421,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jclass 
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "session.force_spinning_stop",
                                              "0");  // 1 for low power
-        ort_runtime_B->SetSessionGraphOptimizationLevel(session_options_B, ORT_ENABLE_ALL);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_ALL instead of ORT_ENABLE_BLL.
+        ort_runtime_B->SetSessionGraphOptimizationLevel(session_options_B, ORT_ENABLE_EXTENDED);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_EXTENDED instead of ORT_ENABLE_BLL.
         ort_runtime_B->AddSessionConfigEntry(session_options_B,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
@@ -634,7 +544,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jclass 
     ort_runtime_B->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
     ort_runtime_B->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(ids_exclude_image.data()), max_token_history * sizeof(int),
+            reinterpret_cast<void *>(input_ids.data()), max_token_history * sizeof(int),
             input_dims_B[0].data(), input_dims_B[0].size(), input_types_B[0],
             &input_tensors_B[0]);
     ort_runtime_B->CreateTensorWithDataAsOrtValue(
@@ -704,7 +614,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jclass 
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "session.force_spinning_stop",
                                              "0");  // 1 for low power
-        ort_runtime_C->SetSessionGraphOptimizationLevel(session_options_C, ORT_ENABLE_ALL);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_ALL instead of ORT_ENABLE_CLL.
+        ort_runtime_C->SetSessionGraphOptimizationLevel(session_options_C, ORT_ENABLE_EXTENDED);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_EXTENDED instead of ORT_ENABLE_CLL.
         ort_runtime_C->AddSessionConfigEntry(session_options_C,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
@@ -892,7 +802,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1D(JNIEnv *env, jclass 
         ort_runtime_D->AddSessionConfigEntry(session_options_D,
                                              "session.force_spinning_stop",
                                              "0");  // 1 for low power
-        ort_runtime_D->SetSessionGraphOptimizationLevel(session_options_D, ORT_ENABLE_ALL);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_ALL instead of ORT_ENABLE_DLL.
+        ort_runtime_D->SetSessionGraphOptimizationLevel(session_options_D, ORT_ENABLE_EXTENDED);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_EXTENDED instead of ORT_ENABLE_DLL.
         ort_runtime_D->AddSessionConfigEntry(session_options_D,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
@@ -1125,7 +1035,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
         ort_runtime_E->AddSessionConfigEntry(session_options_E,
                                              "session.force_spinning_stop",
                                              "0");  // 1 for low power
-        ort_runtime_E->SetSessionGraphOptimizationLevel(session_options_E, ORT_ENABLE_ALL);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_ALL instead of ORT_ENABLE_ELL.
+        ort_runtime_E->SetSessionGraphOptimizationLevel(session_options_E, ORT_ENABLE_EXTENDED);  // CPU backend would failed on some FP16 operators with latest opset. Hence, use ORT_ENABLE_EXTENDED instead of ORT_ENABLE_ELL.
         ort_runtime_E->AddSessionConfigEntry(session_options_E,
                                              "optimization.minimal_build_optimizations",
                                              "");   // Keep empty for full optimization
