@@ -198,7 +198,7 @@ position_ids = ort_session_C.run(
     [out_name_C0],
     {
         in_name_C0: dummy
-    })
+    })[0]
 
 if use_vision:
     print('\nStart to Process the Image...')
