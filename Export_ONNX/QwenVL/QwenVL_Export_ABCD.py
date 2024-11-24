@@ -98,11 +98,11 @@ with torch.inference_mode():
     image_embed = torch.ones((image_embed_size, hidden_size), dtype=torch.float16)
     pixel_values = torch.ones([1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.float32)
     image_pad_len = torch.tensor([image_embed_size], dtype=torch.long)
-    ids_len = ids_len + image_pad_len
-    kv_seq_len = ids_len + history_len
     input_ids = torch.ones(max_seq_len, dtype=torch.int32)
     hidden_states = torch.ones((max_seq_len, hidden_size), dtype=torch.float16)
     ids_len_minus = torch.tensor(ids_len[0] - prompt_head_len, dtype=torch.int32)
+    ids_len = ids_len + image_pad_len
+    kv_seq_len = ids_len + history_len
     split_factor = torch.tensor(max_seq_len - ids_len[0] - image_embed_size, dtype=torch.int32)
     dummy = torch.tensor(0, dtype=torch.int32)
 
