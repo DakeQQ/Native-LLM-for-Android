@@ -99,8 +99,6 @@ std::vector<ONNXTensorElementDataType> output_types_E;
 std::vector<OrtValue*> input_tensors_E;
 std::vector<OrtValue*> output_tensors_E;
 Tokenizer* tokenizer;
-int response_count = 0;
-int save_index = 0;
 int dummy = 0;
 int ids_len_minus = 0;
 int split_factor = 0;
@@ -124,14 +122,7 @@ const int end_id_1 = 151645;
 const int past_key_value_size = 7168 * max_token_history;                 // 28 * 2 * 128, Remember edit the value if using others param size model.
 const int64_t image_pad_len = WIDTH_FACTOR * HEIGHT_FACTOR;
 const int64_t pos_factor_v = 1 - image_pad_len + WIDTH_FACTOR;
-const int single_chat_limit = 341 + image_pad_len;                        // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
-const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int> input_ids(max_token_history, 0);
-std::vector<int> ids_exclude_image(max_token_history, 0);
-std::vector<int> accumulate_num_ids(30, 0); // Just make sure the size is enough before reaching max_token_history.
-std::vector<int> num_ids_per_chat(30, 0);   // Same size with accumulate_num_ids.
-std::vector<int> save_max_logit_position(max_token_history, 0);
-std::vector<int> image_pad_ids(image_pad_len, 151655);
 const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/";
 const std::string vocab_file = "/data/user/0/com.example.myapplication/cache/vocab_Qwen.txt"; // We have moved the vocab.txt from assets to the cache folder in Java process.
 const char* ctx_model_A = "/storage/emulated/0/Android/data/com.example.myapplication/ctx_model_A.onnx";
