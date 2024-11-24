@@ -74,9 +74,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1AD(JNIEnv *env, jclass cla
                        output_tensors_A.data());
     input_tensors_D[0] = output_tensors_B[0];
     input_tensors_D[1] = output_tensors_A[0];
-    ids_len += image_pad_len;
     ids_len_minus = static_cast<int> (ids_len) - prompt_head_len;
-    split_factor = max_token_history - static_cast<int> (ids_len + image_pad_len);
+    ids_len += image_pad_len;
+    split_factor = max_token_history - static_cast<int> (ids_len);
     ort_runtime_D->Run(session_model_D, run_options_D, input_names_D.data(),
                        (const OrtValue* const*) input_tensors_D.data(),
                        input_tensors_D.size(), output_names_D.data(), output_names_D.size(),
