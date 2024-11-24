@@ -206,9 +206,9 @@ if use_vision:
     image_embed = ort_session_A.run(
         [out_name_A0],
         {in_name_A0: pixel_values})[0]
-    ids_len += image_embed_size
-    split_factor = np.array(max_seq_len - ids_len[0] - image_embed_size, dtype=np.int32)
     ids_len_minus = np.array(ids_len[0] - prompt_head_len[0], dtype=np.int32)
+    ids_len += image_embed_size
+    split_factor = np.array(max_seq_len - ids_len[0], dtype=np.int32)
     hidden_states, position_ids = ort_session_D.run(
         [out_name_D0, out_name_D1],
         {
