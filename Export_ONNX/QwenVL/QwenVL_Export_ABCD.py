@@ -103,7 +103,7 @@ with torch.inference_mode():
     ids_len_minus = torch.tensor(ids_len[0] - prompt_head_len, dtype=torch.int32)
     ids_len = ids_len + image_pad_len
     kv_seq_len = ids_len + history_len
-    split_factor = torch.tensor(max_seq_len - ids_len[0] - image_embed_size, dtype=torch.int32)
+    split_factor = torch.tensor(max_seq_len - ids_len[0], dtype=torch.int32)
     dummy = torch.tensor(0, dtype=torch.int32)
 
     model.model.embed_tokens.weight.requires_grad = False
