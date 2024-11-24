@@ -15,6 +15,7 @@ const char* computeShaderSource = "#version 320 es\n"
                                   "layout(binding = 0) uniform samplerExternalOES yuvTex;\n"
                                   "const int camera_width = 960;\n"  //  camera_width
                                   "const int camera_height = 960;\n"  //  camera_height
+                                  "const int camera_height_minus = camera_height - 1;\n"
                                   "layout(std430, binding = 1) buffer Output {\n"
                                   "    int result[camera_height * camera_width];\n"  // pixelCount
                                   "} outputData;\n"
@@ -26,7 +27,7 @@ const char* computeShaderSource = "#version 320 es\n"
                                   "    ivec2 texelPos = ivec2(gl_GlobalInvocationID.xy);\n"
                                   "    ivec3 rgb = clamp(ivec3(YUVtoRGBMatrix * (texelFetch(yuvTex, texelPos, 0).rgb + bias)), -128, 127) + 128;\n"
                                   // Use int8 packing the pixels, it would be 1.6 times faster than using float32 buffer.
-                                  "    outputData.result[texelPos.x * camera_height + (camera_height - texelPos.y - 1)] = (rgb.b << 16) | (rgb.r << 8) | (rgb.g);\n"
+                                  "    outputData.result[texelPos.x * camera_height + (camera_height_minus - texelPos.y)] = (rgb.b << 16) | (rgb.r << 8) | (rgb.g);\n"
                                   "}";
 // OpenGL Setting
 GLuint pbo_A = 0;
