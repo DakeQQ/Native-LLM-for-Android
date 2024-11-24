@@ -11,6 +11,15 @@ inline static std::string get_output_words(const int &id)
     return words;
 }
 
+
+inline static void clear_history()
+{
+    history_len = 0;
+    attention_mask = Ort::Float16_t(-65504.f);
+    pos_factor = Ort::Float16_t(0.f);
+    std::fill(input_ids.begin(), input_ids.end(), 0);
+}
+
 extern "C"
 JNIEXPORT jintArray JNICALL
 Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass clazz) {
@@ -80,6 +89,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1BC(JNIEnv *env, jclass cla
                                                          jboolean clear,
                                                          jboolean use_vision) {
     // We haven't supported the chat mode for QwenVL yet.
+    clear_history();
     const char *query = env->GetStringUTFChars(jquery, nullptr);
     std::vector<int32_t> get_ids = tokenizer->encode(query);
     get_ids.insert(get_ids.begin(), {151644, 872, 198, 151652, 151653});              // Chat prompt head
@@ -110,8 +120,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1E(JNIEnv *env, jclass claz
                        output_tensors_E.data());
     void* max_logit_id;
     ort_runtime_E->GetTensorMutableData(output_tensors_E[0], &max_logit_id);
-    ids_exclude_image[0] = reinterpret_cast<int*>(max_logit_id)[0];
-    if ((ids_exclude_image[0] != end_id_0) && (ids_exclude_image[0] != end_id_1) && (history_len < max_token_history)) {
+    input_ids[0] = reinterpret_cast<int*>(max_logit_id)[0];
+    if ((input_ids[0] != end_id_0) && (input_ids[0] != end_id_1) && (history_len < max_token_history)) {
         history_len += ids_len;
         if (add_prompt) {
             ids_len = 1;
@@ -131,13 +141,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1E(JNIEnv *env, jclass claz
         input_tensors_E[0] = output_tensors_B[0];
         input_tensors_E[2] = output_tensors_E[1];
         input_tensors_E[3] = output_tensors_E[2];
-        save_max_logit_position[response_count] = ids_exclude_image[0];
-        response_count += 1;
-        return env->NewStringUTF(get_output_words(ids_exclude_image[0]).c_str());
+        return env->NewStringUTF(get_output_words(input_ids[0]).c_str());
     } else {
-        history_len = 0;
-        attention_mask = Ort::Float16_t(-65504.f);
-        pos_factor = Ort::Float16_t(0.f);
         return env->NewStringUTF("END");
     }
 }
