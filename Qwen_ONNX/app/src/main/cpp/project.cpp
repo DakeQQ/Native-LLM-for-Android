@@ -19,6 +19,7 @@ inline static void clear_history()
     accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
     std::fill(input_ids.begin(), input_ids.end(), 0);
+    response_count = 0;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
