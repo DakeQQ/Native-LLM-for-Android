@@ -177,6 +177,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private native boolean Pre_Process();
-    private native boolean Load_Models_A(AssetManager assetManager, boolean USE_NNAPI);
+    private native boolean Load_Models_A(AssetManager assetManager, boolean USE_XNNPACK);
     private static native String Run_LLM(String Query, boolean add_prompt, boolean clear);
 }
