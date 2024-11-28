@@ -55,7 +55,7 @@ const int hidden_size = 2304;
 const int start_id = 2;
 const int end_id_0 = 107;
 const int end_id_1 = 1;
-const int past_key_value_size = 26624 * max_token_history;  // 4 * 26 * 256
+const size_t past_key_value_size = 26624 * max_token_history;  // 4 * 26 * 256
 const int single_chat_limit = 341; // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
 const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int32_t> input_ids(max_token_history, 0);
