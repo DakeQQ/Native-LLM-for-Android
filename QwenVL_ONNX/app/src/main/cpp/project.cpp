@@ -549,7 +549,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jclass 
     ort_runtime_B->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
     ort_runtime_B->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(input_ids.data()), max_token_history * sizeof(int),
+            reinterpret_cast<void *>(input_ids.data()), static_cast<size_t> (max_token_history) * sizeof(int),
             input_dims_B[0].data(), input_dims_B[0].size(), input_types_B[0],
             &input_tensors_B[0]);
     ort_runtime_B->CreateTensorWithDataAsOrtValue(
