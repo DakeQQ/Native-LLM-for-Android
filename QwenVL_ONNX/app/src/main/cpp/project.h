@@ -120,7 +120,7 @@ const int hidden_size = 1536;
 const int max_token_history = 1024;                                       // Please set this value to match the exported model.
 const int end_id_0 = 151643;
 const int end_id_1 = 151645;
-const int past_key_value_size = 7168 * max_token_history;                 // 28 * 2 * 128, Remember edit the value if using others param size model.
+const size_t past_key_value_size = 7168 * max_token_history;                 // 28 * 2 * 128, Remember edit the value if using others param size model.
 const int64_t image_pad_len = WIDTH_FACTOR * HEIGHT_FACTOR;
 const int64_t pos_factor_v = 1 - image_pad_len + WIDTH_FACTOR;
 std::vector<int> input_ids(max_token_history, 0);
