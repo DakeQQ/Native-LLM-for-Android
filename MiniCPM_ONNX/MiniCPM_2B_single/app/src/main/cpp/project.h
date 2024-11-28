@@ -30,7 +30,7 @@ const std::string file_name_A_external = "MiniCPM_2B_dpo_1024.onnx.data";   // I
 const int max_token_history = 1024;                                         // Please set this value to match the model name flag.
 const int start_id = 1;
 const int end_id_0 = 2;
-const int past_key_value_size = 40 * 36 * 64 * max_token_history;           // 40 * 36 * 64
+const size_t past_key_value_size = 40 * 36 * 64 * max_token_history;           // 40 * 36 * 64
 const int single_chat_limit = 341;                                          // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
 const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int32_t> input_ids(max_token_history, 0);
