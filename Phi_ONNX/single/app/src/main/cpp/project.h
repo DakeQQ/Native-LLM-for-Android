@@ -32,7 +32,7 @@ const int max_token_history = 1024;  // Please set this value to match the model
 const int start_id = 50256;
 const int end_id_0 = 32000;
 const int end_id_1 = 32007;
-const int past_key_value_size = 32 * 32 * 96 * max_token_history;
+const size_t past_key_value_size = 32 * 32 * 96 * max_token_history;
 const int single_chat_limit = 341; // It is recommended to set it to max_token_history/3, and use phrases like 'go ahead', 'go on', or 'and then?' to continue answering."
 const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int32_t> input_ids(max_token_history, 0);
