@@ -321,7 +321,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     ort_runtime_A->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(input_ids.data()), max_token_history * sizeof(int32_t),
+            reinterpret_cast<void *>(input_ids.data()), static_cast<size_t> (max_token_history) * sizeof(int32_t),
             input_dims_A[0].data(), input_dims_A[0].size(), input_types_A[0],
             &input_tensors_A[0]);
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
@@ -333,12 +333,12 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     std::vector<Ort::Float16_t> past_key_values(past_key_value_size, Ort::Float16_t(0.f));
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            reinterpret_cast<void *>(past_key_values.data()), past_key_value_size * sizeof(Ort::Float16_t),
             input_dims_A[2].data(), input_dims_A[2].size(), input_types_A[2],
             &input_tensors_A[2]);
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(past_key_values.data()), past_key_values_buffer_size,
+            reinterpret_cast<void *>(past_key_values.data()), past_key_value_size * sizeof(Ort::Float16_t),
             input_dims_A[3].data(), input_dims_A[3].size(), input_types_A[3],
             &input_tensors_A[3]);
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
@@ -538,7 +538,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jobject
             input_dims_B[1].data(), input_dims_B[1].size(), input_types_B[1],
             &input_tensors_B[1]);
     std::vector<Ort::Float16_t> past_key_values(past_key_value_size, Ort::Float16_t(0.f));
-    int buffer_size = past_key_value_size * sizeof(Ort::Float16_t);
+    size_t buffer_size = past_key_value_size * sizeof(Ort::Float16_t);
     ort_runtime_B->CreateTensorWithDataAsOrtValue(
             memory_info,
             reinterpret_cast<void *>(past_key_values.data()), buffer_size,
