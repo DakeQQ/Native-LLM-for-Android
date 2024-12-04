@@ -172,13 +172,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject clazz,
-                                                            jobject asset_manager,
-                                                            jboolean use_gpu,
-                                                            jboolean use_fp16,
-                                                            jboolean use_nnapi,
-                                                            jboolean use_xnnpack,
-                                                            jboolean use_qnn,
-                                                            jboolean use_dsp_npu)
+                                                            jobject asset_manager, jboolean use_xnnpack)
 {
     OrtStatus *status;
     OrtAllocator *allocator;
