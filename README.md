@@ -3,9 +3,7 @@
     - Qwen2.5-Instruct: 0.5B, 1.5B
     - Qwen2VL: 2B
     - MiniCPM-DPO/SFT: 1B, 2.7B
-    - Yuan2.0: update soon...
     - Gemma2-it: 2B...
-    - StableLM2-Chat/Zephyr: update soon...
     - Phi3.5-mini-instruct: 3.8B
     - Llama-3.2-Instruct: 1B
 2. The demo models were uploaded to the drive: https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
@@ -26,9 +24,7 @@
    - 通义千问2.5-Instruct: 0.5B, 1.5B
    - 通义千问2VL: 2B
    - MiniCPM-DPO/SFT: 1B, 2.7B
-   - 源2.0: update soon...
    - Gemma2-it: 2B
-   - StableLM2-Chat/Zephyr: update soon...
    - Phi3.5-mini-instruct: 3.8B
    - Llama-3.2-Instruct: 1B
 2. 演示模型已上传至云端硬盘：https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link
@@ -45,6 +41,9 @@
 13. 现在不建议使用q4(uint4)量化方法, 因为ONNX Runtime的运算符"MatMulNBits"表现不佳。
 14. 2024/11/04/更新Qwen2VL-2B。
 15. 看更多項目: https://dakeqq.github.io/overview/
+# To Do List
+- [Megrez-3B-Omni](https://github.com/infinigence/Infini-Megrez-Omni)
+- [StableLM2-Chat-1.6B](https://huggingface.co/stabilityai/stablelm-2-1_6b-chat)
 # 通义千问VL QwenVL - 性能 Performance
 | OS | Device | Backend | Model | Inference<br>( 1024 Context ) |
 |:-------:|:-------:|:-------:|:-------:|:-------:|
