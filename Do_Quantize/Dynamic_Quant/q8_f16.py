@@ -83,7 +83,7 @@ else:
 # transformers.optimizer
 model = optimize_model(quanted_model_path,
                        use_gpu=use_gpu,
-                       opt_level=99,
+                       opt_level=2,
                        num_heads=num_heads,
                        hidden_size=hidden_size,
                        provider=provider,
