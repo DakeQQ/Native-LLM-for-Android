@@ -12,7 +12,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## Getting Started
 1. **Download Models:**
-   - Models are available on [Google Drive](https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link).
+   - Demo models are available on [Google Drive](https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link).
    - Alternatively, use [Baidu Cloud](https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake) with the extraction code: `dake`.
 
 2. **Setup Instructions:**
@@ -50,54 +50,53 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### Qwen2VL
 | OS         | Device       | Backend                 | Model             | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:-----------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Qwen2VL-2B (q8f32) | 15 token/s              |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Qwen2VL-2B (q8f32) | 9 token/s               |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Qwen2VL-2B<br>q8f32 | 15 token/s              |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Qwen2VL-2B<br>q8f32 | 9 token/s               |
 
 ### Qwen
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Qwen2-1.5B-Instruct (q8f32) | 20 token/s         |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Qwen2-1.5B-Instruct (q8f32) | 13 token/s         |
-| Harmony 3  | 荣耀\u20 (20S)  | Kirin_810-CPU (2*A76)     | Qwen2-1.5B-Instruct (q8f32) | 7 token/s          |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Qwen2-1.5B-Instruct<br>q8f32 | 20 token/s         |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
+| Harmony 3  | 荣耀\u20 (20S)  | Kirin_810-CPU (2*A76)     | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
 
 ### MiniCPM
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | MiniCPM-2.7B (q8f32)   | 9.5 token/s              |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | MiniCPM-2.7B (q8f32)   | 6 token/s               |
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | MiniCPM-1.3B (q8f32)   | 16.5 token/s             |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | MiniCPM-1.3B (q8f32)   | 11 token/s              |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | MiniCPM-2.7B<br>q8f32   | 9.5 token/s              |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | MiniCPM-2.7B<br>q8f32   | 6 token/s               |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | MiniCPM-1.3B<br>q8f32   | 16.5 token/s             |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | MiniCPM-1.3B<br>q8f32   | 11 token/s              |
 
-### Additional Models
-#### Yuan
+### Yuan
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Yuan2.0-2B-Mars-hf (q8f32) | 12 token/s         |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Yuan2.0-2B-Mars-hf (q8f32) | 6.5 token/s       |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Yuan2.0-2B-Mars-hf<br>q8f32 | 12 token/s         |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Yuan2.0-2B-Mars-hf<br>q8f32 | 6.5 token/s       |
 
-#### Gemma
+### Gemma
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Gemma1.1-it-2B (q8f32) | 16 token/s               |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Gemma1.1-it-2B<br>q8f32 | 16 token/s               |
 
-#### StableLM
+### StableLM
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | StableLM2-1.6B-Chat (q8f32) | 17.8 token/s      |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | StableLM2-1.6B-Chat (q8f32) | 11 token/s        |
-| Harmony 3  | 荣耀\u20 (20S)  | Kirin_810-CPU (2*A76)     | StableLM2-1.6B-Chat (q8f32) | 5.5 token/s       |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | StableLM2-1.6B-Chat<br>q8f32 | 17.8 token/s      |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | StableLM2-1.6B-Chat<br>q8f32 | 11 token/s        |
+| Harmony 3  | 荣耀\u20 (20S)  | Kirin_810-CPU (2*A76)     | StableLM2-1.6B-Chat<br>q8f32 | 5.5 token/s       |
 
 #### Phi
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Phi2-2B-Orange-V2 (q8f32) | 9.5 token/s       |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Phi2-2B-Orange-V2 (q8f32) | 5.8 token/s       |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Phi2-2B-Orange-V2<br>q8f32 | 9.5 token/s       |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Phi2-2B-Orange-V2<br>q8f32 | 5.8 token/s       |
 
-#### Llama
+### Llama
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Llama3.2-1B-Instruct (q8f32) | 25 token/s     |
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Llama3.2-1B-Instruct (q8f32) | 16 token/s     |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Llama3.2-1B-Instruct<br>q8f32 | 25 token/s     |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Llama3.2-1B-Instruct<br>q8f32 | 16 token/s     |
 
 ## Demo Results
 ### Qwen2VL-2B / 1024 Context
@@ -120,7 +119,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ## 入门指南
 
 1. **下载模型：**
-   - 模型可以在 [Google Drive](https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link) 上获取。
+   - Demo模型可以在 [Google Drive](https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link) 上获取。
    - 或者使用 [百度网盘](https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake) 提取码：`dake`。
 
 2. **设置说明：**
