@@ -86,7 +86,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | StableLM2-1.6B-Chat<br>q8f32 | 11 token/s        |
 | Harmony 3  | 荣耀\u20 (20S)  | Kirin_810-CPU (2*A76)     | StableLM2-1.6B-Chat<br>q8f32 | 5.5 token/s       |
 
-#### Phi
+### Phi
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
 | Android 13 | Nubia Z50    | 8_Gen2-CPU (X3+A715)   | Phi2-2B-Orange-V2<br>q8f32 | 9.5 token/s       |
