@@ -44,7 +44,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **2024/11/04:** Added support for Qwen2VL-2B (Vision LLM).
 
 ## Additional Resources
-- Explore more projects: [DakeQQ Projects](https://dakeqq.github.io/overview/)
+- Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
 
 ## Performance Metrics
 ### Qwen2VL
@@ -156,4 +156,4 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## 额外资源
 
-- 探索更多项目：[DakeQQ Projects](https://dakeqq.github.io/overview/)
+- 探索更多项目：[DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
