@@ -37,10 +37,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
 {
     if (add_prompt)
     {
-        // if (clear) {
-        //     clear_history();  // Open for "Chat" model.
-        // }
-        clear_history(); // Do clear every time for "Instruct" model.
+        if (use_deepseek) {
+            if (clear) {
+                clear_history();  // Open for "Chat" model.
+            }
+        } else {
+            clear_history(); // Do clear every time for "Instruct" model.
+        }
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = tokenizer->encode(query);
         if (use_deepseek) {
