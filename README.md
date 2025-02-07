@@ -48,7 +48,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
 
 ## Performance Metrics
-### DeepSeek-R1-Distill
+### DeepSeek-R1
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
 | Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Distill-Qwen-1.5B<br>q8f32 | 13 token/s         |
