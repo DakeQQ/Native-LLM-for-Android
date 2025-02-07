@@ -42,7 +42,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - The `q4` (uint4) quantization method is not recommended due to poor performance of the `MatMulNBits` operator in ONNX Runtime.
 
 ## Recent Updates
-- **2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
 
 ## Additional Resources
 - Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
@@ -154,7 +154,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## 最近更新
 
-- **2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）
 
 ## 额外资源
 
