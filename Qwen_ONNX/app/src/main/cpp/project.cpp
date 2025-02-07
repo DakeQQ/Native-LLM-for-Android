@@ -44,8 +44,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = tokenizer->encode(query);
         if (use_deepseek) {
-            get_ids.insert(get_ids.begin(), {151646, 27, 91, 7265, 10417, 223, 1055, 10417, 223, 51889, 91, 29, 151644, 198}); // DeepSeek-Distill-Qwen Chat prompt head
-            get_ids.insert(get_ids.end(), {27, 91, 408, 10417, 223, 1055, 10417, 223, 51889, 91, 397, 27, 91, 7265, 10417, 223, 1055, 10417, 223, 51889, 91, 29, 151645, 198}); // DeepSeek-Distill-Qwen Chat prompt tail
+            get_ids.insert(get_ids.begin(), {151646, 151644, 198}); // DeepSeek-Distill-Qwen Chat prompt head
+            get_ids.insert(get_ids.end(), {151643, 198, 151646, 151645, 198}); // DeepSeek-Distill-Qwen Chat prompt tail
         } else {
             get_ids.insert(get_ids.begin(), {151644, 872, 198});  // Qwen Chat prompt head
             get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198}); // Qwen Chat prompt tail
