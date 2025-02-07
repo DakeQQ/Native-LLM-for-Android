@@ -3,6 +3,7 @@
 ## Overview
 Demonstration of running a native Large Language Model (LLM) on Android devices. Currently supported models include:
 
+- **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **Qwen2.5-Instruct**: 0.5B, 1.5B
 - **Qwen2VL**: 2B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
@@ -41,7 +42,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - The `q4` (uint4) quantization method is not recommended due to poor performance of the `MatMulNBits` operator in ONNX Runtime.
 
 ## Recent Updates
-- **2024/11/04:** Added support for Qwen2VL-2B (Vision LLM).
+- **2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
 
 ## Additional Resources
 - Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
@@ -109,6 +110,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 展示在 Android 设备上运行原生大型语言模型 (LLM) 的示范。目前支持的模型包括：
 
+- **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **Qwen2.5-Instruct**: 0.5B, 1.5B
 - **Qwen2VL**: 2B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
@@ -152,7 +154,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## 最近更新
 
-- **2024/11/04：** 添加对 Qwen2VL-2B (视觉 LLM) 的支持。
+- **2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）
 
 ## 额外资源
 
