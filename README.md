@@ -51,7 +51,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### DeepSeek-R1-Distill
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Qwen-1.5B<br>q8f32 | 13 token/s         |
+| Harmony 4  | P40          | Kirin_990_5G-CPU (2*A76) | Distill-Qwen-1.5B<br>q8f32 | 13 token/s         |
 
 ### Qwen2VL
 | OS         | Device       | Backend                 | Model             | Inference (1024 Context) |
