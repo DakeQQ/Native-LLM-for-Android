@@ -121,10 +121,14 @@ out_name_A2 = out_name_A[2].name
 
 # Pre-process inputs
 if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
-    prompt = f'<|begin▁of▁sentence|><｜User｜>\n{query}<|end▁of▁sentence|>\n<|begin▁of▁sentence|><｜Assistant｜>\n'
+    #  prompt = f'<|begin▁of▁sentence|><｜User｜>\n{query}<|end▁of▁sentence|>\n<|begin▁of▁sentence|><｜Assistant｜>\n'
+    head = torch.tensor([151646, 151644, 198], dtype=torch.int32)
+    tail = torch.tensor([151643, 198, 151646, 151645, 198], dtype=torch.int32)
+    token = tokenizer(query, return_tensors='pt')['input_ids']
+    token = torch.cat((head.unsqueeze(0), token, tail.unsqueeze(0)), dim=-1)
 else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
-token = tokenizer(prompt, return_tensors='pt')['input_ids']
+    token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros(max_seq_len, dtype=np.int32)
 input_ids[:ids_len[0]] = token[0, :]
