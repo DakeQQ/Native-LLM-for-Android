@@ -129,7 +129,7 @@ if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
 else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
     token = tokenizer(prompt, return_tensors='pt')['input_ids']
-ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
+ids_len = np.array([token.shape[1]], dtype=np.int64)
 input_ids = np.zeros(max_seq_len, dtype=np.int32)
 input_ids[:ids_len[0]] = token[0, :]
 attention_mask = np.array([-65504.0], dtype=np.float32)
