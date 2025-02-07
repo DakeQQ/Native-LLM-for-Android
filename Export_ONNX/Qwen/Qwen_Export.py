@@ -121,7 +121,7 @@ out_name_A2 = out_name_A[2].name
 
 # Pre-process inputs
 if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
-    prompt = f'<|begin▁of▁sentence|><｜User｜>\nHello<|end▁of▁sentence|>\n<|begin▁of▁sentence|><｜Assistant｜>\n'
+    prompt = f'<|begin▁of▁sentence|><｜User｜>\n{query}<|end▁of▁sentence|>\n<|begin▁of▁sentence|><｜Assistant｜>\n'
 else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
 token = tokenizer(prompt, return_tensors='pt')['input_ids']
