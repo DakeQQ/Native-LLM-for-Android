@@ -43,8 +43,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         clear_history(); // Do clear every time for "Instruct" model.
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = tokenizer->encode(query);
-        get_ids.insert(get_ids.begin(), {151644, 872, 198});              // Chat prompt head
-        get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198}); // Chat prompt tail
+        if (use_deepseek) {
+            get_ids.insert(get_ids.begin(), {151646, 27, 91, 7265, 10417, 223, 1055, 10417, 223, 51889, 91, 29, 151644, 198}); // DeepSeek-Distill-Qwen Chat prompt head
+            get_ids.insert(get_ids.end(), {27, 91, 408, 10417, 223, 1055, 10417, 223, 51889, 91, 397, 27, 91, 7265, 10417, 223, 1055, 10417, 223, 51889, 91, 29, 151645, 198}); // DeepSeek-Distill-Qwen Chat prompt tail
+        } else {
+            get_ids.insert(get_ids.begin(), {151644, 872, 198});  // Qwen Chat prompt head
+            get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198}); // Qwen Chat prompt tail
+        }
         ids_len = static_cast<int64_t> (get_ids.size());
         num_ids_per_chat[save_index] = static_cast<int> (ids_len);
         if (save_index > 0)
