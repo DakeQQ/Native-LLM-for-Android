@@ -26,7 +26,11 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz)
 {
     std::unique_ptr<Tokenizer> temp = std::make_unique<HuggingfaceTokenizer>();
-    tokenizer = temp->createTokenizer(vocab_file);
+    if (use_deepseek) {
+        tokenizer = temp->createTokenizer(vocab_file + "vocab_DeepSeek_Qwen.txt");
+    } else {
+        tokenizer = temp->createTokenizer(vocab_file + "vocab_Qwen.txt");
+    }
     return JNI_TRUE;
 }
 
