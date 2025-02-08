@@ -43,6 +43,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## Recent Updates
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
+- Fix the continuous chat bugs.
 
 ## Additional Resources
 - Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
@@ -160,6 +161,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ## 最近更新
 
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）
+- 修复连续对话的错误。
 
 ## 额外资源
 
