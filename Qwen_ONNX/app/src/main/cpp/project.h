@@ -21,6 +21,7 @@ std::vector<OrtValue *> output_tensors_A;
 Tokenizer* tokenizer;
 int response_count = 0;
 int save_index = 0;
+int start_id = 151644;
 int64_t history_len = 0;
 int64_t ids_len = 0;
 // Ort::Float16_t attention_mask = Ort::Float16_t(-65504.f); // Enable if using all fp16 format
@@ -30,7 +31,6 @@ const bool use_deepseek = false;                             // Enable if using 
 const std::string file_name_A = "Model_Qwen_1_5B_1024.ort";
 const std::string file_name_A_external = "NONE";             // If using external data to load the model, provide the file name; otherwise, set to "NONE". If contains many parts, please modify the project.cpp line 313-315.
 const int max_token_history = 1024;                          // Please set this value to match the model name flag.
-const int start_id = 151644;
 const int end_id_0 = 151643;
 const int end_id_1 = 151645;
 const size_t past_key_value_size = 7168 * max_token_history; // 28 * 2 * 128, Remember edit the value if using others param size model.
