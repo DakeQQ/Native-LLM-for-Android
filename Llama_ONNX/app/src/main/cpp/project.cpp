@@ -41,6 +41,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         //     clear_history();  // Open for "Chat" model.
         // }
         clear_history(); // Do clear every time for "Instruct" model.
+        response_count = 0;
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int32_t> get_ids = tokenizer->encode(query);
         get_ids.insert(get_ids.begin(), {128000, 128006, 882, 128007, 271});              // Chat prompt head
@@ -111,7 +112,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         if (add_prompt)
         {
             ids_len = 1;
-            response_count = 0;
             attention_mask = 0.f;
 //        attention_mask = Ort::Float16_t(0.f);
         }
