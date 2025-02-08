@@ -55,7 +55,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz,
                     if (accumulate_num_ids[save_index] - accumulate_num_ids[i] <= next_chat_buffer) {
                         std::move(input_ids.begin() + accumulate_num_ids[i], input_ids.end(), input_ids.begin());
                         int k = i + 1;
-                        for (int j = k; j <= save_index; j++) {
+                        for (int j = i; j <= save_index; j++) {
                             accumulate_num_ids[j] -= accumulate_num_ids[i];
                         }
                         ids_len = accumulate_num_ids[save_index];
@@ -128,7 +128,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz,
                         if (accumulate_num_ids[save_index] - accumulate_num_ids[i] <= next_chat_buffer) {
                             std::move(input_ids.begin() + accumulate_num_ids[i],input_ids.end(),input_ids.begin());
                             int k = i + 1;
-                            for (int j = k; j <= save_index; j++) {
+                            for (int j = i; j <= save_index; j++) {
                                 accumulate_num_ids[j] -= accumulate_num_ids[i];
                             }
                             std::move(save_max_logit_position.begin(),save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[save_index] - response_count);
@@ -144,9 +144,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz,
                     save_index += 1;
                 }
             } else {
-                std::move(save_max_logit_position.begin(),save_max_logit_position.begin() + response_count,input_ids.begin() + accumulate_num_ids[0]);
-                accumulate_num_ids[0] = num_ids_per_chat[0];
-                save_index += 1;
+                if (num_ids_per_chat[0] > next_chat_buffer) {
+                    clear_history();
+                } else {
+                    std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count, input_ids.begin() + accumulate_num_ids[0]);
+                    accumulate_num_ids[0] = num_ids_per_chat[0];
+                    save_index += 1;
+                }
             }
         }
         return env->NewStringUTF("END");
