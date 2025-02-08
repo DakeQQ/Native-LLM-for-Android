@@ -33,8 +33,8 @@ const std::string file_name_A = "Model_Qwen_1_5B_1024.ort";
 const std::string file_name_A_external = "NONE";             // If using external data to load the model, provide the file name; otherwise, set to "NONE". If contains many parts, please modify the project.cpp line 313-315.
 const int max_token_history = 1024;                          // Please set this value to match the model name flag.
 const int end_id_0 = 151643;
-const size_t past_key_value_size = 7168 * max_token_history; // 28 * 2 * 128, Remember edit the value if using others param size model.
-const int single_chat_limit = 341;                        
+const size_t past_key_value_size = 28 * 2 * 128 * max_token_history; // Remember edit the value if using others param size model.
+const int single_chat_limit = 511;                        
 const int next_chat_buffer = max_token_history - single_chat_limit;
 std::vector<int32_t> input_ids(max_token_history, 0);
 std::vector<int> accumulate_num_ids(30, 0);                  // Just make sure the size is enough before reaching max_token_history.
