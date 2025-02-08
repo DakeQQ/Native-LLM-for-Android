@@ -60,7 +60,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                     {
                         std::move(input_ids.begin() + accumulate_num_ids[i], input_ids.end(), input_ids.begin());
                         int k = i + 1;
-                        for (int j = k; j <= save_index; j++)
+                        for (int j = i; j <= save_index; j++)
                         {
                             accumulate_num_ids[j] -= accumulate_num_ids[i];
                         }
@@ -142,7 +142,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                         {
                             std::move(input_ids.begin() + accumulate_num_ids[i], input_ids.end(), input_ids.begin());
                             int k = i + 1;
-                            for (int j = k; j <= save_index; j++)
+                            for (int j = i; j <= save_index; j++)
                             {
                                 accumulate_num_ids[j] -= accumulate_num_ids[i];
                             }
@@ -163,9 +163,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
             else
             {
-                std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count, input_ids.begin() + accumulate_num_ids[0]);
-                accumulate_num_ids[0] = num_ids_per_chat[0];
-                save_index += 1;
+                if (num_ids_per_chat[0] > next_chat_buffer) {
+                    clear_history();
+                } else {
+                    std::move(save_max_logit_position.begin(), save_max_logit_position.begin() + response_count, input_ids.begin() + accumulate_num_ids[0]);
+                    accumulate_num_ids[0] = num_ids_per_chat[0];
+                    save_index += 1;
+                }
             }
 
         }
