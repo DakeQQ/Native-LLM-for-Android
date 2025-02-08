@@ -21,7 +21,7 @@ onnx_model_C = r'/home/dake/Downloads/Qwen/QwenVL_C.onnx'
 onnx_model_D = r'/home/dake/Downloads/Qwen/QwenVL_D.onnx'
 
 python_package_path = site.getsitepackages()[-1]
-shutil.copyfile("./modeling_modified/part_ABCD/modeling_qwen2_vl.py", python_package_path + "/transformers/models/qwen2_vl/export_config.py")
+shutil.copyfile("./modeling_modified/part_ABCD/modeling_qwen2_vl.py", python_package_path + "/transformers/models/qwen2_vl/modeling_qwen2_vl.py")
 shutil.copyfile("export_config.py", python_package_path + "/transformers/models/qwen2_vl/export_config.py")
 
 from transformers import Qwen2VLForConditionalGeneration
