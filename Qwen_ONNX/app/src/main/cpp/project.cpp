@@ -37,6 +37,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
 {
     if (add_prompt)
     {
+        response_count = 0;
         if (use_deepseek) {
             if (clear) {
                 clear_history();  // Open for "Chat" model.
@@ -124,7 +125,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         if (add_prompt)
         {
             ids_len = 1;
-            response_count = 0;
             attention_mask = 0.f;
 //        attention_mask = Ort::Float16_t(0.f);
         }
