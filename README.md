@@ -15,6 +15,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 1. **Download Models:**
    - Demo models are available on [Google Drive](https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link).
    - Alternatively, use [Baidu Cloud](https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake) with the extraction code: `dake`.
+   - Quick Try: [DeepSeek-R1-Distill-Qwen-1.5B-Android](https://drive.google.com/file/d/1xm1JadCQ4pjKjeq2BPi478STXhaMPv69/view?usp=sharing)
 
 2. **Setup Instructions:**
    - Place the downloaded model files into the `assets` folder.
@@ -129,6 +130,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 1. **下载模型：**
    - Demo模型可以在 [Google Drive](https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link) 上获取。
    - 或者使用 [百度网盘](https://pan.baidu.com/s/1NHbUyjZ_VC-o62G13KCrSA?pwd=dake) 提取码：`dake`。
+   - Quick Try: [DeepSeek-R1-Distill-Qwen-1.5B-Android](https://drive.google.com/file/d/1xm1JadCQ4pjKjeq2BPi478STXhaMPv69/view?usp=sharing)
 
 2. **设置说明：**
    - 将下载的模型文件放入 `assets` 文件夹。
