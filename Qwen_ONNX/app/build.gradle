@@ -38,7 +38,7 @@ android {
     externalNativeBuild {
         cmake {
             path file('src/main/cpp/CMakeLists.txt')
-            version '3.31.0'
+            version '3.31.5'
         }
     }
     sourceSets {
@@ -49,7 +49,7 @@ android {
     buildFeatures {
         viewBinding true
     }
-    ndkVersion '28.0.12433566 rc1'
+    ndkVersion '28.0.13004108'
 }
 
 dependencies {
