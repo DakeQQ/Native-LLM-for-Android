@@ -760,7 +760,8 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
         self.lm_head = nn.Linear(self.hidden_size, self.vocab_size, bias=False)
         self.save_key = [None] * self.num_layers
         self.save_value = [None] * self.num_layers
-        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
+        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.uint8)))
+        self.expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len, self.head_dim), dtype=torch.uint8)
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -809,7 +810,7 @@ class MiniCPMForCausalLM(MiniCPMPreTrainedModel):
                 past_key_states=past_key_states[i],
                 past_value_states=past_value_states[i]
             )
-        expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len - kv_seq_len, self.head_dim), dtype=torch.float16)
+        expand_space = self.expand_space[:, :, kv_seq_len:, :].half()
         return (torch.cat((hidden_states.half(), torch.zeros((self.max_seq_len - ids_len, self.hidden_size), dtype=torch.float16)), dim=-2),
                 torch.cat((torch.stack(self.save_key), expand_space), dim=-2),
                 torch.cat((torch.stack(self.save_value), expand_space), dim=-2))
