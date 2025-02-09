@@ -3,6 +3,10 @@
 inline static std::string get_output_words(const int &id)
 {
     std::string words = tokenizer->decode(id);
+    if (words.empty())
+    {
+        return "?";
+    }
     if (words.length() == 6 && words[0] == '<' && words[words.length() - 1] == '>' && words[1] == '0' && words[2] == 'x')
     {
         words = static_cast<char>(std::stoi(words.substr(3, 2), nullptr, 16));
