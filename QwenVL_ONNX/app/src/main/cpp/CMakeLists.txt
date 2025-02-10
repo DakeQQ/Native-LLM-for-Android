@@ -29,6 +29,7 @@ add_compile_options(
         -fvisibility=hidden
         -fvisibility-inlines-hidden
         -funroll-loops
+        -malign-double
 )
 
 add_library(${CMAKE_PROJECT_NAME} SHARED project.cpp tokenizer.cpp)
