@@ -10,13 +10,13 @@
 const char* computeShaderSource = "#version 320 es\n"
                                   "#extension GL_OES_EGL_image_external_essl3 : require\n"
                                   "precision highp float;\n"
-                                  "layout(local_size_x = 16, local_size_y = 16) in;\n"  // gpu_num_group=16, Customize it to fit your device's specifications.
                                   "layout(binding = 0) uniform samplerExternalOES yuvTex;\n"
+                                  "layout(local_size_x = 16, local_size_y = 16) in;\n"  // gpu_num_group=16, Customize it to fit your device's specifications.
                                   "const int camera_width = 960;\n"                     //  camera_width, Remember edit the value if using custom param in export_config.py.
                                   "const int camera_height = 960;\n"                    //  camera_height, Remember edit the value if using custom param in export_config.py.
                                   "const int camera_height_minus = camera_height - 1;\n"
                                   "layout(std430, binding = 1) buffer Output {\n"
-                                  "    int result[camera_height * camera_width];\n"  // pixelCount
+                                  "    int result[camera_height * camera_width];\n"     // pixelCount
                                   "} outputData;\n"
                                   "const vec3 bias = vec3(-0.15, -0.5, -0.2);\n"
                                   "const mat3 YUVtoRGBMatrix = mat3(127.5, 0.0, 1.402 * 127.5, "
