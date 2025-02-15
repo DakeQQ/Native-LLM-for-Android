@@ -35,8 +35,8 @@ public class GLRender implements GLSurfaceView.Renderer {
     private static int mVMatrixLocation;
     private static int ShaderProgram_Camera;
     private static final int screen_resolution_short_side = 1080;
-    public static final int camera_width = 960;  // Please modify the project.h file simultaneously when editing these values.
-    public static final int camera_height = 960;
+    public static final int camera_width = 960;   // Please modify the project.h file simultaneously when editing these values.
+    public static final int camera_height = 960;  // Please modify the project.h file simultaneously when editing these values.
     private static final int camera_pixels = camera_height * camera_width;
     private static final int camera_pixels_2 = camera_pixels * 2;
     private static final int camera_pixels_half = camera_pixels / 2;
