@@ -112,7 +112,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 - **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **Qwen2.5-Instruct**: 0.5B, 1.5B
-- **Qwen2VL**: 2B
+- **Qwen2/2.5VL**: 2B, 3B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
 - **Gemma2-it**: 2B
 - **Phi3.5-mini-instruct**: 3.8B
