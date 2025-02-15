@@ -5,7 +5,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 - **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **Qwen2.5-Instruct**: 0.5B, 1.5B
-- **Qwen2VL**: 2B
+- **Qwen2/2.5VL**: 2B, 3B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
 - **Gemma2-it**: 2B
 - **Phi3.5-mini-instruct**: 3.8B
@@ -24,6 +24,9 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 3. **Model Notes:**
    - Demo models are converted from HuggingFace or ModelScope and optimized for extreme execution speed.
    - Inputs and outputs may differ slightly from the original models.
+   - For Qwen2VL / Qwen2.5VL, adjust the key variables to match the model parameters and `export_config.py`.
+      - `GLRender.java: Line 37, 38, 39`
+      - `project.h: Line 14, 15, 16, 35, 36, 39, 116, 117, 118, 121, 122`
 
 4. **ONNX Export Considerations:**
    - Dynamic axes were not used during export to better adapt to ONNX Runtime on Android. Exported ONNX models may not be optimal for x86_64 systems.
@@ -46,6 +49,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
 - Fix the continuous chat bugs.
 - Solved NewStringUTF() issue.
+- 2025/02/15：Qwen2.5VL-3B-Instruct
 
 ## Additional Resources
 - Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
@@ -128,6 +132,9 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 3. **模型说明：**
    - 演示模型是从 HuggingFace 或 ModelScope 转换而来，并针对极限执行速度进行了优化。
    - 输入和输出可能与原始模型略有不同。
+   - 对于Qwen2VL / Qwen2.5VL，请调整关键变量以匹配模型参数和`export_config.py`
+      - `GLRender.java: Line 37, 38, 39`
+      - `project.h: Line 14, 15, 16, 35, 36, 39, 116, 117, 118, 121, 122`
 
 4. **ONNX 导出注意事项：**
    - 导出时未使用动态轴，以更好地适应 Android 上的 ONNX Runtime。导出的 ONNX 模型可能不适合 x86_64 系统。
@@ -154,6 +161,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）
 - 修复连续对话的错误。
 - 修复 NewStringUTF() 错误.
+- 2025/02/15：Qwen2.5VL-3B-Instruct
 
 ## 额外资源
 
