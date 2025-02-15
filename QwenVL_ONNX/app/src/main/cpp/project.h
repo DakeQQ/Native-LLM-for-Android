@@ -1,4 +1,3 @@
-
 #include <jni.h>
 #include <iostream>
 #include <fstream>
@@ -13,8 +12,8 @@ const char* computeShaderSource = "#version 320 es\n"
                                   "precision highp float;\n"
                                   "layout(local_size_x = 16, local_size_y = 16) in;\n"  // gpu_num_group=16, Customize it to fit your device's specifications.
                                   "layout(binding = 0) uniform samplerExternalOES yuvTex;\n"
-                                  "const int camera_width = 960;\n"  //  camera_width
-                                  "const int camera_height = 960;\n"  //  camera_height
+                                  "const int camera_width = 960;\n"                     //  camera_width, Remember edit the value if using custom param in export_config.py.
+                                  "const int camera_height = 960;\n"                    //  camera_height, Remember edit the value if using custom param in export_config.py.
                                   "const int camera_height_minus = camera_height - 1;\n"
                                   "layout(std430, binding = 1) buffer Output {\n"
                                   "    int result[camera_height * camera_width];\n"  // pixelCount
@@ -33,11 +32,11 @@ const char* computeShaderSource = "#version 320 es\n"
 GLuint pbo_A = 0;
 GLuint computeProgram = 0;
 GLint yuvTexLoc = 0;
-const GLsizei camera_width = 960;
-const GLsizei camera_height = 960;
+const GLsizei camera_width = 960;   // Remember edit the value if using custom param in export_config.py.
+const GLsizei camera_height = 960;  // Remember edit the value if using custom param in export_config.py.
 const GLsizei pixelCount = camera_width * camera_height;
 const int pixelCount_rgb = 3 * pixelCount;
-const int gpu_num_group = 16;  // Customize it to fit your device's specifications.
+const int gpu_num_group = 16;       // Customize it to fit your device's specifications.
 const GLsizei rgbSize = pixelCount_rgb * sizeof(float);
 const GLsizei rgbSize_i8 = pixelCount * sizeof(int);
 const GLsizei workGroupCountX = camera_width / gpu_num_group;
@@ -115,12 +114,12 @@ const std::string file_name_E = "QwenVL_E.ort";
 const std::string file_name_E_external = "NONE";   // If using external data to load the model, provide the file name; otherwise, set to "NONE". If contains many parts, please modify the project.cpp line 1192-1194.
 const int WIDTH_FACTOR = 10;
 const int HEIGHT_FACTOR = 10;
-const int prompt_head_len = 5;
-const int hidden_size = 1536;
-const int max_token_history = 1024;                                       // Please set this value to match the exported model.
+const int prompt_head_len = 5; 
+const int max_token_history = 1024;                                        // Please set this value to match the exported model.
 const int end_id_0 = 151643;
 const int end_id_1 = 151645;
-const size_t past_key_value_size = 7168 * max_token_history;                 // 28 * 2 * 128, Remember edit the value if using others param size model.
+const int hidden_size = 1536;                                              // Qwen2VL-2B = 1536;  Qwen2.5VL-3B = 2048;
+const size_t past_key_value_size = 28 * 2 * 128 * max_token_history;       // Qwen2VL-2B = 28 * 2 * 128;  Qwen2.5VL-3B = 36 * 2 * 128; Remember edit the value if using others param size model.
 const int64_t image_pad_len = WIDTH_FACTOR * HEIGHT_FACTOR;
 const int64_t pos_factor_v = 1 - image_pad_len + WIDTH_FACTOR;
 std::vector<int> input_ids(max_token_history, 0);
@@ -128,6 +127,6 @@ const std::string storage_path = "/storage/emulated/0/Android/data/com.example.m
 const std::string vocab_file = "/data/user/0/com.example.myapplication/cache/vocab_Qwen.txt"; // We have moved the vocab.txt from assets to the cache folder in Java process.
 const char* ctx_model_A = "/storage/emulated/0/Android/data/com.example.myapplication/ctx_model_A.onnx";
 const char* cache_path = "/data/user/0/com.example.myapplication/cache";
-const char* qnn_htp_so = "/data/user/0/com.example.myapplication/cache/libQnnHtp.so";  //  If use (std::string + "libQnnHtp.so").c_str() instead, it will open failed.
-const char* qnn_cpu_so = "/data/user/0/com.example.myapplication/cache/libQnnCpu.so";  //  If use (std::string + "libQnnCpu.so").c_str() instead, it will open failed.
+const char* qnn_htp_so = "/data/user/0/com.example.myapplication/cache/libQnnHtp.so";        //  If use (std::string + "libQnnHtp.so").c_str() instead, it will open failed.
+const char* qnn_cpu_so = "/data/user/0/com.example.myapplication/cache/libQnnCpu.so";        //  If use (std::string + "libQnnCpu.so").c_str() instead, it will open failed.
 // Just specify the path for qnn_*_so, and the code will automatically locate the other required libraries.
