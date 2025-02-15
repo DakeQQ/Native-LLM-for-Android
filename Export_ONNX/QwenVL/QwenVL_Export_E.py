@@ -29,7 +29,7 @@ image_path = r"./psyduck.png"                                           # Test i
 query = "Describe this image."                                          # Test query for the exported onnx model.
 
 python_package_path = site.getsitepackages()[-1]
-shutil.copyfile("./modeling_modified/part_E/modeling_qwen2_vl.py", python_package_path + "/transformers/models/qwen2_vl/export_config.py")
+shutil.copyfile("./modeling_modified/part_E/modeling_qwen2_vl.py", python_package_path + "/transformers/models/qwen2_vl/modeling_qwen2_vl.py")
 shutil.copyfile("export_config.py", python_package_path + "/transformers/models/qwen2_vl/export_config.py")
 
 
