@@ -77,7 +77,7 @@ if download_path == "NONE":
     hidden_size = 0  # default
 else:
     if ('vl' in download_path.lower()) & ('qwen' in download_path.lower()):
-        if "Qwen2.5" in download_path or "qwen2.5" in download_path or "VL-3B" in download_path or "vl-3b" in download_path:
+        if "2.5" in download_path or "3b" in download_path.lower():
             from transformers import Qwen2_5_VLForConditionalGeneration
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
         else:
