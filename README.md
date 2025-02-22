@@ -32,7 +32,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
    - Dynamic axes were not used during export to better adapt to ONNX Runtime on Android. Exported ONNX models may not be optimal for x86_64 systems.
 
 ## Tokenizer Files
-- The `tokenizer.cpp` and `tokenizer.hpp` files are sourced from the [mnn-llm repository](https://github.com/mnn-llm).
+- The `tokenizer.cpp` and `tokenizer.hpp` files are sourced from the [mnn-llm repository](https://github.com/wangzhaode/mnn-llm).
 
 ## Exporting Models
 1. Navigate to the `Export_ONNX` folder.
@@ -139,7 +139,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## 分词器文件
 
-- `tokenizer.cpp` 和 `tokenizer.hpp` 文件来源于 [mnn-llm 仓库](https://github.com/mnn-llm)。
+- `tokenizer.cpp` 和 `tokenizer.hpp` 文件来源于 [mnn-llm 仓库](https://github.com/wangzhaode/mnn-llm)。
 
 ## 导出模型
 
