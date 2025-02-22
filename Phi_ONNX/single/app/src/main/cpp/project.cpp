@@ -231,7 +231,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 fileSize = AAsset_getLength(asset);
                 fileBuffer.resize(fileSize);
                 AAsset_read(asset, fileBuffer.data(), fileSize);
-                if (file_name_A_external != "NONE") {
+                if (!file_name_A_external.empty()) {
                     // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
                     AAsset* asset_ex = AAssetManager_open(mgr, file_name_A_external.c_str(), AASSET_MODE_BUFFER);
                     fileSize_external = AAsset_getLength(asset_ex);
@@ -322,7 +322,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 status = ort_runtime_A->CreateSession(ort_env_A, (cache_path + file_name_A).c_str(), session_options_A, &session_model_A);
             }
         } else {
-            if (file_name_A_external != "NONE") {
+            if (!file_name_A_external.empty()) {
                 const char* external_file_names[] = {file_name_A_external.c_str()};                         // Add all external data file names here if your model uses multiple external files.
                 const char* external_file_buffers[] = {fileBuffer_external.data()};                         // Read external data into fileBuffers and add them here.
                 size_t external_file_sizes[] = {fileBuffer_external.size()};                                // Store the size of each fileBuffer here for multiple external data files.
