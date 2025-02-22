@@ -53,14 +53,6 @@ quantize_dynamic(
 )
 
 
-model_size_bytes = sys.getsizeof(onnx.load(quanted_model_path).SerializeToString())
-model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
-if model_size_gb > 2.0:
-    is_large_model = True
-else:
-    is_large_model = True if use_low_memory_mode_in_Android else False
-
-
 # ONNX Model Optimizer
 slim(
     model=quanted_model_path,
