@@ -59,6 +59,7 @@ public class MainActivity extends AppCompatActivity {
         answerView.setLayoutManager(new LinearLayoutManager(this));
         answerView.setAdapter(chatAdapter);
         clearButton.setOnClickListener(v -> clearHistory());
+        boolean success;
         if (low_memory_mode) {
             try {
                 String[] files = mgr.list("");
@@ -67,7 +68,7 @@ public class MainActivity extends AppCompatActivity {
                     for (String fileName : files) {
                         String[] subEntries = mgr.list(fileName);
                         if (subEntries == null || subEntries.length == 0) {
-                            if (!fileName.contains(".") || fileName.contains(".onnx")) {
+                            if (fileName.endsWith(".onnx") || !fileName.contains(".")) {
                                 Copy_from_Asset_to_Cache(fileName, mgr);
                                 count_file += 1;
                                 if (count_file > 1) {
@@ -85,13 +86,16 @@ public class MainActivity extends AppCompatActivity {
                 addHistory(ChatMessage.TYPE_SERVER, low_memory_mode_error);
                 throw new RuntimeException(e);
             }
-        }
-        if (!Load_Models_A(mgr, false, low_memory_mode)) {
-            addHistory(ChatMessage.TYPE_SERVER, load_failed);
+            success = Load_Models_A(null, false, true);
         } else {
+            success = Load_Models_A(mgr, false, false);
+        }
+        if (success) {
             Copy_from_Asset_to_Cache(file_name_vocab, mgr);
             Pre_Process();
             Start_Chat();
+        } else {
+            addHistory(ChatMessage.TYPE_SERVER, load_failed);
         }
     }
     @SuppressLint("NotifyDataSetChanged")
