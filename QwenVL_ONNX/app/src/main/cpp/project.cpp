@@ -229,7 +229,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jclass 
                 fileSize = AAsset_getLength(asset);
                 fileBuffer.resize(fileSize);
                 AAsset_read(asset, fileBuffer.data(), fileSize);
-                if (file_name_A_external != "NONE") {
+                if (!file_name_A_external.empty()) {
                     // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
                     AAsset* asset_ex = AAssetManager_open(mgr, file_name_A_external.c_str(), AASSET_MODE_BUFFER);
                     fileSize_external = AAsset_getLength(asset_ex);
@@ -353,7 +353,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jclass 
                 status = ort_runtime_A->CreateSession(ort_env_A, (cache_path + file_name_A).c_str(), session_options_A, &session_model_A);
             }
         } else {
-            if (file_name_A_external != "NONE") {
+            if (!file_name_A_external.empty()) {
                 const char* external_file_names[] = {file_name_A_external.c_str()};                         // Add all external data file names here if your model uses multiple external files.
                 const char* external_file_buffers[] = {fileBuffer_external.data()};                         // Read external data into fileBuffers and add them here.
                 size_t external_file_sizes[] = {fileBuffer_external.size()};                                // Store the size of each fileBuffer here for multiple external data files.
@@ -443,7 +443,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jclass 
                 fileSize = AAsset_getLength(asset);
                 fileBuffer.resize(fileSize);
                 AAsset_read(asset, fileBuffer.data(), fileSize);
-                if (file_name_B_external != "NONE") {
+                if (!file_name_B_external.empty()) {
                     // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
                     AAsset* asset_ex = AAssetManager_open(mgr, file_name_B_external.c_str(), AASSET_MODE_BUFFER);
                     fileSize_external = AAsset_getLength(asset_ex);
@@ -533,7 +533,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jclass 
                 status = ort_runtime_B->CreateSession(ort_env_B, (cache_path + file_name_B).c_str(), session_options_B, &session_model_B);
             }
         } else {
-            if (file_name_B_external != "NONE") {
+            if (!file_name_B_external.empty()) {
                 const char* external_file_names[] = {file_name_B_external.c_str()};                         // Add all external data file names here if your model uses multiple external files.
                 const char* external_file_buffers[] = {fileBuffer_external.data()};                         // Read external data into fileBuffers and add them here.
                 size_t external_file_sizes[] = {fileBuffer_external.size()};                                // Store the size of each fileBuffer here for multiple external data files.
@@ -636,7 +636,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jclass 
                 fileSize = AAsset_getLength(asset);
                 fileBuffer.resize(fileSize);
                 AAsset_read(asset, fileBuffer.data(), fileSize);
-                if (file_name_C_external != "NONE") {
+                if (!file_name_C_external.empty()) {
                     // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
                     AAsset* asset_ex = AAssetManager_open(mgr, file_name_C_external.c_str(), AASSET_MODE_BUFFER);
                     fileSize_external = AAsset_getLength(asset_ex);
@@ -726,7 +726,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jclass 
                 status = ort_runtime_C->CreateSession(ort_env_C, (cache_path + file_name_C).c_str(), session_options_C, &session_model_C);
             }
         } else {
-            if (file_name_C_external != "NONE") {
+            if (!file_name_C_external.empty()) {
                 const char* external_file_names[] = {file_name_C_external.c_str()};                         // Add all external data file names here if your model uses multiple external files.
                 const char* external_file_buffers[] = {fileBuffer_external.data()};                         // Read external data into fileBuffers and add them here.
                 size_t external_file_sizes[] = {fileBuffer_external.size()};                                // Store the size of each fileBuffer here for multiple external data files.
@@ -824,7 +824,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1D(JNIEnv *env, jclass 
                 fileSize = AAsset_getLength(asset);
                 fileBuffer.resize(fileSize);
                 AAsset_read(asset, fileBuffer.data(), fileSize);
-                if (file_name_D_external != "NONE") {
+                if (!file_name_D_external.empty()) {
                     // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
                     AAsset* asset_ex = AAssetManager_open(mgr, file_name_D_external.c_str(), AASSET_MODE_BUFFER);
                     fileSize_external = AAsset_getLength(asset_ex);
@@ -914,7 +914,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1D(JNIEnv *env, jclass 
                 status = ort_runtime_D->CreateSession(ort_env_D, (cache_path + file_name_D).c_str(), session_options_D, &session_model_D);
             }
         } else {
-            if (file_name_D_external != "NONE") {
+            if (!file_name_D_external.empty()) {
                 const char* external_file_names[] = {file_name_D_external.c_str()};                         // Add all external data file names here if your model uses multiple external files.
                 const char* external_file_buffers[] = {fileBuffer_external.data()};                         // Read external data into fileBuffers and add them here.
                 size_t external_file_sizes[] = {fileBuffer_external.size()};                                // Store the size of each fileBuffer here for multiple external data files.
@@ -1032,7 +1032,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
             fileSize = AAsset_getLength(asset);
             fileBuffer.resize(fileSize);
             AAsset_read(asset,fileBuffer.data(),fileSize);
-            if (file_name_E_external != "NONE") {
+            if (!file_name_E_external.empty()) {
                 // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
                 AAsset* asset_ex = AAssetManager_open(mgr, file_name_E_external.c_str(), AASSET_MODE_BUFFER);
                 fileSize_external = AAsset_getLength(asset_ex);
@@ -1125,7 +1125,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
                 status = ort_runtime_E->CreateSession(ort_env_E, (cache_path + file_name_E).c_str(), session_options_E, &session_model_E);
             }
         } else {
-            if (file_name_E_external != "NONE") {
+            if (!file_name_E_external.empty()) {
                 const char* external_file_names[] = {file_name_E_external.c_str()};                         // Add all external data file names here if your model uses multiple external files.
                 const char* external_file_buffers[] = {fileBuffer_external.data()};                         // Read external data into fileBuffers and add them here.
                 size_t external_file_sizes[] = {fileBuffer_external.size()};                                // Store the size of each fileBuffer here for multiple external data files.
@@ -1236,4 +1236,3 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1E(JNIEnv *env, jclass 
     ort_runtime_E->ReleaseMemoryInfo(memory_info);
     return JNI_TRUE;
 }
-
