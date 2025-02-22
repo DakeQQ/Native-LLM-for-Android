@@ -103,6 +103,7 @@ public class MainActivity extends AppCompatActivity {
         answerView.setAdapter(chatAdapter);
         switch_vision = findViewById(R.id.use_vision);
         clearButton.setOnClickListener(v -> clearHistory());
+        boolean success;
         if (low_memory_mode) {
             try {
                 String[] files = mgr.list("");
@@ -120,18 +121,23 @@ public class MainActivity extends AppCompatActivity {
                 addHistory(ChatMessage.TYPE_SERVER, low_memory_mode_error);
                 throw new RuntimeException(e);
             }
-        }
-        if (!Load_Models_E(mgr, false, low_memory_mode)
-                || !Load_Models_A(mgr, false, false, false, false, low_memory_mode)
-                || !Load_Models_B(mgr, false, low_memory_mode)
-                || !Load_Models_C(mgr, false, low_memory_mode)
-                || !Load_Models_D(mgr, false, low_memory_mode)) {
-            addHistory(ChatMessage.TYPE_SERVER, load_failed);
+            success = Load_Models_E(null, false, true);
+            if (success) {
+                success = (Load_Models_A(null, false, false, false, false, true)) && (Load_Models_B(null, false, true)) && (Load_Models_C(null, false, true) && (Load_Models_D(null, false, true));
+            }
         } else {
+            success = Load_Models_E(mgr, false, false);
+            if (success) {
+                success = (Load_Models_A(mgr, false, false, false, false, false)) && (Load_Models_B(mgr, false, false)) && (Load_Models_C(mgr, false, false) && (Load_Models_D(mgr, false, false));
+            }
+        }
+        if (success) {
             Copy_from_Asset_to_Cache(file_name_vocab, mgr);
             setWindowFlag();
             initView();
             Start_Chat();
+        } else {
+            addHistory(ChatMessage.TYPE_SERVER, load_failed);
         }
     }
 
