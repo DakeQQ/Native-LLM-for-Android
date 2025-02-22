@@ -29,14 +29,6 @@ use_low_memory_mode_in_Android = False                                          
 
 
 # Start Quantize
-model_size_bytes = sys.getsizeof(onnx.load(model_path).SerializeToString())
-model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
-if model_size_gb > 8.0:
-    is_large_model = True
-else:
-    is_large_model = True if use_low_memory_mode_in_Android else False
-
-
 quantize_dynamic(
     model_input=model_path,
     model_output=quanted_model_path,
@@ -50,8 +42,15 @@ quantize_dynamic(
                    'MatMulConstBOnly': True                  # False for more quant. Sometime, the inference speed may get worse.
                    },
     nodes_to_exclude=None,                                   # Specify the node names to exclude quant process. Example: nodes_to_exclude={'/Gather'}
-    use_external_data_format=is_large_model                  # Save the model into two parts.
+    use_external_data_format=True                            # Save the model into two parts.
 )
+
+model_size_bytes = sys.getsizeof(onnx.load(model_path).SerializeToString())
+model_size_gb = model_size_bytes * 9.31322575e-10            # 1 / (1024 * 1024 * 1024)
+if model_size_gb > 2.0:
+    is_large_model = True
+else:
+    is_large_model = True if use_low_memory_mode_in_Android else False
 
 
 # ONNX Model Optimizer
