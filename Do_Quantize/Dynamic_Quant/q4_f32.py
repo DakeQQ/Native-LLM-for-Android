@@ -111,7 +111,15 @@ del model
 gc.collect()
 
 
-if not is_large_model:
+if is_large_model:
+    pattern = os.path.join(quanted_folder_path, '*.data')
+    files_to_delete = glob.glob(pattern)
+    for file_path in files_to_delete:
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"Error deleting {file_path}: {e}")
+else:
     # Convert the simplified model to ORT format.
     if provider == 'CPUExecutionProvider':
         optimization_style = "Fixed"
@@ -120,3 +128,4 @@ if not is_large_model:
     target_platform = "arm"                 # ['arm', 'amd64']; The 'amd64' means x86_64 desktop, not means the AMD chip.
     # Call subprocess may get permission failed on Windows system.
     subprocess.run([f'python -m onnxruntime.tools.convert_onnx_models_to_ort --output_dir {quanted_folder_path} --optimization_style {optimization_style} --target_platform {target_platform} --enable_type_reduction {quanted_folder_path}'], shell=True)
+    
