@@ -222,44 +222,27 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         std::vector<char> fileBuffer_external;
         off_t fileSize;
         off_t fileSize_external;
-        if (asset_manager != nullptr) {
-            AAssetManager* mgr = AAssetManager_fromJava(env, asset_manager);
-            AAsset* asset = AAssetManager_open(mgr,file_name_A.c_str(), AASSET_MODE_BUFFER);
-            fileSize = AAsset_getLength(asset);
-            fileBuffer.resize(fileSize);
-            AAsset_read(asset,fileBuffer.data(),fileSize);
-            if (file_name_A_external != "NONE") {
-                // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
-                AAsset* asset_ex = AAssetManager_open(mgr, file_name_A_external.c_str(), AASSET_MODE_BUFFER);
-                fileSize_external = AAsset_getLength(asset_ex);
-                fileBuffer_external.resize(fileSize_external);
-                AAsset_read(asset_ex, fileBuffer_external.data(), fileSize_external);
-            }
-        } else {
-            std::ifstream model_file(storage_path + file_name_A, std::ios::binary | std::ios::ate);
-            if (!model_file.is_open()) {
-                return JNI_FALSE;
-            }
-            fileSize = model_file.tellg();
-            model_file.seekg(0, std::ios::beg);
-            fileBuffer.resize(fileSize);
-            if (!model_file.read(fileBuffer.data(), fileSize)) {
-                return JNI_FALSE;
-            }
-            model_file.close();
-            if (file_name_A_external != "NONE") {
-                // Load external data using std::ifstream. For models with multiple external files, manually load additional files as needed.
-                std::ifstream model_file_external(storage_path + file_name_A_external, std::ios::binary | std::ios::ate);
-                if (!model_file_external.is_open()) {
-                    return JNI_FALSE;
+        bool use_storage_path = false;
+        if (!low_memory_mode) {
+            if (asset_manager != nullptr)
+            {
+                AAssetManager *mgr = AAssetManager_fromJava(env, asset_manager);
+                AAsset *asset = AAssetManager_open(mgr, file_name_A.c_str(), AASSET_MODE_BUFFER);
+                fileSize = AAsset_getLength(asset);
+                fileBuffer.resize(fileSize);
+                AAsset_read(asset, fileBuffer.data(), fileSize);
+                if (file_name_A_external != "NONE") {
+                    // Load external data using AAsset_read. For models with multiple external files, manually load additional files as needed.
+                    AAsset* asset_ex = AAssetManager_open(mgr, file_name_A_external.c_str(), AASSET_MODE_BUFFER);
+                    fileSize_external = AAsset_getLength(asset_ex);
+                    fileBuffer_external.resize(fileSize_external);
+                    AAsset_read(asset_ex, fileBuffer_external.data(), fileSize_external);
                 }
-                fileSize_external = model_file_external.tellg();
-                model_file_external.seekg(0, std::ios::beg);
-                fileBuffer_external.resize(fileSize_external);
-                if (!model_file_external.read(fileBuffer_external.data(), fileSize_external)) {
-                    return JNI_FALSE;
-                }
-                model_file_external.close();
+            }
+            else
+            {
+                use_storage_path = true;
+                low_memory_mode = true;
             }
         }
         ort_runtime_A = OrtGetApiBase()->GetApi(ORT_API_VERSION);
@@ -332,7 +315,13 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
             ort_runtime_A->SetIntraOpNumThreads(session_options_A, 1);                                                // Set to 1.
             ort_runtime_A->SessionOptionsAppendExecutionProvider(session_options_A, "XNNPACK", option_keys.data(), option_values.data(), option_keys.size());
         }
-        if (!low_memory_mode) {
+        if (low_memory_mode) {
+            if (use_storage_path) {
+                status = ort_runtime_A->CreateSession(ort_env_A, (storage_path + file_name_A).c_str(), session_options_A, &session_model_A);
+            } else {
+                status = ort_runtime_A->CreateSession(ort_env_A, (cache_path + file_name_A).c_str(), session_options_A, &session_model_A);
+            }
+        } else {
             if (file_name_A_external != "NONE") {
                 const char* external_file_names[] = {file_name_A_external.c_str()};                         // Add all external data file names here if your model uses multiple external files.
                 const char* external_file_buffers[] = {fileBuffer_external.data()};                         // Read external data into fileBuffers and add them here.
@@ -340,8 +329,6 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 ort_runtime_A->AddExternalInitializersFromFilesInMemory(session_options_A, external_file_names, const_cast<char**>(external_file_buffers), external_file_sizes, 1);  // '1' indicates a single external file.
             }
             status = ort_runtime_A->CreateSessionFromArray(ort_env_A, fileBuffer.data(), fileSize, session_options_A, &session_model_A);
-        } else {
-            status = ort_runtime_A->CreateSession(ort_env_A, (cache_path + file_name_A).c_str(), session_options_A, &session_model_A);
         }
     }
     if (status != nullptr) {
