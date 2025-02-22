@@ -1,5 +1,6 @@
 import os
 import gc
+import glob
 import sys
 import onnx
 import torch
@@ -108,4 +109,14 @@ model = onnx.load(quanted_model_path)
 model = onnx.version_converter.convert_version(model, 21)
 onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
 
+
+if is_large_model:
+    pattern = os.path.join(quanted_folder_path, '*.data')
+    files_to_delete = glob.glob(pattern)
+    for file_path in files_to_delete:
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"Error deleting {file_path}: {e}")
+          
 # It is not recommended to convert an FP16 ONNX model to the ORT format because this process adds a Cast operation to convert the FP16 process back to FP32.
