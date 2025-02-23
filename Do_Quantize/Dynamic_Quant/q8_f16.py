@@ -35,7 +35,7 @@ quantize_dynamic(
     model_output=quanted_model_path,
     per_channel=True,                                        # True for model accuracy but cost a lot of time during quanting process.
     reduce_range=False,                                      # True for some x86_64 platform.
-    weight_type=QuantType.QUInt8,                            # It is recommended using uint8 + Symmetric False
+    weight_type=QuantType.QInt8,                            # It is recommended using uint8 + Symmetric False
     extra_options={'ActivationSymmetric': False,             # True for inference speed. False may keep more accuracy.
                    'WeightSymmetric': False,                 # True for inference speed. False may keep more accuracy.
                    'EnableSubgraph': True,                   # True for more quant.
