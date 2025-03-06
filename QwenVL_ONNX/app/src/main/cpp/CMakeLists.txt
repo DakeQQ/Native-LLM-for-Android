@@ -29,11 +29,7 @@ add_compile_options(
         -ffunction-sections
         -fdata-sections
         -falign-functions
-        -fforce-addr
-
-        # Memory Safety & Alignment: Ensure correct memory access and detect misaligned memory operations
-        -mstrict-align
-
+        
         # Exception Handling & Runtime Behavior: Disable RTTI, exceptions, and stack protection for faster execution
         -fno-sanitize=address
         -fno-sanitize=alignment
