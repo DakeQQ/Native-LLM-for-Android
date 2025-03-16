@@ -134,7 +134,7 @@ print('\n\nTest Question: ' + query + "\nInternLM Answering:\n")
 
 # Start to run LLM
 start_time = time.time()
-while (history_len < max_single_chat_length) or (num_decode >= max_single_chat_length):
+while (history_len < max_single_chat_length) or (num_decode < max_single_chat_length):
     token_id, past_key_states_A, past_values_states_A = ort_session_A.run(
         [out_name_A0, out_name_A1, out_name_A2],
         {
