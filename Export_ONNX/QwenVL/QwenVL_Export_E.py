@@ -226,7 +226,7 @@ if use_vision:
             in_name_D4: split_factor
         })
     end_time = time.time()
-    print(f'\nImage Process Complete. Time Cost: {(end_time - start_time)}')
+    print(f'\nImage Process Complete. Time Cost: {(end_time - start_time):.3f} seconds')
 
 print('\nTest Question: ' + query + "\n\nQwenVL Answering:\n")
 end_time = time.time()
