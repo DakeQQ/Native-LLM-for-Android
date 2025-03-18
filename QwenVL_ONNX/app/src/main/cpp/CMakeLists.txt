@@ -7,11 +7,13 @@ include_directories(${CMAKE_SOURCE_DIR}/../../../libs/${ANDROID_ABI})
 
 add_compile_options(
         # Optimization Flags: Enable aggressive optimizations for performance
-        -Ofast
+        -O3
         -ffast-math
         -ffp-model=fast
         -ffp-contract=fast
         -funsafe-math-optimizations
+        -fno-math-errno
+        -ffinite-math-only
         -fvectorize
         -funroll-loops
         -finline-functions
