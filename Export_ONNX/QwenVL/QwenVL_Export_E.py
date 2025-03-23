@@ -171,7 +171,7 @@ if is_valid_image_path(image_path):
     image = image.resize((INPUT_IMAGE_SIZE[1], INPUT_IMAGE_SIZE[0]))
     if image.mode != 'RGB':
         image = image.convert('RGB')
-    pixel_values = np.transpose(np.array(image).astype(np.int16), (2, 0, 1))
+    pixel_values = np.transpose(np.array(image).astype(np.uint8), (2, 0, 1))
     pixel_values = np.expand_dims(pixel_values, axis=0)
     use_vision = True
 else:
