@@ -178,7 +178,7 @@ else:
     use_vision = False
 
 prompt = f"<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n<|im_start|>assistant\n"
-prompt_head_len = np.array([5], dtype=np.int64)  # Keep the same value with QwenVL_Export_ABCD.py
+prompt_head_len = np.array([4], dtype=np.int64)  # Keep the same value with QwenVL_Export_ABCD.py
 image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
 token = tokenizer(prompt, return_tensors='pt')['input_ids']
 ids_len = np.array([token.shape[1]], dtype=np.int64)
