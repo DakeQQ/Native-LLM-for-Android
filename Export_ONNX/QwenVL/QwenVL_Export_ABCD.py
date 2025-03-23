@@ -102,7 +102,7 @@ with torch.inference_mode():
     history_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
     image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
     image_embed = torch.ones((image_embed_size, hidden_size), dtype=torch.float16)
-    pixel_values = torch.ones([1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.int16)
+    pixel_values = torch.ones([1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.uint8)
     image_pad_len = torch.tensor([image_embed_size], dtype=torch.long)
     input_ids = torch.ones(max_seq_len, dtype=torch.int32)
     hidden_states = torch.ones((max_seq_len, hidden_size), dtype=torch.float16)
