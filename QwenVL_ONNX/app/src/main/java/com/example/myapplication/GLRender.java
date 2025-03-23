@@ -44,7 +44,6 @@ public class GLRender implements GLSurfaceView.Renderer {
     private static final int[] mTextureId = new int[1];
     public static int[] imageRGBA = new int[camera_pixels];
     public static final MeteringRectangle[] focus_area = new MeteringRectangle[]{new MeteringRectangle(camera_width >> 1, camera_height >> 1, 100, 100, MeteringRectangle.METERING_WEIGHT_MAX)};
-    private static final float inv_255 = 1.f / 255.f;
     public static final short[] pixel_values = new short[camera_pixels * 3];
     private static final float[] vMatrix = new float[16];
     private static final String VERTEX_ATTRIB_POSITION = "aPosVertex";
