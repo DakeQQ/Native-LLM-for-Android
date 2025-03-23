@@ -1431,10 +1431,9 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         self.temporal_patch_size: int = 2
         self.merge_size: int = 2
         self.means = torch.tensor([0.48145466, 0.4578275, 0.40821073], dtype=torch.float32).view(1, 3, 1, 1)
-        self.inv_std = torch.tensor([1.0 / 0.26862954, 1.0 / 0.26130258, 1.0 / 0.27577711], dtype=torch.float32).view(1,
-                                                                                                                      3,
-                                                                                                                      1,
-                                                                                                                      1)
+        self.inv_std = torch.tensor([1.0 / 0.26862954, 1.0 / 0.26130258, 1.0 / 0.27577711], dtype=torch.float32).view(1, 3, 1, 1)
+        self.means_inv_std = self.means * self.inv_std
+        self.inv_255_std = self.inv_std / 255.0
         self.factor_size = WIDTH_FACTOR * HEIGHT_FACTOR * self.merge_size * self.merge_size
 
     def get_input_embeddings(self):
@@ -1639,10 +1638,10 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
     ) -> torch.FloatTensor:
         pixel_values = torch.tile(
             (nn.functional.interpolate(
-                pixel_values,
+                pixel_values.float(),
                 IMAGE_RESIZE,
                 mode='bilinear',
-                align_corners=True) - self.means) * self.inv_std, (self.temporal_patch_size, 1, 1, 1)
+                align_corners=True) * self.inv_255_std - self.means_inv_std), (self.temporal_patch_size, 1, 1, 1)
         ).reshape(
             1,
             self.temporal_patch_size,
