@@ -97,7 +97,7 @@ with torch.inference_mode():
     num_layers = model.config.num_hidden_layers
     hidden_size = model.config.hidden_size
 
-    prompt_head_len = 4  # <|im_start|>user\n<|vision_start|>
+    prompt_head_len = 5  # \n<|im_start|>user\n<|vision_start|>
     ids_len = torch.tensor([10], dtype=torch.long)      # "10" is just a dummy value.
     history_len = torch.tensor([10], dtype=torch.long)  # "10" is just a dummy value.
     image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
