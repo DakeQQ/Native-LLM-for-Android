@@ -688,8 +688,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         self.lm_head = nn.Linear(self.hidden_size, self.vocab_size, bias=False)
         self.save_key = [None] * self.num_layers
         self.save_value = [None] * self.num_layers
-        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.uint8)))
-        self.expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len, self.head_dim), dtype=torch.uint8)
+        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
+        self.expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len, self.head_dim), dtype=torch.int8)
         # Initialize weights and apply final processing
         self.post_init()
 
