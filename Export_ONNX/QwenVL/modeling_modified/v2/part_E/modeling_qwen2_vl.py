@@ -1133,8 +1133,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         self.save_value = [None] * self.num_layers
         self.rotary_emb = Qwen2VLRotaryEmbedding(config=config)
         self.rope_scaling = config.rope_scaling["mrope_section"] * 2
-        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.uint8)))
-        self.expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len, self.head_dim), dtype=torch.uint8)
+        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
+        self.expand_space = torch.zeros((self.num_layers, self.num_key_value_heads, self.max_seq_len, self.head_dim), dtype=torch.int8)
         # Initialize weights and apply final processing
         self.post_init()
 
