@@ -39,15 +39,15 @@ class QwenVL_PartB(torch.nn.Module):
     def __init__(self, embed_data, scale, zero_point, hidden_size, max_seq_len):
         super(QwenVL_PartB, self).__init__()
         self.embed_data = embed_data
-        self.scale = scale.half()
-        self.zero_point = zero_point.half()
+        self.scale = scale
+        self.zero_point = zero_point
         self.hidden_size = hidden_size
         self.max_seq_len = max_seq_len
 
     def forward(self, input_ids, ids_len):
         ids = input_ids[:ids_len]
         hidden_states = self.embed_data[ids] * self.scale[ids] + self.zero_point[ids]
-        return torch.cat((hidden_states, torch.zeros(self.max_seq_len - ids_len, self.hidden_size, dtype=torch.float16)), dim=0)
+        return torch.cat((hidden_states.half(), torch.zeros(self.max_seq_len - ids_len, self.hidden_size, dtype=torch.float16)), dim=0)
 
 
 class QwenVL_PartC(torch.nn.Module):
