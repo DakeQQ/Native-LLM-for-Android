@@ -326,8 +326,7 @@ if use_vision:
         })[0]
     ids_len += num_image_token
     split_factor = np.array([num_image_token_plus], dtype=np.int64)
-    end_time = time.time()
-    print(f'\nImage Process Complete. Time Cost: {(end_time - start_time):.3f} seconds')
+    print(f'\nImage Process Complete. Time Cost: {(time.time() - start_time):.3f} seconds')
 
 print('\nTest Question: ' + query + "\n\nInternVL Answering:\n")
 start_time = time.time()
