@@ -7,13 +7,13 @@ import shutil
 import gc
 import site
 
-path = '/home/iamj/Downloads/Qwen2.5-0.5B-Instruct'     # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = '/home/iamj/Downloads/Qwen_ONNX/Qwen.onnx'       # Assign a path where the exported Qwen model stored.
+path = '/home/DakeQQ/Downloads/Qwen2.5-1.5B-Instruct'         # Set the folder path where the Qwen whole project downloaded.
+onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'   # Assign a path where the exported Qwen model stored.
 
 # Load the model
 shutil.copyfile("./modeling_modified/modeling_qwen2.py", site.getsitepackages()[-1] + "/transformers/models/qwen2/modeling_qwen2.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 682, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 683, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
