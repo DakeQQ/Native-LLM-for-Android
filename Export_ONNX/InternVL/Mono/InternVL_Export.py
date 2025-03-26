@@ -60,6 +60,7 @@ class InternVL_PartA(torch.nn.Module):
         self.inv_255_std = inv_std / 255.0
 
     def forward(self, pixel_values):
+        # The original repository uses 9 grid-cropped images along with thumbnails. However, we are using only the thumbnail, which is expected to result in lower OCR performance.
         pixel_values = torch.nn.functional.interpolate(
             pixel_values.float(),
             (self.image_size, self.image_size),
