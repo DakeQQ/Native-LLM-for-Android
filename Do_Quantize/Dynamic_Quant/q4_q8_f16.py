@@ -56,7 +56,7 @@ quantize_dynamic(
     model_output=quanted_model_path,
     per_channel=True,                                        # True for model accuracy but cost a lot of time during quanting process.
     reduce_range=False,                                      # True for some x86_64 platform.
-    weight_type=QuantType.QInt8,                            # It is recommended using uint8 + Symmetric False
+    weight_type=QuantType.QUInt8,                            # It is recommended using uint8 + Symmetric False
     extra_options={'ActivationSymmetric': False,             # True for inference speed. False may keep more accuracy.
                    'WeightSymmetric': False,                 # True for inference speed. False may keep more accuracy.
                    'EnableSubgraph': True,                   # True for more quant.
@@ -119,7 +119,7 @@ model = optimize_model(quanted_model_path,
 model.convert_float_to_float16(
     keep_io_types=True,
     force_fp16_initializers=True,
-    use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
+    use_symbolic_shape_infer=True,                            # True for more optimize but may get errors.
     op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range', 'MatMulIntegerToFloat']
 )
 model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
@@ -131,7 +131,7 @@ gc.collect()
 slim(
     model=quanted_model_path,
     output_model=quanted_model_path,
-    no_shape_infer=False,   # True for more optimize but may get errors.
+    no_shape_infer=False,                                     # False for more optimize but may get errors.
     skip_fusion_patterns=False,
     no_constant_folding=False,
     save_as_external_data=is_large_model,
