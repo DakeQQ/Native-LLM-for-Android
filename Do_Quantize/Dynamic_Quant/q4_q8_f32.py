@@ -56,7 +56,7 @@ quantize_dynamic(
     model_output=quanted_model_path,
     per_channel=True,                                        # True for model accuracy but cost a lot of time during quanting process.
     reduce_range=False,                                      # True for some x86_64 platform.
-    weight_type=QuantType.QInt8,                            # It is recommended using uint8 + Symmetric False
+    weight_type=QuantType.QUInt8,                            # It is recommended using uint8 + Symmetric False
     extra_options={'ActivationSymmetric': False,             # True for inference speed. False may keep more accuracy.
                    'WeightSymmetric': False,                 # True for inference speed. False may keep more accuracy.
                    'EnableSubgraph': True,                   # True for more quant.
@@ -69,7 +69,7 @@ quantize_dynamic(
 
 
 model_size_bytes = sys.getsizeof(onnx.load(quanted_model_path).SerializeToString())
-model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
+model_size_gb = model_size_bytes * 9.31322575e-10            # 1 / (1024 * 1024 * 1024)
 if model_size_gb > 2.0:
     is_large_model = True
 else:
@@ -80,7 +80,7 @@ else:
 slim(
     model=quanted_model_path,
     output_model=quanted_model_path,
-    no_shape_infer=False,   # True for more optimize but may get errors.
+    no_shape_infer=False,                                     # False for more optimize but may get errors.
     skip_fusion_patterns=False,
     no_constant_folding=False,
     save_as_external_data=is_large_model,
@@ -125,7 +125,7 @@ gc.collect()
 slim(
     model=quanted_model_path,
     output_model=quanted_model_path,
-    no_shape_infer=False,   # True for more optimize but may get errors.
+    no_shape_infer=False,                                     # False for more optimize but may get errors.
     skip_fusion_patterns=False,
     no_constant_folding=False,
     save_as_external_data=is_large_model,
@@ -154,7 +154,7 @@ else:
     if provider == 'CPUExecutionProvider':
         optimization_style = "Fixed"
     else:
-        optimization_style = "Runtime"  # ['Runtime', 'Fixed']; Runtime for XNNPACK/NNAPI/QNN/CoreML..., Fixed for CPU provider
+        optimization_style = "Runtime"      # ['Runtime', 'Fixed']; Runtime for XNNPACK/NNAPI/QNN/CoreML..., Fixed for CPU provider
     target_platform = "arm"                 # ['arm', 'amd64']; The 'amd64' means x86_64 desktop, not means the AMD chip.
     # Call subprocess may get permission failed on Windows system.
     subprocess.run([f'python -m onnxruntime.tools.convert_onnx_models_to_ort --output_dir {quanted_folder_path} --optimization_style {optimization_style} --target_platform {target_platform} --enable_type_reduction {quanted_folder_path}'], shell=True)
