@@ -345,21 +345,18 @@ while (num_decode < max_single_chat_length) & (history_len < MAX_SEQ_LENGTH):
     if (token_id == 2) | (token_id == 92542):  # the stop_id in Intern is "2" & "92542"
         break
     else:
-        num_decode += 1
-        if num_decode < 2:
-            history_len += ids_len
+        history_len += ids_len
+        if num_decode < 1:
             ids_len = np.array([1], dtype=np.int64)
             attention_mask = np.array([0.0], dtype=np.float32)
             split_factor = np.array([PROMPT_HEAD_LENGTH], dtype=np.int64)
-        else:
-            history_len += 1
+        num_decode += 1
         input_ids[:, 0] = token_id
+        print(tokenizer.decode(token_id), end="", flush=True)
         hidden_states = ort_session_C.run(
             [out_name_C0],
             {
                 in_name_C0: input_ids,
                 in_name_C1: ids_len
             })[0]
-        print(tokenizer.decode(token_id), end="", flush=True)
-
 print(f"\n\nText Generate Speed: {num_decode / (time.time() - start_time):.3f} token/s")
