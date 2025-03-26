@@ -152,8 +152,7 @@ while (history_len < max_single_chat_length) or (num_decode < max_single_chat_le
         if num_decode < 1:
             ids_len = np.array([1], dtype=np.int64)
             attention_mask = np.array([0.0], dtype=np.float32)
-        input_ids[0] = token_id
         num_decode += 1
+        input_ids[0] = token_id
         print(tokenizer.decode(token_id), end="", flush=True)
-end_time = time.time()
-print(f"\n\nDecode: {(num_decode / (end_time - start_time)):.3f} token/s")
+print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
