@@ -64,7 +64,7 @@ class InternVL_PartA(torch.nn.Module):
         pixel_values = torch.nn.functional.interpolate(
             pixel_values.float(),
             (self.image_size, self.image_size),
-            mode='bicubic',
+            mode='bicubic',  # bilinear for speed / bicubic for accuracy
             align_corners=True) * self.inv_255_std - self.means_inv_std
         vision_embed = (self.vision_model(pixel_values=pixel_values) + self.position_embedding)[:, 1:]
         return self.mlp1(vision_embed.reshape(1, self.h_w_half, 2, self.h_w_half, -1).transpose(2, 3).contiguous().reshape(1, self.num_image_token, -1)).half()
