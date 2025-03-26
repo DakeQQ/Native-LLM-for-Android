@@ -225,11 +225,10 @@ if use_vision:
             in_name_D3: ids_len_minus,
             in_name_D4: split_factor
         })
-    end_time = time.time()
-    print(f'\nImage Process Complete. Time Cost: {(end_time - start_time):.3f} seconds')
+    print(f'\nImage Process Complete. Time Cost: {(time.time() - start_time):.3f} seconds')
 
 print('\nTest Question: ' + query + "\n\nQwenVL Answering:\n")
-end_time = time.time()
+start_time = time.time()
 while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
     token_id, past_key_states, past_values_states = ort_session_E.run(
         [out_name_E0, out_name_E1, out_name_E2],
@@ -246,9 +245,8 @@ while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
     if (token_id == 151643) | (token_id == 151645):  # the stop_id in Qwen is "151643" & "151645"
         break
     else:
-        num_decode += 1
-        if num_decode < 2:
-            history_len += ids_len
+        history_len += ids_len
+        if num_decode < 1:
             ids_len = np.array([1], dtype=np.int64)
             attention_mask = np.array([0.0], dtype=np.float16)
             if use_vision:
@@ -256,16 +254,16 @@ while (num_decode < max_single_chat_length) & (history_len < max_seq_len):
             else:
                 pos_factor = np.array(history_len + 1, dtype=np.float16)
         else:
-            history_len += 1
             pos_factor += 1
+        num_decode += 1
         input_ids[0] = token_id
+        print(tokenizer.decode(token_id), end="", flush=True)
         hidden_states = ort_session_B.run(
             [out_name_B0],
             {
                 in_name_B0: input_ids,
                 in_name_B1: ids_len
             })[0]
-        print(tokenizer.decode(token_id), end="", flush=True)
 
-print(f"\n\nText Generate Speed: {num_decode / (time.time() - end_time):.3f} token/s")
+print(f"\n\nText Generate Speed: {num_decode / (time.time() - start_time):.3f} token/s")
 
