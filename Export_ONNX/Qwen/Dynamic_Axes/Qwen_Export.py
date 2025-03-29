@@ -136,9 +136,9 @@ if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
 else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
     token = tokenizer(prompt, return_tensors='pt')['input_ids']
-input_ids = token.int().numpy()
-attention_mask = np.array([-65504.0], dtype=np.float32)
-past_key_values_A = np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16)
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(token.int().numpy(), 'cpu', 0)
+attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([-65504.0], dtype=np.float32), 'cpu', 0)
+past_key_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
 num_decode = 0
 print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 
@@ -155,19 +155,20 @@ for i in range(len(out_name_A)):
 # Start to run LLM
 start_time = time.time()
 while num_decode < max_single_chat_length:
-    max_ids, *keys_values = ort_session_A.run(
+    max_ids, *keys_values = ort_session_A.run_with_ort_values(
         output_names,
         input_feed
     )
-    if max_ids in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
+    token_id = onnxruntime.OrtValue.numpy(max_ids)
+    if token_id in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
         break
     else:
         input_feed[in_name_A[0].name] = max_ids
         for i in range(2, len(in_name_A)):
             input_feed[in_name_A[i].name] = keys_values[i - 2]
         if num_decode < 1:
-            input_feed[in_name_A[1].name] = np.array([0.0], dtype=np.float32)
+            input_feed[in_name_A[1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0.0], dtype=np.float32), 'cpu', 0)
         num_decode += 1
-        print(tokenizer.decode(max_ids[0]), end="", flush=True)
+        print(tokenizer.decode(token_id[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 
