@@ -716,16 +716,13 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             self,
             input_ids: torch.IntTensor,
             attention_mask: torch.FloatTensor,
-            past_key_states: torch.FloatTensor,
-            past_value_states: torch.FloatTensor
+            *past_key_values: torch.FloatTensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         ids_len = input_ids.shape[1]
-        history_len = past_key_states.shape[2]
+        history_len = past_key_values[0].shape[1]
         kv_seq_len = ids_len + history_len
         cos_rotary_pos_emb = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
         sin_rotary_pos_emb = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
-        past_key_states = past_key_states.float()
-        past_value_states = past_value_states.float()
         hidden_states = self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
         attention_mask = self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask
         for i in range(self.num_layers):
@@ -734,13 +731,13 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 attention_mask=attention_mask,
                 rotary_pos_emb_cos=cos_rotary_pos_emb,
                 rotary_pos_emb_sin=sin_rotary_pos_emb,
-                past_key_states=past_key_states[i],
-                past_value_states=past_value_states[i],
+                past_key_states=past_key_values[i].float(),
+                past_value_states=past_key_values[i + self.num_layers].float(),
                 kv_seq_len=kv_seq_len
             )
         return (torch.argmax(self.lm_head(self.model.norm(hidden_states[:, -1])), dim=-1, keepdim=True).int(),
-                torch.stack(self.save_key, dim=0),
-                torch.stack(self.save_value, dim=0))
+                *self.save_key,
+                *self.save_value)
 
     def prepare_inputs_for_generation(
         self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
