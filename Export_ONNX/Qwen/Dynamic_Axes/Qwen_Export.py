@@ -138,8 +138,7 @@ else:
     token = tokenizer(prompt, return_tensors='pt')['input_ids']
 input_ids = token.int().numpy()
 attention_mask = np.array([-65504.0], dtype=np.float32)
-past_key_states_A = np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16)
-past_values_states_A = past_key_states_A
+past_key_values_A = np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16)
 num_decode = 0
 print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 
@@ -149,7 +148,7 @@ input_feed = {
     in_name_A[1].name: attention_mask,
 }
 for i in range(2, len(in_name_A)):
-    input_feed[in_name_A[i].name] = past_key_states_A
+    input_feed[in_name_A[i].name] = past_key_values_A
 for i in range(len(out_name_A)):
     output_names.append(out_name_A[i].name)
 
