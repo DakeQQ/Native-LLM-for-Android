@@ -22,7 +22,7 @@ download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                       
 use_gpu = False                                                                  # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider']
 use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
-
+upgrade_opset = 21                                                               # optional
 
 # Start Quantize
 quantize_dynamic(
@@ -110,7 +110,7 @@ slim(
 # Upgrade the Opset version. (optional process)
 try:
     model = onnx.load(quanted_model_path)
-    model = onnx.version_converter.convert_version(model, 21)
+    model = onnx.version_converter.convert_version(model, upgrade_opset)
     onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
     del model
     gc.collect()
