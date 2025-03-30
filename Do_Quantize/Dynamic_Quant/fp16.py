@@ -20,7 +20,7 @@ download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                       
 use_gpu = True                                                                   # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider'']
 use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
-upgrade_opset = 21                                                               # optional
+upgrade_opset = 21                                                               # Optional process. Set 0 for close.
 
 
 # Convert the fp32 to fp16
@@ -106,20 +106,21 @@ slim(
 )
 
 # Upgrade the Opset version. (optional process)
-try:
-    model = onnx.load(quanted_model_path)
-    model = onnx.version_converter.convert_version(model, upgrade_opset)
-    onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
-    del model
-    gc.collect()
-except FileNotFoundError:
-    print(f"Error: The model file at {quanted_model_path} was not found.")
-except onnx.checker.ValidationError as e:
-    print(f"ONNX validation error: {e}")
-except onnx.version_converter.ConvertError as e:
-    print(f"Version conversion error: {e}")
-except Exception as e:
-    print(f"An unexpected error occurred: {e}")
+if upgrade_opset > 0:
+    try:
+        model = onnx.load(quanted_model_path)
+        model = onnx.version_converter.convert_version(model, upgrade_opset)
+        onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+        del model
+        gc.collect()
+    except FileNotFoundError:
+        print(f"Error: The model file at {quanted_model_path} was not found.")
+    except onnx.checker.ValidationError as e:
+        print(f"ONNX validation error: {e}")
+    except onnx.version_converter.ConvertError as e:
+        print(f"Version conversion error: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 
 if is_large_model:
