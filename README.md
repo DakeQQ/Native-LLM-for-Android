@@ -43,7 +43,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ## Quantization Notes
 - Use `onnxruntime.tools.convert_onnx_models_to_ort` to convert models to `*.ort` format. Note that this process automatically adds `Cast` operators that change FP16 multiplication to FP32.
 - The quantization methods are detailed in the `Do_Quantize` folder.
-- The `q4` (uint4) quantization method is not recommended due to poor performance of the `MatMulNBits` operator in ONNX Runtime.
 
 ## Recent Updates
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
@@ -152,7 +151,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 - 使用 `onnxruntime.tools.convert_onnx_models_to_ort` 将模型转换为 `*.ort` 格式。注意该过程会自动添加 `Cast` 操作符，将 FP16 乘法改为 FP32。
 - 量化方法详见 `Do_Quantize` 文件夹。
-- 不推荐使用 `q4` (uint4) 量化方法，因为 ONNX Runtime 中 `MatMulNBits` 操作符性能较差。
 
 ## 最近更新
 
