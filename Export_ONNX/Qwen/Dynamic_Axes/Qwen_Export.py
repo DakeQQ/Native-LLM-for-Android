@@ -1,11 +1,13 @@
+import gc
+import math
 import time
+import site
+import shutil
 import torch
 import numpy as np
 import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import shutil
-import gc
-import site
+
 
 path = '/home/DakeQQ/Downloads/Qwen2.5-1.5B-Instruct'         # Set the folder path where the Qwen whole project downloaded.
 onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'   # Assign a path where the exported Qwen model stored.
@@ -13,7 +15,7 @@ onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'   # Assign a path wh
 # Load the model
 shutil.copyfile("./modeling_modified/modeling_qwen2.py", site.getsitepackages()[-1] + "/transformers/models/qwen2/modeling_qwen2.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 683, at the same time.
+max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 682, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
@@ -23,8 +25,7 @@ hidden_size = model.config.hidden_size
 # Generate dummies for torch.onnx.export()
 attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
 input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value.
-past_key_states = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
-past_values_states = past_key_states
+past_keys_values = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
 position_ids = torch.zeros((max_seq_len, 1), dtype=torch.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
@@ -42,7 +43,6 @@ def quantize_to_uint8(tensor, scale, zero_point):
     return ((tensor - zero_point) * scale).round().clamp(0, 255).to(torch.uint8)
 
 
-model.model.embed_tokens.weight.requires_grad = False
 data = model.model.embed_tokens.weight.data
 zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
 scale = ((torch.max(data, dim=1)[0] - zero_point[:, 0]) / 255.0).unsqueeze(1)
@@ -50,6 +50,14 @@ embed_data = quantize_to_uint8(data, 1.0 / scale, zero_point)
 model.register_buffer("scale", scale)
 model.register_buffer("zero_point", zero_point)
 model.register_buffer("embed_data", embed_data)
+
+scale_factor = math.pow(head_dim, -0.25)
+for i in range(num_layers):
+    model.model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
+    model.model.layers._modules[f'{i}'].self_attn.q_proj.bias.data *= scale_factor
+    model.model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
+    model.model.layers._modules[f'{i}'].self_attn.k_proj.bias.data *= scale_factor
+
 del position_ids
 del theta
 del idx_theta
@@ -62,35 +70,36 @@ del zero_point
 gc.collect()
 
 # Prepare input and output names
-input_names = ['input_ids', 'attention_mask']
+input_names = []
+keys_values = []
 output_names = ['max_logit_id']
 dynamic_axes = {'input_ids': {1: 'ids_len'}}
-keys_values = []
 for i in range(num_layers):
     key_name = f'in_key_{i}'
     input_names.append(key_name)
-    keys_values.append(past_key_states)
+    keys_values.append(past_keys_values)
     dynamic_axes[key_name] = {1: 'history_len'}
     key_name = f'out_key_{i}'
     output_names.append(key_name)
     dynamic_axes[key_name] = {1: 'history_len_plus_ids_len'}
 
 for i in range(num_layers):
-    value_name = f'in_values_{i}'
+    value_name = f'in_value_{i}'
     input_names.append(value_name)
-    keys_values.append(past_values_states)
+    keys_values.append(past_keys_values)
     dynamic_axes[value_name] = {1: 'history_len'}
-    value_name = f'out_values_{i}'
+    value_name = f'out_value_{i}'
     output_names.append(value_name)
     dynamic_axes[value_name] = {1: 'history_len_plus_ids_len'}
 
+input_names.append('attention_mask')
+input_names.append('input_ids')
 
 print('Export start ...')
 with torch.inference_mode():
-    input_feed = [input_ids, attention_mask] + keys_values
     torch.onnx.export(
         model,
-        tuple(input_feed),
+        tuple(keys_values + [attention_mask, input_ids]),
         onnx_model_A,
         input_names=input_names,
         output_names=output_names,
@@ -101,8 +110,7 @@ with torch.inference_mode():
 del model
 del input_ids
 del attention_mask
-del past_key_states
-del past_values_states
+del past_keys_values
 gc.collect()
 print('\nExport done!\n\nStart running the Qwen by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
@@ -131,26 +139,27 @@ if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
     #  prompt = f'<|begin▁of▁sentence|><｜User｜>\n{query}<|end▁of▁sentence|>\n<|begin▁of▁sentence|><｜Assistant｜>\n'
     head = torch.tensor([[151646, 151644, 198]], dtype=torch.int32)
     tail = torch.tensor([[151643, 198, 151646, 151645, 198]], dtype=torch.int32)
-    token = tokenizer(query, return_tensors='pt')['input_ids']
-    token = torch.cat((head, token, tail), dim=-1)
+    tokens = tokenizer(query, return_tensors='pt')['input_ids']
+    tokens = torch.cat((head, tokens, tail), dim=-1)
 else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
-    token = tokenizer(prompt, return_tensors='pt')['input_ids']
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(token.int().numpy(), 'cpu', 0)
+    tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([-65504.0], dtype=np.float32), 'cpu', 0)
-past_key_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
+past_keys_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
+num_keys_values = num_layers + num_layers
 num_decode = 0
 print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 
 output_names = []
 input_feed = {
-    in_name_A[0].name: input_ids,
-    in_name_A[1].name: attention_mask,
+    in_name_A[-1].name: input_ids,
+    in_name_A[-2].name: attention_mask,
 }
-for i in range(2, len(in_name_A)):
-    input_feed[in_name_A[i].name] = past_key_values_A
-for i in range(len(out_name_A)):
+for i in range(num_keys_values):
+    input_feed[in_name_A[i].name] = past_keys_values_A
     output_names.append(out_name_A[i].name)
+output_names.append(out_name_A[num_keys_values].name)
 
 # Start to run LLM
 start_time = time.time()
@@ -163,12 +172,11 @@ while num_decode < max_single_chat_length:
     if token_id in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
         break
     else:
-        input_feed[in_name_A[0].name] = max_ids
-        for i in range(2, len(in_name_A)):
-            input_feed[in_name_A[i].name] = keys_values[i - 2]
+        input_feed[in_name_A[-1].name] = max_ids
+        for i in range(num_keys_values):
+            input_feed[in_name_A[i].name] = keys_values[i]
         if num_decode < 1:
-            input_feed[in_name_A[1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0.0], dtype=np.float32), 'cpu', 0)
+            input_feed[in_name_A[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0.0], dtype=np.float32), 'cpu', 0)
         num_decode += 1
         print(tokenizer.decode(token_id[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
-
