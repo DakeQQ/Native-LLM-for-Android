@@ -39,6 +39,8 @@ nodes_to_exclude = None                                                         
 # (optional process)
 # subprocess.run([f'python -m onnxruntime.quantization.preprocess --auto_merge --all_tensors_to_one_file --input {model_path} --output {quanted_folder_path}'], shell=True)
 
+
+# Start Weight-Only Quantize
 model = quant_utils.load_model_with_shape_infer(Path(model_path))
 
 if algorithm == "RTN":
