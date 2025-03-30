@@ -34,6 +34,7 @@ block_size = 128                                                                
 accuracy_level = 4                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 quant_symmetric = False                                                          # False may get more accuracy.
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
+upgrade_opset = 21                                                               # optional
 
 
 # Start Weight-Only Quantize
@@ -155,7 +156,7 @@ slim(
 # Upgrade the Opset version. (optional process)
 try:
     model = onnx.load(quanted_model_path)
-    model = onnx.version_converter.convert_version(model, 21)
+    model = onnx.version_converter.convert_version(model, upgrade_opset)
     onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
     del model
     gc.collect()
