@@ -5,8 +5,8 @@ import sys
 import onnx
 import torch
 import subprocess
-from pathlib import Path
 import onnx.version_converter
+from pathlib import Path
 from onnxsim import simplify
 from onnxslim import slim
 from onnxruntime.quantization import QuantType, quantize_dynamic, quant_utils
