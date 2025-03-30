@@ -34,7 +34,7 @@ block_size = 128                                                                
 accuracy_level = 4                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 quant_symmetric = False                                                          # False may get more accuracy.
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
-upgrade_opset = 21                                                               # optional
+upgrade_opset = 21                                                               # Optional process. Set 0 for close.
 
 
 # Start Weight-Only Quantize
@@ -154,20 +154,21 @@ slim(
 
 
 # Upgrade the Opset version. (optional process)
-try:
-    model = onnx.load(quanted_model_path)
-    model = onnx.version_converter.convert_version(model, upgrade_opset)
-    onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
-    del model
-    gc.collect()
-except FileNotFoundError:
-    print(f"Error: The model file at {quanted_model_path} was not found.")
-except onnx.checker.ValidationError as e:
-    print(f"ONNX validation error: {e}")
-except onnx.version_converter.ConvertError as e:
-    print(f"Version conversion error: {e}")
-except Exception as e:
-    print(f"An unexpected error occurred: {e}")
+if upgrade_opset > 0:
+    try:
+        model = onnx.load(quanted_model_path)
+        model = onnx.version_converter.convert_version(model, upgrade_opset)
+        onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+        del model
+        gc.collect()
+    except FileNotFoundError:
+        print(f"Error: The model file at {quanted_model_path} was not found.")
+    except onnx.checker.ValidationError as e:
+        print(f"ONNX validation error: {e}")
+    except onnx.version_converter.ConvertError as e:
+        print(f"Version conversion error: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 
 if is_large_model:
