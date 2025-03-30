@@ -36,10 +36,6 @@ quant_symmetric = False                                                         
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
 
 
-# Preprocess, it also cost alot of memory during preprocess, you can close this command and keep quanting. Call subprocess may get permission failed on Windows system.
-# (optional process)
-# subprocess.run([f'python -m onnxruntime.quantization.preprocess --auto_merge --all_tensors_to_one_file --input {model_path} --output {quanted_folder_path}'], shell=True)
-
 # Start Weight-Only Quantize
 model = quant_utils.load_model_with_shape_infer(Path(model_path))
 
