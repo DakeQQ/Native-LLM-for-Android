@@ -118,9 +118,19 @@ slim(
 
 
 # Upgrade the Opset version. (optional process)
-model = onnx.load(quanted_model_path)
-model = onnx.version_converter.convert_version(model, 21)
-onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+try:
+    model = onnx.load(quanted_model_path)
+    model = onnx.version_converter.convert_version(model, 21)
+    onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+except FileNotFoundError:
+    print(f"Error: The model file at {quanted_model_path} was not found.")
+except onnx.checker.ValidationError as e:
+    print(f"ONNX validation error: {e}")
+except onnx.version_converter.ConvertError as e:
+    print(f"Version conversion error: {e}")
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+    
 
 if is_large_model:
     pattern = os.path.join(quanted_folder_path, '*.data')
