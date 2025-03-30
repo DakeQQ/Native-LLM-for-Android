@@ -5,10 +5,11 @@ import sys
 import onnx
 import torch
 import subprocess
+from pathlib import Path
 import onnx.version_converter
 from onnxsim import simplify
 from onnxslim import slim
-from onnxruntime.quantization import QuantType, quantize_dynamic
+from onnxruntime.quantization import QuantType, quantize_dynamic, quant_utils
 from onnxruntime.transformers.optimizer import optimize_model
 from transformers import AutoModelForCausalLM
 
@@ -24,14 +25,9 @@ provider = 'CPUExecutionProvider'                                               
 use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
 
 
-# Preprocess, it also cost alot of memory during preprocess, you can close this command and keep quanting. Call subprocess may get permission failed on Windows system.
-# (optional process)
-# subprocess.run([f'python -m onnxruntime.quantization.preprocess --auto_merge --all_tensors_to_one_file --input {model_path} --output {quanted_folder_path}'], shell=True)
-
-
 # Start Quantize
 quantize_dynamic(
-    model_input=model_path,
+    model_input=quant_utils.load_model_with_shape_infer(Path(model_path)),
     model_output=quanted_model_path,
     per_channel=True,                                        # True for model accuracy but cost a lot of time during quanting process.
     reduce_range=False,                                      # True for some x86_64 platform.
