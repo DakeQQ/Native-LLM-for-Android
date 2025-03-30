@@ -81,7 +81,7 @@ quant = matmul_4bits_quantizer.MatMul4BitsQuantizer(
 quant.process()
 quant.model.save_model_to_file(
     quanted_model_path,
-    True                                         # save_as_external_data
+    False                                           # save_as_external_data
 )
 
 
@@ -97,7 +97,7 @@ else:
 slim(
     model=quanted_model_path,
     output_model=quanted_model_path,
-    no_shape_infer=False,   # False for more optimize but may get errors.
+    no_shape_infer=True,                           # False for more optimize but may get errors.
     skip_fusion_patterns=False,
     no_constant_folding=False,
     save_as_external_data=is_large_model,
@@ -134,7 +134,7 @@ model = optimize_model(quanted_model_path,
                        verbose=False,
                        model_type='bert')
 model.convert_float_to_float16(
-    keep_io_types=True,
+    keep_io_types=False,
     force_fp16_initializers=True,
     use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
     op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range', 'MatMulIntegerToFloat']
@@ -157,9 +157,18 @@ slim(
 
 
 # Upgrade the Opset version. (optional process)
-model = onnx.load(quanted_model_path)
-model = onnx.version_converter.convert_version(model, 21)
-onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+try:
+    model = onnx.load(quanted_model_path)
+    model = onnx.version_converter.convert_version(model, 21)
+    onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+except FileNotFoundError:
+    print(f"Error: The model file at {quanted_model_path} was not found.")
+except onnx.checker.ValidationError as e:
+    print(f"ONNX validation error: {e}")
+except onnx.version_converter.ConvertError as e:
+    print(f"Version conversion error: {e}")
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
 
 
 if is_large_model:
