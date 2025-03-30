@@ -7,8 +7,12 @@ import torch
 import subprocess
 import onnx.version_converter
 from onnxslim import slim
-from onnxruntime.transformers.optimizer import optimize_model
 from transformers import AutoModelForCausalLM
+from onnxruntime.transformers.optimizer import optimize_model
+from onnxruntime.quantization import (
+    matmul_4bits_quantizer,
+    quant_utils,
+)
 
 
 # Path Setting
@@ -17,26 +21,69 @@ quanted_folder_path = r"C:\Users\Downloads\Model_ONNX_Optimized"                
 model_path = os.path.join(original_folder_path, "Model.onnx")                    # The original fp32 model path.
 quanted_model_path = os.path.join(quanted_folder_path, "Model_Optimized.onnx")   # The optimized model stored path.
 download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                        # Set the folder path where the LLM whole project downloaded, otherwise set "NONE".
-use_gpu = True                                                                   # If true, the transformers.optimizer will remain the FP16 processes.
+
+target_platform = "arm"                                                          # ['arm', 'amd64']
+use_gpu = False                                                                  # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider']
 use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
+algorithm = "DEFAULT"                                                            # ["DEFAULT", "RTN", "HQQ",], HQQ will very slow both in quant and inference.
+bits = 4                                                                         # [4], Only work for 4 bits.
+op_types = ["MatMul"]                                                            # ["MatMul", "Gather"]; Adding Gather may get errors.
+quant_axes = [0]                                                                 # Target axes to quant the quant data.
+block_size = 128                                                                 # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
+accuracy_level = 4                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
+quant_symmetric = False                                                          # False may get more accuracy.
+nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
 
 
 # Preprocess, it also cost alot of memory during preprocess, you can close this command and keep quanting. Call subprocess may get permission failed on Windows system.
 # (optional process)
 # subprocess.run([f'python -m onnxruntime.quantization.preprocess --auto_merge --all_tensors_to_one_file --input {model_path} --output {quanted_folder_path}'], shell=True)
 
-
 # Start Weight-Only Quantize
-block_size = 256            # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
-symmetric = False           # False may get more accuracy.
-accuracy_level = 4          # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
-bits = 4                    # [2, 4, 8]
-quant_method = 'default'    # ["default", "hqq", "rtn", "gptq"]; default is recommended, or you will get errors.
-quant_format = 'QOperator'  # ["QOperator", "QDQ"]; QOperator format quantizes the model with quantized operators directly.  QDQ format quantize the model by inserting DeQuantizeLinear before the MatMul.,
-nodes_to_exclude = None     # Specify the unsupported op type, for example: ReduceMean
-# Call subprocess may get permission failed on Windows system.
-subprocess.run([f'python -m onnxruntime.quantization.matmul_4bits_quantizer --input_model {model_path} --output_model {quanted_model_path} --block_size {block_size} --symmetric {symmetric} --accuracy_level {accuracy_level} --bits {bits} --quant_method {quant_method} --quant_format {quant_format} --nodes_to_exclude {nodes_to_exclude}'], shell=True)
+model = quant_utils.load_model_with_shape_infer(Path(model_path))
+
+if algorithm == "RTN":
+    quant_config = matmul_4bits_quantizer.RTNWeightOnlyQuantConfig(
+        quant_format=quant_utils.QuantFormat.QOperator,
+        op_types_to_quantize=tuple(op_types)
+    )
+elif algorithm == "HQQ":
+    quant_config = matmul_4bits_quantizer.HQQWeightOnlyQuantConfig(
+        bits=bits,
+        block_size=block_size,
+        axis=quant_axes[0],
+        quant_format=quant_utils.QuantFormat.QOperator,
+        op_types_to_quantize=tuple(op_types),
+        quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types)))
+    )
+else:
+    quant_config = matmul_4bits_quantizer.DefaultWeightOnlyQuantConfig(
+        block_size=block_size,
+        is_symmetric=quant_symmetric,
+        accuracy_level=accuracy_level,
+        quant_format=quant_utils.QuantFormat.QOperator,
+        op_types_to_quantize=tuple(op_types),
+        quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types)))
+    )
+quant_config.bits = bits
+quant = matmul_4bits_quantizer.MatMul4BitsQuantizer(
+    model,
+    block_size=block_size,
+    is_symmetric=quant_symmetric,
+    accuracy_level=accuracy_level,
+    quant_format=quant_utils.QuantFormat.QOperator,
+    op_types_to_quantize=tuple(op_types),
+    quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types))),
+    algo_config=quant_config,
+    nodes_to_exclude=nodes_to_exclude
+)
+quant.process()
+quant.model.save_model_to_file(
+    quanted_model_path,
+    True                                         # save_as_external_data
+)
+
 
 model_size_bytes = sys.getsizeof(onnx.load(quanted_model_path).SerializeToString())
 model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
