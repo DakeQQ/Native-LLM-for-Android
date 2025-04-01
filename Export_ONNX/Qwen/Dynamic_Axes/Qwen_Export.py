@@ -25,7 +25,8 @@ hidden_size = model.config.hidden_size
 # Generate dummies for torch.onnx.export()
 attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
 input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value.
-past_keys_values = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
+past_keys = torch.zeros((num_key_value_heads, head_dim, 0), dtype=torch.float16)
+past_values = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
 position_ids = torch.zeros((max_seq_len, 1), dtype=torch.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
@@ -77,16 +78,16 @@ dynamic_axes = {'input_ids': {1: 'ids_len'}}
 for i in range(num_layers):
     key_name = f'in_key_{i}'
     input_names.append(key_name)
-    keys_values.append(past_keys_values)
-    dynamic_axes[key_name] = {1: 'history_len'}
+    keys_values.append(past_keys)
+    dynamic_axes[key_name] = {2: 'history_len'}
     key_name = f'out_key_{i}'
     output_names.append(key_name)
-    dynamic_axes[key_name] = {1: 'history_len_plus_ids_len'}
+    dynamic_axes[key_name] = {2: 'history_len_plus_ids_len'}
 
 for i in range(num_layers):
     value_name = f'in_value_{i}'
     input_names.append(value_name)
-    keys_values.append(past_keys_values)
+    keys_values.append(past_values)
     dynamic_axes[value_name] = {1: 'history_len'}
     value_name = f'out_value_{i}'
     output_names.append(value_name)
@@ -110,7 +111,8 @@ with torch.inference_mode():
 del model
 del input_ids
 del attention_mask
-del past_keys_values
+del past_keys
+del past_values
 gc.collect()
 print('\nExport done!\n\nStart running the Qwen by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
@@ -146,7 +148,8 @@ else:
     tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([-65504.0], dtype=np.float32), 'cpu', 0)
-past_keys_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
+past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, head_dim, 0), dtype=np.float16), 'cpu', 0)
+past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
 num_keys_values = num_layers + num_layers
 num_decode = 0
 print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
@@ -156,8 +159,11 @@ input_feed = {
     in_name_A[-1].name: input_ids,
     in_name_A[-2].name: attention_mask,
 }
-for i in range(num_keys_values):
-    input_feed[in_name_A[i].name] = past_keys_values_A
+for i in range(num_layers):
+    input_feed[in_name_A[i].name] = past_keys_A
+    output_names.append(out_name_A[i].name)
+for i in range(num_layers, num_keys_values):
+    input_feed[in_name_A[i].name] = past_values_A
     output_names.append(out_name_A[i].name)
 output_names.append(out_name_A[num_keys_values].name)
 
