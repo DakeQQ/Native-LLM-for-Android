@@ -6,6 +6,7 @@ import onnx
 import torch
 import subprocess
 import onnx.version_converter
+from pathlib import Path
 from onnxslim import slim
 from transformers import AutoModelForCausalLM
 from onnxruntime.transformers.optimizer import optimize_model
@@ -77,7 +78,7 @@ quant = matmul_4bits_quantizer.MatMul4BitsQuantizer(
 quant.process()
 quant.model.save_model_to_file(
     quanted_model_path,
-    Fa;se                                         # save_as_external_data
+    False                                         # save_as_external_data
 )
 
 model_size_bytes = sys.getsizeof(onnx.load(quanted_model_path).SerializeToString())
