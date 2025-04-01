@@ -6,6 +6,7 @@ import onnx
 import torch
 import subprocess
 import onnx.version_converter
+from pathlib import Path
 from onnxslim import slim
 from transformers import AutoModelForCausalLM
 from onnxruntime.transformers.optimizer import optimize_model
