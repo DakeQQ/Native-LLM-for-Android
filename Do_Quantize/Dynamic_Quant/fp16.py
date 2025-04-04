@@ -125,14 +125,13 @@ else:
     gc.collect()
 
 
-if is_large_model:
-    if upgrade_opset > 0:
-        pattern = os.path.join(quanted_folder_path, '*.data')
-        files_to_delete = glob.glob(pattern)
-        for file_path in files_to_delete:
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                print(f"Error deleting {file_path}: {e}")
+pattern = os.path.join(quanted_folder_path, '*.data')
+files_to_delete = glob.glob(pattern)
+for file_path in files_to_delete:
+    try:
+        os.remove(file_path)
+    except Exception as e:
+        print(f"Error deleting {file_path}: {e}")
+        
           
 # It is not recommended to convert an FP16 ONNX model to the ORT format because this process adds a Cast operation to convert the FP16 process back to FP32.
