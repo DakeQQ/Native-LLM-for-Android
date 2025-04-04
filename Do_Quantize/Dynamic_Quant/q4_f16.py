@@ -135,6 +135,7 @@ model.convert_float_to_float16(
     keep_io_types=False,
     force_fp16_initializers=True,
     use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
+    max_finite_val=65504.0,
     op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range', 'MatMulIntegerToFloat']
 )
 model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
