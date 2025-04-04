@@ -127,13 +127,14 @@ if upgrade_opset > 0:
 
 
 if is_large_model:
-    pattern = os.path.join(quanted_folder_path, '*.data')
-    files_to_delete = glob.glob(pattern)
-    for file_path in files_to_delete:
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            print(f"Error deleting {file_path}: {e}")
+    if upgrade_opset > 0:
+        pattern = os.path.join(quanted_folder_path, '*.data')
+        files_to_delete = glob.glob(pattern)
+        for file_path in files_to_delete:
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting {file_path}: {e}")
 else:
     # Convert the simplified model to ORT format.
     if provider == 'CPUExecutionProvider':
