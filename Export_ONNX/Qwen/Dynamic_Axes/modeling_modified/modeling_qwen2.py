@@ -240,8 +240,8 @@ class Qwen2Attention(nn.Module):
             attention_mask: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_cos_k: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_sin_k: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_cos_v: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_sin_v: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_cos_q: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_sin_q: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
             kv_seq_len: Optional[torch.LongTensor] = None
@@ -255,7 +255,7 @@ class Qwen2Attention(nn.Module):
         key_states = repeat_k(key_states, self.num_key_value_groups, self.num_key_value_heads_mul_groups, self.head_dim, kv_seq_len)
         value_states = repeat_v(value_states, self.num_key_value_groups, self.num_key_value_heads_mul_groups, self.head_dim, kv_seq_len)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
-            query_states * rotary_pos_emb_cos_v + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_v, key_states)
+            query_states * rotary_pos_emb_cos_q + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_q, key_states)
                                                               + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(1, -1, self.hidden_size)), save_key_states, save_value_states
 
 
@@ -283,8 +283,8 @@ class Qwen2FlashAttention2(Qwen2Attention):
             attention_mask: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_cos_k: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_sin_k: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_cos_v: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_sin_v: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_cos_q: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_sin_q: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
             kv_seq_len: Optional[torch.LongTensor] = None
@@ -298,7 +298,7 @@ class Qwen2FlashAttention2(Qwen2Attention):
         key_states = repeat_k(key_states, self.num_key_value_groups, self.num_key_value_heads_mul_groups, self.head_dim, kv_seq_len)
         value_states = repeat_v(value_states, self.num_key_value_groups, self.num_key_value_heads_mul_groups, self.head_dim, kv_seq_len)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
-            query_states * rotary_pos_emb_cos_v + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_v, key_states)
+            query_states * rotary_pos_emb_cos_q + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_q, key_states)
                                                               + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(1, -1, self.hidden_size)), save_key_states, save_value_states
 
 
@@ -317,8 +317,8 @@ class Qwen2SdpaAttention(Qwen2Attention):
             attention_mask: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_cos_k: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_sin_k: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_cos_v: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_sin_v: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_cos_q: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_sin_q: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
             kv_seq_len: Optional[torch.LongTensor] = None
@@ -332,7 +332,7 @@ class Qwen2SdpaAttention(Qwen2Attention):
         key_states = repeat_k(key_states, self.num_key_value_groups, self.num_key_value_heads_mul_groups, self.head_dim, kv_seq_len)
         value_states = repeat_v(value_states, self.num_key_value_groups, self.num_key_value_heads_mul_groups, self.head_dim, kv_seq_len)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
-            query_states * rotary_pos_emb_cos_v + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_v, key_states)
+            query_states * rotary_pos_emb_cos_q + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_q, key_states)
                                                               + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(1, -1, self.hidden_size)), save_key_states, save_value_states
 
 
@@ -366,8 +366,8 @@ class Qwen2DecoderLayer(nn.Module):
             attention_mask: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_cos_k: Optional[torch.FloatTensor] = None,
             rotary_pos_emb_sin_k: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_cos_v: Optional[torch.FloatTensor] = None,
-            rotary_pos_emb_sin_v: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_cos_q: Optional[torch.FloatTensor] = None,
+            rotary_pos_emb_sin_q: Optional[torch.FloatTensor] = None,
             past_key_states: Optional[torch.FloatTensor] = None,
             past_value_states: Optional[torch.FloatTensor] = None,
             kv_seq_len: Optional[torch.LongTensor] = None
@@ -377,8 +377,8 @@ class Qwen2DecoderLayer(nn.Module):
             attention_mask=attention_mask,
             rotary_pos_emb_cos_k=rotary_pos_emb_cos_k,
             rotary_pos_emb_sin_k=rotary_pos_emb_sin_k,
-            rotary_pos_emb_cos_v=rotary_pos_emb_cos_v,
-            rotary_pos_emb_sin_v=rotary_pos_emb_sin_v,
+            rotary_pos_emb_cos_q=rotary_pos_emb_cos_q,
+            rotary_pos_emb_sin_q=rotary_pos_emb_sin_q,
             past_key_states=past_key_states,
             past_value_states=past_value_states,
             kv_seq_len=kv_seq_len
@@ -730,10 +730,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         ids_len = input_ids.shape[1]
         history_len = all_inputs[0].shape[-1]
         kv_seq_len = ids_len + history_len
-        rotary_pos_emb_cos_v = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
-        rotary_pos_emb_sin_v = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
-        rotary_pos_emb_cos_k = rotary_pos_emb_cos_v.transpose(1, 2)
-        rotary_pos_emb_sin_k = rotary_pos_emb_sin_v.transpose(1, 2)
+        rotary_pos_emb_cos_q = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
+        rotary_pos_emb_sin_q = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
+        rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(1, 2)
+        rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(1, 2)
         hidden_states = self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
         attention_mask = self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask
         for i in range(self.num_layers):
@@ -742,8 +742,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 attention_mask=attention_mask,
                 rotary_pos_emb_cos_k=rotary_pos_emb_cos_k,
                 rotary_pos_emb_sin_k=rotary_pos_emb_sin_k,
-                rotary_pos_emb_cos_v=rotary_pos_emb_cos_v,
-                rotary_pos_emb_sin_v=rotary_pos_emb_sin_v,
+                rotary_pos_emb_cos_q=rotary_pos_emb_cos_q,
+                rotary_pos_emb_sin_q=rotary_pos_emb_sin_q,
                 past_key_states=all_inputs[i].float(),
                 past_value_states=all_inputs[i + self.num_layers].float(),
                 kv_seq_len=kv_seq_len
