@@ -113,14 +113,16 @@ if upgrade_opset > 0:
         onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
         del model
         gc.collect()
-    except FileNotFoundError:
-        print(f"Error: The model file at {quanted_model_path} was not found.")
-    except onnx.checker.ValidationError as e:
-        print(f"ONNX validation error: {e}")
-    except onnx.version_converter.ConvertError as e:
-        print(f"Version conversion error: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+    except:
+        model = onnx.load(quanted_model_path)
+        onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+        del model
+        gc.collect()
+else:
+    model = onnx.load(quanted_model_path)
+    onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
+    del model
+    gc.collect()
 
 
 if is_large_model:
