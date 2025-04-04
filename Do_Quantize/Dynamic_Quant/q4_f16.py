@@ -24,7 +24,7 @@ quanted_model_path = os.path.join(quanted_folder_path, "Model_Optimized.onnx")  
 download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                        # Set the folder path where the LLM whole project downloaded, otherwise set "NONE".
 
 target_platform = "arm"                                                          # ['arm', 'amd64']
-use_gpu = False                                                                  # If true, the transformers.optimizer will remain the FP16 processes.
+use_gpu = True                                                                   # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider']
 use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
 algorithm = "DEFAULT"                                                            # ["DEFAULT", "RTN", "HQQ",], HQQ will very slow both in quant and inference.
@@ -32,7 +32,7 @@ bits = 4                                                                        
 op_types = ["MatMul"]                                                            # ["MatMul", "Gather"]; Adding Gather may get errors.
 quant_axes = [0]                                                                 # Target axes to quant the quant data.
 block_size = 128                                                                 # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
-accuracy_level = 4                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
+accuracy_level = 2                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 quant_symmetric = False                                                          # False may get more accuracy.
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
 upgrade_opset = 21                                                               # Optional process. Set 0 for close.
