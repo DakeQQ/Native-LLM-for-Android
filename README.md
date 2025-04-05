@@ -37,7 +37,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
    - It is recommended to use dynamic axes and q4f32 quantization.
    
 ## Tokenizer Files
-- The `tokenizer.cpp` and `tokenizer.hpp` files are sourced from the [mnn-llm repository](https://github.com/wangzhaode/mnn-llm).
+- The `tokenizer.cpp` and `tokenizer.hpp` files are sourced from the [mnn-llm repository](https://github.com/alibaba/MNN/tree/master/transformers/llm/engine/src).
 
 ## Exporting Models
 1. Navigate to the `Export_ONNX` folder.
@@ -147,7 +147,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## 分词器文件
 
-- `tokenizer.cpp` 和 `tokenizer.hpp` 文件来源于 [mnn-llm 仓库](https://github.com/wangzhaode/mnn-llm)。
+- `tokenizer.cpp` 和 `tokenizer.hpp` 文件来源于 [mnn-llm 仓库](https://github.com/alibaba/MNN/tree/master/transformers/llm/engine/src)。
 
 ## 导出模型
 
