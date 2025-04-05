@@ -70,9 +70,9 @@ inline static void clear_history()
     save_index = 0;
     history_len = 0;
     response_count = 0;
-    attention_mask = -65504.f;
-    accumulate_num_ids[0] = 0;
     num_ids_per_chat[0] = 0;
+    accumulate_num_ids[0] = 0;
+    attention_mask = -65504.f;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
