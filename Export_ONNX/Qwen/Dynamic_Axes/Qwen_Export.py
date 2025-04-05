@@ -15,7 +15,7 @@ onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'   # Assign a path wh
 # Load the model
 shutil.copyfile("./modeling_modified/modeling_qwen2.py", site.getsitepackages()[-1] + "/transformers/models/qwen2/modeling_qwen2.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-max_seq_len = 1024  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 682, at the same time.
+max_seq_len = 4096  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 692, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
@@ -170,15 +170,15 @@ output_names.append(out_name_A[num_keys_values].name)
 # Start to run LLM
 start_time = time.time()
 while num_decode < max_single_chat_length:
-    max_ids, *keys_values = ort_session_A.run_with_ort_values(
+    max_logit_ids, *keys_values = ort_session_A.run_with_ort_values(
         output_names,
         input_feed
     )
-    token_id = onnxruntime.OrtValue.numpy(max_ids)
+    token_id = onnxruntime.OrtValue.numpy(max_logit_ids)
     if token_id in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
         break
     else:
-        input_feed[in_name_A[-1].name] = max_ids
+        input_feed[in_name_A[-1].name] = max_logit_ids
         for i in range(num_keys_values):
             input_feed[in_name_A[i].name] = keys_values[i]
         if num_decode < 1:
@@ -186,3 +186,4 @@ while num_decode < max_single_chat_length:
         num_decode += 1
         print(tokenizer.decode(token_id[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
