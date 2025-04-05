@@ -689,7 +689,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         super().__init__(config)
         self.model = Qwen2Model(config)
         self.vocab_size = config.vocab_size
-        self.max_seq_len = 1024
+        self.max_seq_len = 4096
         self.hidden_size = config.hidden_size
         self.num_layers = config.num_hidden_layers
         self.num_heads = config.num_attention_heads
