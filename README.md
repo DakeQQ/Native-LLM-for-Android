@@ -11,6 +11,11 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Phi3.5-mini-instruct**: 3.8B
 - **Llama-3.2-Instruct**: 1B
 
+## Recent Updates
+- 2025/04/05：Update `q4f32` + `dynamic_axes`, the inference speed of `ONNX-CPU-q4f32` is only about 10% slower than `MNN-CPU-q4f16`.
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
+- 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
+
 ## Getting Started
 1. **Download Models:**
    - Demo models are available on [Google Drive](https://drive.google.com/drive/folders/1E43ApPcOq3I2xvb9b7aOxazTcR3hn5zK?usp=drive_link).
@@ -30,7 +35,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 4. **ONNX Export Considerations:**
    - It is recommended to use dynamic axes and q4f32 quantization.
-   - 
+   
 ## Tokenizer Files
 - The `tokenizer.cpp` and `tokenizer.hpp` files are sourced from the [mnn-llm repository](https://github.com/wangzhaode/mnn-llm).
 
@@ -43,10 +48,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ## Quantization Notes
 - Use `onnxruntime.tools.convert_onnx_models_to_ort` to convert models to `*.ort` format. Note that this process automatically adds `Cast` operators that change FP16 multiplication to FP32.
 - The quantization methods are detailed in the `Do_Quantize` folder.
-
-## Recent Updates
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
-- 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 
 ## Additional Resources
 - Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
@@ -117,6 +118,12 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Phi3.5-mini-instruct**: 3.8B
 - **Llama-3.2-Instruct**: 1B
 
+
+## 最近更新
+- 2025/04/05: 更新`q4f32` + `dynamic_axes`，`ONNX-CPU-q4f32`的推理速度仅慢于`MNN-CPU-q4f16`约10%。
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）。
+- 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
+
 ## 入门指南
 
 1. **下载模型：**
@@ -153,11 +160,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 - 使用 `onnxruntime.tools.convert_onnx_models_to_ort` 将模型转换为 `*.ort` 格式。注意该过程会自动添加 `Cast` 操作符，将 FP16 乘法改为 FP32。
 - 量化方法详见 `Do_Quantize` 文件夹。
-
-## 最近更新
-
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）
-- 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 
 ## 额外资源
 
