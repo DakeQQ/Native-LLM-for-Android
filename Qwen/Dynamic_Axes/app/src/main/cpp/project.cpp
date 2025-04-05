@@ -99,7 +99,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             response_count = 0;
         }
         const char *query = env->GetStringUTFChars(jquery, nullptr);
-        std::vector<int32_t> get_ids = tokenizer->encode(query);
+        std::vector<int> get_ids = tokenizer->encode(query);
         if (use_deepseek) {
             start_id = 151646;
             end_id_1 = end_id_0;
@@ -152,7 +152,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         input_dims_A[last_indices][1] = ids_len;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(input_ids.data()), ids_len * sizeof(int32_t),
+                reinterpret_cast<void*>(input_ids.data()), ids_len * sizeof(int),
                 input_dims_A[last_indices].data(), input_dims_A[last_indices].size(), input_types_A[last_indices],
                 &input_tensors_A[last_indices]);
         for (int i = 0; i < num_keys_values; i++) {
@@ -166,8 +166,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                            output_tensors_A[buffer_index].data());
         void *max_logit_id;
         ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
-        input_ids[0] = reinterpret_cast<int32_t*>(max_logit_id)[0];
-        if ((input_ids[0] != end_id_0) && (input_ids[0] != end_id_1) && (response_count < single_chat_limit) && (history_len < max_seq_len)) {
+        int token_id = reinterpret_cast<int*>(max_logit_id)[0];
+        if ((token_id != end_id_0) && (token_id != end_id_1) && (response_count < single_chat_limit) && (history_len < max_seq_len)) {
             input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
             for (int i = 0; i < num_keys_values; i++) {
                 input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
@@ -193,16 +193,15 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             } else {
                 history_len += 1;
             }
-            save_max_logit_position[response_count] = input_ids[0];
+            save_max_logit_position[response_count] = token_id;
             response_count += 1;
-            return env->NewStringUTF(get_output_words(input_ids[0]).c_str());
+            return env->NewStringUTF(get_output_words(token_id).c_str());
         } else {
             save_max_logit_position[response_count] = end_id_1;
             response_count += 1;
             num_ids_per_chat[save_index] += response_count;
             attention_mask = -65504.f;
             history_len = 0;
-            input_ids[0] = start_id;
             if (save_index > 0) {
                 accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
                 if (accumulate_num_ids[save_index] > next_chat_buffer) {
@@ -423,14 +422,16 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     }
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(&attention_mask), sizeof(float),
+            reinterpret_cast<void*>(&attention_mask), sizeof(float),
+//        reinterpret_cast<void *>(&attention_mask), sizeof(Ort::Float16_t),
             input_dims_A[num_keys_values].data(), input_dims_A[num_keys_values].size(), input_types_A[num_keys_values],
             &input_tensors_A[num_keys_values]);
+
     for (int i = 0; i < num_layers; i++) {
         input_dims_A[i][2] = 0;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(past_key_values_init.data()), 0,
+                reinterpret_cast<void*>(past_key_values_init.data()), 0,
                 input_dims_A[i].data(), input_dims_A[i].size(), input_types_A[i],
                 &input_tensors_kv_init_A[i]);
     }
@@ -438,7 +439,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         input_dims_A[i][1] = 0;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(past_key_values_init.data()), 0,
+                reinterpret_cast<void*>(past_key_values_init.data()), 0,
                 input_dims_A[i].data(), input_dims_A[i].size(), input_types_A[i],
                 &input_tensors_kv_init_A[i]);
     }
