@@ -29,8 +29,8 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
       - `project.h: Line 14, 15, 16, 35, 36, 39, 116, 117, 118, 121, 122`
 
 4. **ONNX Export Considerations:**
-   - Dynamic axes were not used during export to better adapt to ONNX Runtime on Android. Exported ONNX models may not be optimal for x86_64 systems.
-
+   - It is recommended to use dynamic axes and q4f32 quantization.
+   - 
 ## Tokenizer Files
 - The `tokenizer.cpp` and `tokenizer.hpp` files are sourced from the [mnn-llm repository](https://github.com/wangzhaode/mnn-llm).
 
@@ -55,6 +55,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### DeepSeek-R1
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Distill-Qwen-1.5B<br>q4f32<br>dynamic | 19.5 token/s         |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Distill-Qwen-1.5B<br>q8f32 | 13 token/s         |
 | HyperOS 2  | Xiaomi-14T-Pro | MediaTek_9300+-CPU    | Distill-Qwen-1.5B<br>q8f32 | 22 token/s         |
 
@@ -68,6 +69,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
 | Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2-1.5B-Instruct<br>q8f32 | 20 token/s         |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q4f32<br>dynamic | 20 token/s  |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
 | Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
 
@@ -134,7 +136,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
       - `project.h: Line 14, 15, 16, 35, 36, 39, 116, 117, 118, 121, 122`
 
 4. **ONNX 导出注意事项：**
-   - 导出时未使用动态轴，以更好地适应 Android 上的 ONNX Runtime。导出的 ONNX 模型可能不适合 x86_64 系统。
+   - 推荐使用动态轴以及`q4f32`量化。
 
 ## 分词器文件
 
