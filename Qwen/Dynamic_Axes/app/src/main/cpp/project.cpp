@@ -93,7 +93,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                                                      jboolean add_prompt,
                                                      jboolean clear) {
     if (add_prompt) {
-        chatting = true;
         if (clear) {
             clear_history();
         } else {
