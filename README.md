@@ -13,8 +13,8 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## Recent Updates
 - 2025/04/05：Update `q4f32` + `dynamic_axes`, the inference speed of `ONNX-CPU-q4f32` is only about 10% slower than `MNN-CPU-q4f16`.
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
 
 ## Getting Started
 1. **Download Models:**
@@ -121,8 +121,8 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## 最近更新
 - 2025/04/05: 更新`q4f32` + `dynamic_axes`，`ONNX-CPU-q4f32`的推理速度仅慢于`MNN-CPU-q4f16`约10%。
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）。
 - 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）。
 
 ## 入门指南
 
