@@ -424,10 +424,8 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
             reinterpret_cast<void *>(&attention_mask), sizeof(float),
-//        reinterpret_cast<void *>(&attention_mask), sizeof(Ort::Float16_t),
             input_dims_A[num_keys_values].data(), input_dims_A[num_keys_values].size(), input_types_A[num_keys_values],
             &input_tensors_A[num_keys_values]);
-
     for (int i = 0; i < num_layers; i++) {
         input_dims_A[i][2] = 0;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
