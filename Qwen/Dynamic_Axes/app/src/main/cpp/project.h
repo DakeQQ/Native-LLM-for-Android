@@ -19,7 +19,7 @@ const std::string file_name_A_external = "59da4aba-1227-11f0-aada-bc091bee2d5c";
 const bool use_deepseek = true;                                                 // Enable if using DeepSeek-Distill-Qwen.
 
 // Model Configuration
-const int num_layers = 28;                                                      // Transformer layers. Refer to config.json for the value.
+const int num_layers = 28;                                                      // Transformer layers. Refer to config.json for the value. 24 for Qwen-0.5B / 28 for Qwen-1.5B / 36 for Qwen-3B
 const int max_seq_len = 4096;                                                   // Please set this value to match the exported model.
 const int num_keys_values = num_layers + num_layers;
 const int last_indices = num_keys_values + 1;
