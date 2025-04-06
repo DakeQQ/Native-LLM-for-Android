@@ -138,59 +138,59 @@ with torch.inference_mode():
 
     model_A = InternVL_PartA(model, height_factor, image_size, num_image_token)
     print('\nExport Part_A Start...')
-    # torch.onnx.export(
-    #     model_A,
-    #     (pixel_values,),
-    #     onnx_model_A,
-    #     input_names=[
-    #         'pixel_values'
-    #     ],
-    #     output_names=['vision_embed'],
-    #     do_constant_folding=True,
-    #     opset_version=17
-    # )
+    torch.onnx.export(
+        model_A,
+        (pixel_values,),
+        onnx_model_A,
+        input_names=[
+            'pixel_values'
+        ],
+        output_names=['vision_embed'],
+        do_constant_folding=True,
+        opset_version=17
+    )
     del model_A
     del pixel_values
     gc.collect()
     print('\nExport Part_A Done!  \n\nExport Part_B Start...')
 
     model_B = InternVL_PartB(PROMPT_HEAD_LENGTH)
-    # torch.onnx.export(
-    #     model_B,
-    #     (hidden_states, vision_embed),
-    #     onnx_model_B,
-    #     input_names=[
-    #         'hidden_states',
-    #         'vision_embed'
-    #     ],
-    #     output_names=['hidden_states_with_vision'],
-    #     dynamic_axes={
-    #         'hidden_states': {1: 'ids_len'},
-    #         'hidden_states_with_vision': {1: 'ids_len_vision_embed_len'}
-    #     },
-    #     do_constant_folding=True,
-    #     opset_version=17
-    # )
+    torch.onnx.export(
+        model_B,
+        (hidden_states, vision_embed),
+        onnx_model_B,
+        input_names=[
+            'hidden_states',
+            'vision_embed'
+        ],
+        output_names=['hidden_states_with_vision'],
+        dynamic_axes={
+            'hidden_states': {1: 'ids_len'},
+            'hidden_states_with_vision': {1: 'ids_len_vision_embed_len'}
+        },
+        do_constant_folding=True,
+        opset_version=17
+    )
     del model_B
     del vision_embed
     print('\nExport Part_B Done! \n\nExport Part_C Start...')
 
     model_C = InternVL_PartC(embed_data, scale, zero_point, hidden_size)
-    # torch.onnx.export(
-    #     model_C,
-    #     (input_ids,),
-    #     onnx_model_C,
-    #     input_names=[
-    #         'input_ids'
-    #     ],
-    #     output_names=['hidden_states'],
-    #     dynamic_axes={
-    #         'input_ids': {1: 'ids_len'},
-    #         'hidden_states': {1: 'ids_len'}
-    #     },
-    #     do_constant_folding=True,
-    #     opset_version=17
-    # )
+    torch.onnx.export(
+        model_C,
+        (input_ids,),
+        onnx_model_C,
+        input_names=[
+            'input_ids'
+        ],
+        output_names=['hidden_states'],
+        dynamic_axes={
+            'input_ids': {1: 'ids_len'},
+            'hidden_states': {1: 'ids_len'}
+        },
+        do_constant_folding=True,
+        opset_version=17
+    )
     del model_C
     del embed_data
     del data
@@ -228,17 +228,17 @@ with torch.inference_mode():
     input_names.append('hidden_states')
 
     print('Export start ...')
-    # with torch.inference_mode():
-    #     torch.onnx.export(
-    #         model,
-    #         tuple(keys_values + [attention_mask, split_factor, hidden_states]),
-    #         onnx_model_D,
-    #         input_names=input_names,
-    #         output_names=output_names,
-    #         dynamic_axes=dynamic_axes,
-    #         do_constant_folding=True,
-    #         opset_version=17
-    #     )
+    with torch.inference_mode():
+        torch.onnx.export(
+            model,
+            tuple(keys_values + [attention_mask, split_factor, hidden_states]),
+            onnx_model_D,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+            do_constant_folding=True,
+            opset_version=17
+        )
     del model
     del hidden_states
     del attention_mask
