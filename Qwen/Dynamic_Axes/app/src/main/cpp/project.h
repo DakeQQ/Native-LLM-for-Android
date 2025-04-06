@@ -7,7 +7,7 @@
 #include "tokenizer.hpp"
 
 // ONNX Runtime API Components
-OrtMemoryInfo *memory_info;
+OrtMemoryInfo *memory_info_A;
 const OrtApi *ort_runtime_A;
 OrtSession *session_model_A;
 OrtRunOptions *run_options_A;
