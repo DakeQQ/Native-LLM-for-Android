@@ -435,17 +435,13 @@ class InternLM2DecoderLayer(nn.Module):
     def __init__(self, config: InternLM2Config):
         super().__init__()
         self.hidden_size = config.hidden_size
-
         self.attention = INTERNLM2_ATTENTION_CLASSES[config.attn_implementation](config=config)
-
         self.feed_forward = InternLM2MLP(config)
         #visual expert copied from self.feed_forward
         self.feed_forward_ve = InternLM2MLP(config)
-
         self.attention_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.ffn_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.prompt_head_len = torch.tensor([PROMPT_HEAD_LENGTH], dtype=torch.int64)
-        self.prompt_head_len_minus = torch.tensor([MAX_SEQ_LENGTH - PROMPT_HEAD_LENGTH], dtype=torch.int64)
 
     def forward(
             self,
@@ -473,10 +469,9 @@ class InternLM2DecoderLayer(nn.Module):
         )
         hidden_states_attn += hidden_states
         hidden_states = self.ffn_norm(hidden_states_attn)
-        text_hidden_A = self.feed_forward(hidden_states[:, :self.prompt_head_len])
+        text_hidden = self.feed_forward(hidden_states)
         vision_hidden = self.feed_forward_ve(hidden_states[:, self.prompt_head_len:split_factor])
-        text_hidden_B = self.feed_forward(hidden_states[:, split_factor:])
-        hidden_states = torch.cat((text_hidden_A, vision_hidden, text_hidden_B), dim=1)
+        hidden_states = torch.cat((text_hidden[:, :self.prompt_head_len], vision_hidden, text_hidden[:, split_factor:]), dim=1)
         return hidden_states_attn + hidden_states, past_key_states, past_value_states
     
     
