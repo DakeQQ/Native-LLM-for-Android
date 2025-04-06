@@ -108,11 +108,8 @@ with torch.inference_mode():
 
     pixel_values = torch.ones((1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]), dtype=torch.uint8)
     vision_embed = torch.ones((1, num_image_token, hidden_size), dtype=torch.float16)
-    ids_len = torch.tensor([10], dtype=torch.long)             # "10" is just a dummy value.
-    history_len = torch.tensor([10], dtype=torch.long)         # "10" is just a dummy value.
     attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
     split_factor = torch.tensor([PROMPT_HEAD_LENGTH], dtype=torch.int64)
-    kv_seq_len = ids_len + history_len
     input_ids = torch.ones((1, MAX_SEQ_LENGTH), dtype=torch.int32)
     hidden_states = torch.ones((1, MAX_SEQ_LENGTH, hidden_size), dtype=torch.float16)
     past_keys = torch.zeros((num_key_value_heads, head_dim, 0), dtype=torch.float16)
@@ -128,6 +125,10 @@ with torch.inference_mode():
     sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
     model.base_model.language_model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
     model.base_model.language_model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
+    del idx_theta
+    del position_ids
+    del cos_rotary_pos_emb
+    del sin_rotary_pos_emb
 
     model.base_model.language_model.model.tok_embeddings.weight.requires_grad = False
     data = model.base_model.language_model.model.tok_embeddings.weight.data
