@@ -246,6 +246,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                                                             jboolean low_memory_mode)
 {
     OrtStatus *status;
+    OrtAllocator* allocator;
     OrtEnv *ort_env_A;
     OrtSessionOptions *session_options_A;
     {
