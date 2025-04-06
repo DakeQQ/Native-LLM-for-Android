@@ -723,7 +723,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
     @add_start_docstrings_to_model_forward(QWEN2_INPUTS_DOCSTRING)
     def forward(
             self,
-            *all_inputs: torch.FloatTensor
+            *all_inputs
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         input_ids = all_inputs[-1]
         attention_mask = all_inputs[-2]
