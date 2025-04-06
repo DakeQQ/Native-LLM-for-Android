@@ -372,7 +372,7 @@ class Qwen2DecoderLayer(nn.Module):
             past_value_states: Optional[torch.FloatTensor] = None,
             kv_seq_len: Optional[torch.LongTensor] = None
     ) -> [torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
-        hidden_states_temp, past_key_states, past_value_states = self.self_attn(
+        hidden_states_attn, past_key_states, past_value_states = self.self_attn(
             hidden_states=self.input_layernorm(hidden_states),
             attention_mask=attention_mask,
             rotary_pos_emb_cos_k=rotary_pos_emb_cos_k,
@@ -383,8 +383,8 @@ class Qwen2DecoderLayer(nn.Module):
             past_value_states=past_value_states,
             kv_seq_len=kv_seq_len
         )
-        hidden_states_temp = hidden_states_temp + hidden_states
-        return hidden_states_temp + self.mlp(self.post_attention_layernorm(hidden_states_temp)), past_key_states, past_value_states
+        hidden_states_attn = hidden_states_attn + hidden_states
+        return hidden_states_attn + self.mlp(self.post_attention_layernorm(hidden_states_attn)), past_key_states, past_value_states
 
 
 QWEN2_START_DOCSTRING = r"""
