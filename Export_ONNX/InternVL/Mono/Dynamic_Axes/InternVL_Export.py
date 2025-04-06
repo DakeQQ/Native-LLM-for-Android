@@ -16,12 +16,12 @@ except:
     PROMPT_HEAD_LENGTH = 5
 
 
+use_dynamic_input_image_size = False                                                # False for fixed image size as input.
 path = r'/home/DakeQQ/Downloads/Mono-InternVL-2B-S1-3'                              # Set the folder path where the Mono-InternVL whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_A.onnx'                # Assign a path where the exported InternVL model stored.
 onnx_model_B = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_B.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_C.onnx'
 onnx_model_D = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_D.onnx'
-
 image_path = r"./psyduck.png"                                                       # Test image for the exported onnx model.
 query = "Provide a detailed description of the image."                              # Test query for the exported onnx model.
 
@@ -29,7 +29,6 @@ query = "Provide a detailed description of the image."                          
 shutil.copyfile("./modeling_modified/modeling_intern_patch.py", path + "/modeling_intern_patch.py")
 shutil.copyfile("./modeling_modified/modeling_internlm2_ve.py", path + "/modeling_internlm2_ve.py")
 shutil.copyfile("./export_config.py", path + "/export_config.py")
-
 from transformers import AutoModel, AutoTokenizer
 
 
@@ -146,6 +145,9 @@ with torch.inference_mode():
             'pixel_values'
         ],
         output_names=['vision_embed'],
+        dynamic_axes={
+            'pixel_values': {2: 'height', 3: 'width'}
+        } if use_dynamic_input_image_size else None,
         do_constant_folding=True,
         opset_version=17
     )
@@ -289,7 +291,8 @@ out_name_D = ort_session_D.get_outputs()
 # Pre-process inputs
 if is_valid_image_path(image_path):
     image = Image.open(image_path)
-    image = image.resize((INPUT_IMAGE_SIZE[1], INPUT_IMAGE_SIZE[0]))
+    if not use_dynamic_input_image_size:
+        image = image.resize((INPUT_IMAGE_SIZE[1], INPUT_IMAGE_SIZE[0]))
     if image.mode != 'RGB':
         image = image.convert('RGB')
     pixel_values = np.transpose(np.array(image).astype(np.uint8), (2, 0, 1))
