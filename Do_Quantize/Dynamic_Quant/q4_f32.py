@@ -78,7 +78,7 @@ quant = matmul_4bits_quantizer.MatMul4BitsQuantizer(
 quant.process()
 quant.model.save_model_to_file(
     quanted_model_path,
-    False                                         # save_as_external_data
+    True                                         # save_as_external_data
 )
 
 model_size_bytes = sys.getsizeof(onnx.load(quanted_model_path).SerializeToString())
