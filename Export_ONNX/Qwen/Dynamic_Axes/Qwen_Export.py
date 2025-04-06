@@ -157,7 +157,7 @@ print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 output_names = []
 input_feed = {
     in_name_A[-1].name: input_ids,
-    in_name_A[-2].name: attention_mask,
+    in_name_A[-2].name: attention_mask
 }
 for i in range(num_layers):
     input_feed[in_name_A[i].name] = past_keys_A
