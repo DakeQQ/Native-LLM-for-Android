@@ -369,7 +369,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     input_dims_A.resize(amount_of_input);
     input_types_A.resize(amount_of_input);
     input_tensors_A.resize(amount_of_input);
-    for (size_t i = 0; i < amount_of_input; i++) {
+    for (int i = 0; i < amount_of_input; i++) {
         char *name;
         OrtTypeInfo *typeinfo;
         size_t dimensions;
@@ -398,7 +398,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     for (auto & i : output_tensors_A) {
         i.resize(amount_of_output);
     }
-    for (size_t i = 0; i < amount_of_output; i++) {
+    for (int i = 0; i < amount_of_output; i++) {
         char *name;
         OrtTypeInfo *typeinfo;
         size_t dimensions;
