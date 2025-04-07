@@ -9,8 +9,8 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path = '/home/DakeQQ/Downloads/Qwen2.5-1.5B-Instruct'         # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'   # Assign a path where the exported Qwen model stored.
+path = '/home/DakeQQ/Downloads/DeepSeek-R1-Distill-Qwen-1.5B'  # Set the folder path where the Qwen whole project downloaded.
+onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'    # Assign a path where the exported Qwen model stored.
 
 # Load the model
 shutil.copyfile("./modeling_modified/modeling_qwen2.py", site.getsitepackages()[-1] + "/transformers/models/qwen2/modeling_qwen2.py")
@@ -23,7 +23,7 @@ num_layers = model.config.num_hidden_layers
 hidden_size = model.config.hidden_size
 
 # Generate dummies for torch.onnx.export()
-attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
+attention_mask = torch.tensor([0], dtype=torch.int8)
 input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value.
 past_keys = torch.zeros((num_key_value_heads, head_dim, 0), dtype=torch.float16)
 past_values = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
@@ -147,7 +147,7 @@ else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
     tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
-attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([-65504.0], dtype=np.float32), 'cpu', 0)
+attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
 past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, head_dim, 0), dtype=np.float16), 'cpu', 0)
 past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
 num_keys_values = num_layers + num_layers
@@ -182,7 +182,7 @@ while num_decode < max_single_chat_length:
         for i in range(num_keys_values):
             input_feed[in_name_A[i].name] = keys_values[i]
         if num_decode < 1:
-            input_feed[in_name_A[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0.0], dtype=np.float32), 'cpu', 0)
+            input_feed[in_name_A[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
         num_decode += 1
         print(tokenizer.decode(token_id[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
