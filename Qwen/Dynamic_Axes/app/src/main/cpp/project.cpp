@@ -173,11 +173,11 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
             if (buffer_index > 1) {
                 int clear_idx = buffer_index - 1;
-                for (int i = 0; i < last_indices; i++) {
+                for (int i = 0; i < output_tensors_A.size(); i++) {
                     ort_runtime_A->ReleaseValue(output_tensors_A[clear_idx][i]);
                 }
                 if (buffer_index == 2) {
-                    for (int i = 0; i < last_indices; i++) {
+                    for (int i = 0; i < output_tensors_A.size(); i++) {
                         ort_runtime_A->ReleaseValue(output_tensors_A[0][i]);
                     }
                 }
