@@ -41,6 +41,7 @@ int save_index = 0;
 int buffer_index = 0;
 int history_len = 0;
 int ids_len = 0;
+int amount_of_output;
 
 // Init Values
 int8_t attention_mask = 1;
