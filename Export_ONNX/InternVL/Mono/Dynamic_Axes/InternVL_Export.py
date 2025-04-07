@@ -231,17 +231,16 @@ with torch.inference_mode():
     input_names.append('hidden_states')
 
     print('Export start ...')
-    with torch.inference_mode():
-        torch.onnx.export(
-            model,
-            tuple(keys_values + [attention_mask, split_factor, hidden_states]),
-            onnx_model_D,
-            input_names=input_names,
-            output_names=output_names,
-            dynamic_axes=dynamic_axes,
-            do_constant_folding=True,
-            opset_version=17
-        )
+    torch.onnx.export(
+        model,
+        tuple(keys_values + [attention_mask, split_factor, hidden_states]),
+        onnx_model_D,
+        input_names=input_names,
+        output_names=output_names,
+        dynamic_axes=dynamic_axes,
+        do_constant_folding=True,
+        opset_version=17
+    )
     del model
     del hidden_states
     del attention_mask
