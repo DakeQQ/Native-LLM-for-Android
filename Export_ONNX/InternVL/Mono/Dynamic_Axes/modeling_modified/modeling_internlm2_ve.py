@@ -799,8 +799,7 @@ class InternLM2VEForCausalLM(InternLM2PreTrainedModel):
         self.head_dim = self.hidden_size // self.num_heads
         self.save_key = [None] * self.num_layers
         self.save_value = [None] * self.num_layers
-        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
-
+        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8))) * -128
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -837,7 +836,7 @@ class InternLM2VEForCausalLM(InternLM2PreTrainedModel):
         rotary_pos_emb_sin_q = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
         rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(1, 2)
         rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(1, 2)
-        attention_mask = self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask
+        attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask).float()
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i](
                 hidden_states=hidden_states,
