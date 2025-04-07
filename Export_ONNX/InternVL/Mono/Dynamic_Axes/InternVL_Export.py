@@ -123,9 +123,7 @@ with torch.inference_mode():
     hidden_states = torch.ones((1, MAX_SEQ_LENGTH, hidden_size), dtype=torch.float32)
     past_keys = torch.zeros((num_key_value_heads, head_dim, 0), dtype=torch.float16)
     past_values = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
-    position_ids = torch.zeros((MAX_SEQ_LENGTH, 1), dtype=torch.float32)
-    for i in range(MAX_SEQ_LENGTH):
-        position_ids[i, 0] = float(i)
+    position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
     theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
     idx_theta = position_ids * theta
     cos_rotary_pos_emb = torch.cos(idx_theta)
@@ -134,6 +132,7 @@ with torch.inference_mode():
     sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
     model.base_model.language_model.register_buffer('cos_rotary_pos_emb', cos_rotary_pos_emb)
     model.base_model.language_model.register_buffer('sin_rotary_pos_emb', sin_rotary_pos_emb)
+    del theta
     del idx_theta
     del position_ids
     del cos_rotary_pos_emb
