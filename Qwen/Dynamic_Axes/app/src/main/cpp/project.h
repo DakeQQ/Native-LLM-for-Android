@@ -59,7 +59,7 @@ std::vector<ONNXTensorElementDataType> output_types_A;
 // Tensors
 std::vector<OrtValue*> input_tensors_A;
 std::vector<OrtValue*> input_tensors_kv_init_A(num_keys_values);
-std::vector<std::vector<OrtValue *>> output_tensors_A(max_seq_len);
+std::vector<std::vector<OrtValue*>> output_tensors_A(max_seq_len);
 
 // Arrays and Vectors
 std::vector<int> input_ids(max_seq_len, 0);
@@ -67,6 +67,7 @@ std::vector<int> accumulate_num_ids(20, 0);                    // Just make sure
 std::vector<int> num_ids_per_chat(20, 0);                      // Same size with accumulate_num_ids.
 std::vector<int> save_max_logit_position(max_seq_len, 0);
 std::vector<int> layer_indices(num_keys_values, 0);
+std::vector<size_t> input_ids_buffer_size(max_seq_len, 0);
 std::vector<Ort::Float16_t> past_key_values_init(1, Ort::Float16_t(0.f));
 
 // NLP Components
