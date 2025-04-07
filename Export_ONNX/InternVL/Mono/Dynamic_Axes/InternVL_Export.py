@@ -117,7 +117,7 @@ with torch.inference_mode():
 
     pixel_values = torch.ones((1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]), dtype=torch.uint8)
     vision_embed = torch.ones((1, num_image_token, hidden_size), dtype=torch.float32)
-    attention_mask = torch.tensor([-65504.0], dtype=torch.float32)
+    attention_mask = torch.tensor([1], dtype=torch.int8)
     split_factor = torch.tensor([PROMPT_HEAD_LENGTH], dtype=torch.int64)
     input_ids = torch.ones((1, MAX_SEQ_LENGTH), dtype=torch.int32)
     hidden_states = torch.ones((1, MAX_SEQ_LENGTH, hidden_size), dtype=torch.float32)
@@ -240,17 +240,16 @@ with torch.inference_mode():
     input_names.append('hidden_states')
 
     print('Export start ...')
-    with torch.inference_mode():
-        torch.onnx.export(
-            model,
-            tuple(keys_values + [attention_mask, split_factor, hidden_states]),
-            onnx_model_D,
-            input_names=input_names,
-            output_names=output_names,
-            dynamic_axes=dynamic_axes,
-            do_constant_folding=True,
-            opset_version=17
-        )
+    torch.onnx.export(
+        model,
+        tuple(keys_values + [attention_mask, split_factor, hidden_states]),
+        onnx_model_D,
+        input_names=input_names,
+        output_names=output_names,
+        dynamic_axes=dynamic_axes,
+        do_constant_folding=True,
+        opset_version=17
+    )
     del model
     del hidden_states
     del attention_mask
@@ -316,7 +315,7 @@ else:
 prompt = f"<|im_start|>user\n<img></img>\n{query}<|im_end|><|im_start|>assistant\n"
 tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
-attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([-65504.0], dtype=np.float32), 'cpu', 0)
+attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
 past_keys_D = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, head_dim, 0), dtype=np.float16), 'cpu', 0)
 past_values_D = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
 split_factor = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([PROMPT_HEAD_LENGTH], dtype=np.int64), 'cpu', 0)
@@ -375,7 +374,7 @@ while num_decode < max_single_chat_length:
             input_feed[in_name_D[i].name] = keys_values[i]
         if num_decode < 1:
             input_feed[in_name_D[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([PROMPT_HEAD_LENGTH], dtype=np.int64), 'cpu', 0)
-            input_feed[in_name_D[-3].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0.0], dtype=np.float32), 'cpu', 0)
+            input_feed[in_name_D[-3].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
         num_decode += 1
         print(tokenizer.decode(token_id[0]), end="", flush=True)
         hidden_states = ort_session_C.run_with_ort_values(
