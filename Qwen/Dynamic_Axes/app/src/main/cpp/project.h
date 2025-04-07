@@ -8,21 +8,22 @@
 
 // ONNX Runtime API Components
 const OrtApi *ort_runtime_A;
-OrtMemoryInfo *memory_info_A;
+OrtAllocator* allocator;
+OrtMemoryInfo *memory_info;
 OrtSession *session_model_A;
 OrtRunOptions *run_options_A;
 
 // Model File Settings
 const std::string file_name_A = "Qwen.onnx";
-const std::string file_name_A_external = "59da4aba-1227-11f0-aada-bc091bee2d5c";
-const bool use_deepseek = true;                                                 // Enable if using DeepSeek-Distill-Qwen.
+const std::string file_name_A_external = "09eab48a-1368-11f0-8f55-bc091bee2d5c";  // The demo model is DeepSeek-Qwen
+const bool use_deepseek = true;                                                   // Enable if using DeepSeek-Distill-Qwen.
 
 // Model Configuration
-const int num_layers = 28;                                                      // Transformer layers. Refer to config.json for the value. 24 for Qwen-0.5B / 28 for Qwen-1.5B / 36 for Qwen-3B
-const int max_seq_len = 4096;                                                   // Please set this value to match the exported model.
+const int num_layers = 28;                                                        // Transformer layers. Refer to config.json for the value. Qwen2.5-1.5B = 28; 0.5B = 24;
+const int max_seq_len = 4096;                                                     // Please set this value to match the exported model.
 const int num_keys_values = num_layers + num_layers;
 const int last_indices = num_keys_values + 1;
-const int single_chat_limit = max_seq_len / 2 - 1;                              // You can adjust this value. If you set it greater than (max_seq_len / 2 - 1), the previous context may be cleared.
+const int single_chat_limit = max_seq_len / 2 - 1;                                // You can adjust this value. If you set it greater than (max_seq_len / 2 - 1), the previous context may be cleared.
 const int next_chat_buffer = max_seq_len - single_chat_limit;
 
 // Token IDs
@@ -42,7 +43,7 @@ int history_len = 0;
 int ids_len = 0;
 
 // Init Values
-float attention_mask = -65504.f;
+int8_t attention_mask = 1;
 
 // Input and Output Names
 std::vector<const char*> input_names_A;
@@ -59,7 +60,7 @@ std::vector<ONNXTensorElementDataType> output_types_A;
 // Tensors
 std::vector<OrtValue*> input_tensors_A;
 std::vector<OrtValue*> input_tensors_kv_init_A(num_keys_values);
-std::vector<std::vector<OrtValue*>> output_tensors_A(max_seq_len);
+std::vector<std::vector<OrtValue *>> output_tensors_A(max_seq_len);
 
 // Arrays and Vectors
 std::vector<int> input_ids(max_seq_len, 0);
@@ -70,5 +71,5 @@ std::vector<int> layer_indices(num_keys_values, 1);
 std::vector<size_t> input_ids_buffer_size(max_seq_len, 0);
 std::vector<Ort::Float16_t> past_key_values_init(1, Ort::Float16_t(0.f));
 
-// NLP Components
+// Tokenizer
 MNN::Transformer::Tokenizer* tokenizer;
