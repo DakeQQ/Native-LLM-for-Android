@@ -72,7 +72,7 @@ inline static void clear_history()
     response_count = 0;
     num_ids_per_chat[0] = 0;
     accumulate_num_ids[0] = 0;
-    attention_mask = -65504.f;
+    attention_mask = 1;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -84,7 +84,6 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
         end_id_1 = end_id_0;
         tokenizer = temp->createTokenizer(cache_path + "vocab_DeepSeek_Qwen.txt");
     } else {
-        start_id = 151644;
         tokenizer = temp->createTokenizer(cache_path + "vocab_Qwen.txt");
     }
     return JNI_TRUE;
@@ -188,7 +187,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 return env->NewStringUTF("Out_of_Buffer");
             }
             if (add_prompt) {
-                attention_mask = 0.f;
+                attention_mask = 0;
                 history_len += ids_len;
             } else {
                 history_len += 1;
@@ -200,7 +199,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             save_max_logit_position[response_count] = end_id_1;
             response_count += 1;
             num_ids_per_chat[save_index] += response_count;
-            attention_mask = -65504.f;
+            attention_mask = 1;
             history_len = 0;
             if (save_index > 0) {
                 accumulate_num_ids[save_index] = num_ids_per_chat[save_index] + accumulate_num_ids[save_index - 1];
@@ -422,8 +421,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     }
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
-            reinterpret_cast<void *>(&attention_mask), sizeof(float),
-//        reinterpret_cast<void *>(&attention_mask), sizeof(Ort::Float16_t),
+            reinterpret_cast<void *>(&attention_mask), sizeof(int8_t),
             input_dims_A[num_keys_values].data(), input_dims_A[num_keys_values].size(), input_types_A[num_keys_values],
             &input_tensors_A[num_keys_values]);
 
