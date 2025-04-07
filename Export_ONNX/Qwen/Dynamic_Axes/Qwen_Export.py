@@ -27,9 +27,7 @@ attention_mask = torch.tensor([0], dtype=torch.int8)
 input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value.
 past_keys = torch.zeros((num_key_value_heads, head_dim, 0), dtype=torch.float16)
 past_values = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
-position_ids = torch.zeros((max_seq_len, 1), dtype=torch.float32)
-for i in range(max_seq_len):
-    position_ids[i, 0] = float(i)
+position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
 theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
 idx_theta = position_ids * theta
 cos_rotary_pos_emb = torch.cos(idx_theta)
