@@ -698,7 +698,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         self.lm_head = nn.Linear(self.hidden_size, self.vocab_size, bias=False)
         self.save_key = [None] * self.num_layers
         self.save_value = [None] * self.num_layers
-        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8)))
+        self.attention_mask = (1 - torch.tril(torch.ones([1, self.max_seq_len, self.max_seq_len], dtype=torch.int8))) * -128
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -735,7 +735,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(1, 2)
         rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(1, 2)
         hidden_states = self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
-        attention_mask = self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask
+        attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask).float()
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i](
                 hidden_states=hidden_states,
