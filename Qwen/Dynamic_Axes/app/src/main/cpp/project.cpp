@@ -173,11 +173,11 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
             if (buffer_index > 1) {
                 int clear_idx = buffer_index - 1;
-                for (int i = 0; i < output_tensors_A.size(); i++) {
+                for (int i = 0; i < amount_of_output; i++) {
                     ort_runtime_A->ReleaseValue(output_tensors_A[clear_idx][i]);
                 }
                 if (buffer_index == 2) {
-                    for (int i = 0; i < output_tensors_A.size(); i++) {
+                    for (int i = 0; i < amount_of_output; i++) {
                         ort_runtime_A->ReleaseValue(output_tensors_A[0][i]);
                     }
                 }
@@ -390,7 +390,6 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
             ort_runtime_A->ReleaseTypeInfo(typeinfo);
         }
     }
-    std::size_t amount_of_output;
     ort_runtime_A->SessionGetOutputCount(session_model_A, &amount_of_output);
     output_names_A.resize(amount_of_output);
     output_dims_A.resize(amount_of_output);
