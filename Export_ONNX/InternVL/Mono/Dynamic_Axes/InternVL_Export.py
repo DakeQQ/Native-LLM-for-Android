@@ -48,7 +48,7 @@ class InternVL_PartA(torch.nn.Module):
     def __init__(self, intern_chat_model, h_w_factor, image_size, num_image_token):
         super(InternVL_PartA, self).__init__()
         self.vision_model = intern_chat_model.vision_model.embeddings
-        self.position_embedding = torch.cat([self.vision_model.position_embedding[:, :1, :], self.vision_model._get_pos_embed(self.vision_model.position_embedding[:, 1:, :], 32, 32)], dim=1)[:, 1:]
+        self.position_embedding = torch.cat([self.vision_model.position_embedding[:, :1, :], self.vision_model._get_pos_embed(self.vision_model.position_embedding[:, 1:, :], h_w_factor, h_w_factor)], dim=1)[:, 1:]
         self.mlp1 = intern_chat_model.mlp1
         self.num_image_token = num_image_token
         self.image_size = image_size
