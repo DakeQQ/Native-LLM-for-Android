@@ -48,25 +48,34 @@ class InternVL_PartA(torch.nn.Module):
     def __init__(self, intern_chat_model, h_w_factor, image_size, num_image_token):
         super(InternVL_PartA, self).__init__()
         self.vision_model = intern_chat_model.vision_model.embeddings
-        self.position_embedding = torch.cat([self.vision_model.position_embedding[:, :1, :], self.vision_model._get_pos_embed(self.vision_model.position_embedding[:, 1:, :], 32, 32)], dim=1)
+        self.position_embedding = torch.cat([self.vision_model.position_embedding[:, :1, :], self.vision_model._get_pos_embed(self.vision_model.position_embedding[:, 1:, :], 32, 32)], dim=1)[:, 1:]
         self.mlp1 = intern_chat_model.mlp1
         self.num_image_token = num_image_token
         self.image_size = image_size
+        self.image_size_2 = image_size + image_size
         self.h_w_half = h_w_factor // 2
         means = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1).expand(1, 3, image_size, image_size)
         inv_std = torch.tensor([1.0 / 0.229, 1.0 / 0.224, 1.0 / 0.225], dtype=torch.float32).view(1, 3, 1, 1).expand(1, 3, image_size, image_size)
         self.means_inv_std = means * inv_std
         self.inv_255_std = inv_std / 255.0
+        self.center_crop = [image_size // 2, image_size // 2 + image_size]
 
     def forward(self, pixel_values):
-        # The original repository uses 9 grid-cropped images along with thumbnails. However, we are using only the thumbnail, which is expected to result in lower OCR performance.
-        pixel_values = torch.nn.functional.interpolate(
-            pixel_values.float(),
+        # The original repository uses 9 grid-cropped images along with thumbnails. However, we are using only the center crop + thumbnail, which is expected to result in lower OCR performance.
+        pixel_values = pixel_values.float()
+        pixel_values_A = torch.nn.functional.interpolate(
+            pixel_values,
+            (self.image_size_2, self.image_size_2),
+            mode='bilinear',
+            align_corners=True)[:, :, self.center_crop[0]:self.center_crop[1], self.center_crop[0]:self.center_crop[1]]
+        pixel_values_B = torch.nn.functional.interpolate(
+            pixel_values,
             (self.image_size, self.image_size),
-            mode='bicubic',  # bilinear for speed / bicubic for accuracy
-            align_corners=True) * self.inv_255_std - self.means_inv_std
-        vision_embed = (self.vision_model(pixel_values=pixel_values) + self.position_embedding)[:, 1:]
-        return self.mlp1(vision_embed.reshape(1, self.h_w_half, 2, self.h_w_half, -1).transpose(2, 3).contiguous().reshape(1, self.num_image_token, -1))
+            mode='bicubic',     # bilinear for speed / bicubic for accuracy
+            align_corners=True)
+        pixel_values = torch.cat([pixel_values_A, pixel_values_B], dim=0) * self.inv_255_std - self.means_inv_std
+        vision_embed = self.vision_model(pixel_values=pixel_values) + self.position_embedding
+        return self.mlp1(vision_embed.reshape(2, self.h_w_half, 2, self.h_w_half, -1).transpose(2, 3).contiguous().reshape(1, self.num_image_token, -1))
 
 
 class InternVL_PartB(torch.nn.Module):
@@ -102,7 +111,7 @@ with torch.inference_mode():
     num_layers = model.config.llm_config.num_hidden_layers
     hidden_size = model.config.llm_config.hidden_size
     image_size = model.config.force_image_size
-    num_image_token = model.num_image_token
+    num_image_token = model.num_image_token + model.num_image_token         # Center crop + thumbnail
     height_factor = int(model.vision_model.embeddings.embed_dim ** 0.5)
     width_factor = height_factor
 
@@ -231,16 +240,17 @@ with torch.inference_mode():
     input_names.append('hidden_states')
 
     print('Export start ...')
-    torch.onnx.export(
-        model,
-        tuple(keys_values + [attention_mask, split_factor, hidden_states]),
-        onnx_model_D,
-        input_names=input_names,
-        output_names=output_names,
-        dynamic_axes=dynamic_axes,
-        do_constant_folding=True,
-        opset_version=17
-    )
+    with torch.inference_mode():
+        torch.onnx.export(
+            model,
+            tuple(keys_values + [attention_mask, split_factor, hidden_states]),
+            onnx_model_D,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+            do_constant_folding=True,
+            opset_version=17
+        )
     del model
     del hidden_states
     del attention_mask
@@ -300,6 +310,7 @@ if is_valid_image_path(image_path):
     pixel_values = onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, 'cpu', 0)
     use_vision = True
 else:
+    print("\nImage not found.")
     use_vision = False
 
 prompt = f"<|im_start|>user\n<img></img>\n{query}<|im_end|><|im_start|>assistant\n"
