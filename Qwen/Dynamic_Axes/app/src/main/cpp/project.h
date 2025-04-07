@@ -15,11 +15,11 @@ OrtRunOptions *run_options_A;
 
 // Model File Settings
 const std::string file_name_A = "Qwen.onnx";
-const std::string file_name_A_external = "09eab48a-1368-11f0-8f55-bc091bee2d5c";  // The demo model is DeepSeek-Qwen
+const std::string file_name_A_external = "09eab48a-1368-11f0-8f55-bc091bee2d5c";  // The demo model is DeepSeek-Qwen-1.5B
 const bool use_deepseek = true;                                                   // Enable if using DeepSeek-Distill-Qwen.
 
 // Model Configuration
-const int num_layers = 28;                                                        // Transformer layers. Refer to config.json for the value. Qwen2.5-1.5B = 28; 0.5B = 24;
+const int num_layers = 28;                                                        // Transformer layers. Refer to config.json for the value. Qwen2.5-0.5B = 24; 1.5B = 28; 3B = 36;
 const int max_seq_len = 4096;                                                     // Please set this value to match the exported model.
 const int num_keys_values = num_layers + num_layers;
 const int last_indices = num_keys_values + 1;
