@@ -61,7 +61,7 @@ class InternVL_PartA(torch.nn.Module):
         self.center_crop = [image_size // 2, image_size // 2 + image_size]
 
     def forward(self, pixel_values):
-        # The original repository uses 9 grid-cropped images along with thumbnails. However, we are using only the center crop + thumbnail, which is expected to result in lower OCR performance.
+        # The original repository uses 9 grid-cropped images along with thumbnails. However, we are using only the center cropped + thumbnail, which is expected to result in lower OCR performance.
         pixel_values = pixel_values.float()
         pixel_values_A = torch.nn.functional.interpolate(
             pixel_values,
@@ -111,7 +111,7 @@ with torch.inference_mode():
     num_layers = model.config.llm_config.num_hidden_layers
     hidden_size = model.config.llm_config.hidden_size
     image_size = model.config.force_image_size
-    num_image_token = model.num_image_token + model.num_image_token         # Center crop + thumbnail
+    num_image_token = model.num_image_token + model.num_image_token         # Center cropped + thumbnail
     height_factor = int(model.vision_model.embeddings.embed_dim ** 0.5)
     width_factor = height_factor
 
