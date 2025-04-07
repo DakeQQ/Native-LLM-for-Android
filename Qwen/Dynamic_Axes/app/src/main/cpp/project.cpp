@@ -443,10 +443,11 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 input_dims_A[i].data(), input_dims_A[i].size(), input_types_A[i],
                 &input_tensors_kv_init_A[i]);
     }
-    for (int i = 0; i < num_keys_values; i++) {
-        layer_indices[i] = i + 1;
+    for (int i = 1; i < num_keys_values; i++) {
+        layer_indices[i] += i;
     }
-    for (int i = 1; i < max_seq_len; i++) {
+    input_ids_buffer_size[1] = sizeof(int);
+    for (int i = 2; i < max_seq_len; i++) {
         input_ids_buffer_size[i] = input_ids_buffer_size[i - 1] + sizeof(int);
     }
     return JNI_TRUE;
