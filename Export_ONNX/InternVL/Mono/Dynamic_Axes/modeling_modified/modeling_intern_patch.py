@@ -50,8 +50,7 @@ class InternVisionEmbeddings(nn.Module):
 
     def forward(self, pixel_values: torch.FloatTensor) -> torch.Tensor:
         patch_embeds = self.patch_embedding(pixel_values).flatten(2).transpose(1, 2)
-        embeddings = torch.cat([self.class_embedding, patch_embeds], dim=1)
-        return embeddings
+        return patch_embeds
 
 
 class InternVisionPatchModel(PreTrainedModel):
