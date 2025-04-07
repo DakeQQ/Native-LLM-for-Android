@@ -80,8 +80,11 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
 {
     std::unique_ptr<MNN::Transformer::Tokenizer> temp = std::make_unique<MNN::Transformer::HuggingfaceTokenizer>();
     if (use_deepseek) {
+        start_id = 151646;
+        end_id_1 = end_id_0;
         tokenizer = temp->createTokenizer(cache_path + "vocab_DeepSeek_Qwen.txt");
     } else {
+        start_id = 151644;
         tokenizer = temp->createTokenizer(cache_path + "vocab_Qwen.txt");
     }
     return JNI_TRUE;
@@ -101,12 +104,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int> get_ids = tokenizer->encode(query);
         if (use_deepseek) {
-            start_id = 151646;
-            end_id_1 = end_id_0;
             get_ids.insert(get_ids.begin(), {151646, 151644, 198});             // DeepSeek-Distill-Qwen Chat prompt head
             get_ids.insert(get_ids.end(), {151643, 198, 151646, 151645, 198});  // DeepSeek-Distill-Qwen Chat prompt tail
         } else {
-            start_id = 151644;
             get_ids.insert(get_ids.begin(), {151644, 872, 198});                // Qwen Chat prompt head
             get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198});   // Qwen Chat prompt tail
         }
@@ -288,7 +288,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base",                   // One block can contain 1 or more cores, and sharing 1 job.
                                              "2");
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.intra_op_thread_affinities",           // Binding the #cpu to run the model. 'A;B' means A & B work respectively. 'A,B' means A & B work cooperatively.
-                                             "1,3;2,4");                                                        // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on my device, due to limitations imposed by the RAM bandwidth.
+                                             "1,3;2,4");                                                        // It is the best cost/performance (C/P) value setting for running the Qwen LLM on my device, due to limitations imposed by the RAM bandwidth.
         ort_runtime_A->SetIntraOpNumThreads(session_options_A, 3);                                              // dynamic_block_base + 1
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.inter_op.allow_spinning",
                                              "1");                                                              // 0 for low power
@@ -426,7 +426,6 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
             reinterpret_cast<void*>(&attention_mask), sizeof(float),
             input_dims_A[num_keys_values].data(), input_dims_A[num_keys_values].size(), input_types_A[num_keys_values],
             &input_tensors_A[num_keys_values]);
-
     for (int i = 0; i < num_layers; i++) {
         input_dims_A[i][2] = 0;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
