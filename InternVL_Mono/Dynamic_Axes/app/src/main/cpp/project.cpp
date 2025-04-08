@@ -177,7 +177,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1CD(JNIEnv *env, jclass cla
                        input_tensors_D.size(), output_names_D.data(), output_names_D.size(),
                        output_tensors_D[buffer_index_D].data());
     int token_id = end_id_0;
-    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
+    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
         void* max_logit_id;
         ort_runtime_D->GetTensorMutableData(output_tensors_D[buffer_index_D][0], &max_logit_id);
         token_id = reinterpret_cast<int*>(max_logit_id)[0];
