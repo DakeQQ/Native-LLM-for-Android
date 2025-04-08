@@ -151,7 +151,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         input_dims_A[last_indices][1] = ids_len;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
-                reinterpret_cast<void *>(input_ids.data()), input_ids_buffer_size[ids_len],
+                reinterpret_cast<void*>(input_ids.data()), input_ids_buffer_size[ids_len],
                 input_dims_A[last_indices].data(), input_dims_A[last_indices].size(), input_types_A[last_indices],
                 &input_tensors_A[last_indices]);
         for (int i = 0; i < num_keys_values; i++) {
@@ -171,15 +171,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             for (int i = 0; i < num_keys_values; i++) {
                 input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
             }
-            if (buffer_index > 1) {
+            if (buffer_index > 0) {
                 int clear_idx = buffer_index - 1;
                 for (int i = 0; i < amount_of_output; i++) {
                     ort_runtime_A->ReleaseValue(output_tensors_A[clear_idx][i]);
-                }
-                if (buffer_index == 2) {
-                    for (int i = 0; i < amount_of_output; i++) {
-                        ort_runtime_A->ReleaseValue(output_tensors_A[0][i]);
-                    }
                 }
             }
             buffer_index += 1;
