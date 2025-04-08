@@ -67,6 +67,7 @@ inline static std::string get_output_words(const int &id) {
 inline static void clear_history() {
     history_len = 0;
     attention_mask = 1;
+    token_id = end_id_0;
     split_factor = prompt_head_len;
     for (int i = 0; i < num_keys_values; i++) {
         input_tensors_D[i] = input_tensors_kv_init_D[i];
@@ -220,7 +221,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1CD(JNIEnv *env, jclass cla
             return env->NewStringUTF(get_output_words(token_id).c_str());
         } else {
             chatting = false;
-            token_id = end_id_0;
             return env->NewStringUTF("END");
         }
     }
