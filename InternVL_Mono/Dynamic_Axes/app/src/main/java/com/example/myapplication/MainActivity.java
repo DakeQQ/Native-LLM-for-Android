@@ -413,25 +413,28 @@ public class MainActivity extends AppCompatActivity {
                     clear_flag = false;
                 }
                 chatting = true;
-                LLM_Talk = Run_LLM_CD(true, true);
+                LLM_Talk = Run_LLM_CD(true);
                 long start_time = System.currentTimeMillis();
                 while (chatting) {
                     runOnUiThread(() -> {
                         switch (LLM_Talk) {
                             case "END" -> {
-                                chatting = false;
-                                addHistory(ChatMessage.TYPE_SERVER,"\n\nDecode: " + String.format("%.4f", 1000.0f * response_count / (System.currentTimeMillis() - start_time)) + " token/s");
+                                if (chatting) {
+                                    chatting = false;
+                                    addHistory(ChatMessage.TYPE_SERVER,"\n\nDecode: " + String.format("%.4f", 1000.0f * response_count / (System.currentTimeMillis() - start_time)) + " token/s");
+                                }
                             }
                             case "Over_Inputs" -> {
-                                chatting = false;
-                                addHistory(ChatMessage.TYPE_SERVER, over_inputs);
+                                if (chatting) {
+                                    chatting = false;
+                                    addHistory(ChatMessage.TYPE_SERVER, over_inputs);
+                                }
                             }
                             case "Out_of_Buffer" -> {
-                                chatting = false;
-                                addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
-                            }
-                            case "PASS" -> {
-                                // Do Nothing
+                                if (chatting) {
+                                    chatting = false;
+                                    addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
+                                }
                             }
                             default -> {
                                 addHistory(ChatMessage.TYPE_SERVER, LLM_Talk);
@@ -439,7 +442,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }
                     });
-                    LLM_Talk = Run_LLM_CD(false, chatting);
+                    LLM_Talk = Run_LLM_CD(false);
                 }
             } else {
                 addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
@@ -467,5 +470,5 @@ public class MainActivity extends AppCompatActivity {
     private static native boolean Load_Models_C(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
     private static native boolean Load_Models_D(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
     private static native boolean Run_LLM_ABC(String QUERY, byte[] PIXEL_VALUES, boolean USE_VISION);
-    private static native String Run_LLM_CD(boolean ADD_PROMPT, boolean CHATTING);
+    private static native String Run_LLM_CD(boolean ADD_PROMPT);
 }
