@@ -64,6 +64,7 @@ int buffer_index_C = 0;
 int buffer_index_D = 0;
 int8_t attention_mask = 1;
 int64_t split_factor = prompt_head_len;
+bool chatting = true;
 
 // File name constants for models
 const std::string file_name_A = "InternVL_A.onnx";
