@@ -57,25 +57,24 @@ const int split_factor_indices = num_keys_values + 1;
 const int last_indices = split_factor_indices + 1;
 
 // Integer variables for tracking state
-int history_len = 0;
 int ids_len = 0;
+int history_len = 0;
 int buffer_index_B = 0;
 int buffer_index_C = 0;
 int buffer_index_D = 0;
-int64_t split_factor = prompt_head_len;
 int8_t attention_mask = 1;
+int64_t split_factor = prompt_head_len;
 
 // File name constants for models
 const std::string file_name_A = "InternVL_A.onnx";
 const std::string file_name_B = "InternVL_B.onnx";
 const std::string file_name_C = "InternVL_C.onnx";
 const std::string file_name_D = "InternVL_D.onnx";
-
 // External data file names
-const std::string file_name_A_external = "0a467d18-1437-11f0-80a0-bc091bee2d5c";                               // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 357-360.
-const std::string file_name_B_external = "";                                                                   // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 537-540.
-const std::string file_name_C_external = "8c60259a-13b7-11f0-be48-200db0cd8e0d";                               // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 730-733.
-const std::string file_name_D_external = "dc56c2de-13b7-11f0-abde-200db0cd8e0d";                               // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 918-921.
+const std::string file_name_A_external = "";                          // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 357-360.
+const std::string file_name_B_external = "";                          // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 537-540.
+const std::string file_name_C_external = "";                          // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 730-733.
+const std::string file_name_D_external = "";                          // If using external data to load the model, provide the file name; otherwise, set to "". If contains many parts, please modify the project.cpp line 918-921.
 
 // Path constants
 const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/";
@@ -85,8 +84,8 @@ const char* cache_path = "/data/user/0/com.example.myapplication/cache/";
 
 // QNN library paths
 const char* qualcomm_soc_id = "43";                                                                             // 0 for unknown, Find your device from here: https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-50/overview.html#supported-snapdragon-devices
-const char* qnn_htp_so = "/data/user/0/com.example.myapplication/cache/libQnnHtp.so";                           //  If use (std::string + "libQnnHtp.so").c_str() instead, it will open failed.
-const char* qnn_cpu_so = "/data/user/0/com.example.myapplication/cache/libQnnCpu.so";                           //  If use (std::string + "libQnnCpu.so").c_str() instead, it will open failed.
+const char* qnn_htp_so = "/data/user/0/com.example.myapplication/cache/libQnnHtp.so";                           // If use (std::string + "libQnnHtp.so").c_str() instead, it will open failed.
+const char* qnn_cpu_so = "/data/user/0/com.example.myapplication/cache/libQnnCpu.so";                           // If use (std::string + "libQnnCpu.so").c_str() instead, it will open failed.
 // Just specify the path for qnn_*_so, and the code will automatically locate the other required libraries.
 
 // Vectors and buffers
@@ -94,7 +93,7 @@ std::vector<int> layer_indices(num_keys_values, 1);
 std::vector<size_t> input_ids_buffer_size(max_seq_len, 0);
 std::vector<Ort::Float16_t> past_key_values_init(1, Ort::Float16_t(0.f));
 
-// ONNX Runtime & LLM Setting
+// ONNX Runtime Setting
 const OrtApi* ort_runtime_A;
 OrtMemoryInfo *memory_info_A;
 OrtSession* session_model_A;
