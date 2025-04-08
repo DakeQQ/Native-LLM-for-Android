@@ -115,6 +115,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1ABC(JNIEnv *env, jclass cl
                                                           jboolean use_vision) {
     // We haven't supported the chat mode for InternVL yet.
     clear_history();
+    chatting = true;
     const char *query = env->GetStringUTFChars(jquery, nullptr);
     std::vector<int> input_ids = tokenizer->encode(query);
     input_ids.insert(input_ids.begin(), {1, 92543, 1008, 364, 92544, 92545, 364});         // Chat prompt head
