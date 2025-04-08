@@ -156,7 +156,7 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     switch (LLM_Talk) {
                         case "END" -> {
-                            if (chatting) {
+                            if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent repeat print.
                                 chatting = false;
                                 addHistory(ChatMessage.TYPE_SERVER, "\n\nDecode: " + String.format("%.4f", ((float) 1000 * response_count / (System.currentTimeMillis() - start_time))) + " token/s");
                             }
