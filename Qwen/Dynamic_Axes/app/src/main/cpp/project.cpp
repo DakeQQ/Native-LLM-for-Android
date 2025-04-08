@@ -82,19 +82,19 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
     if (use_deepseek) {
         start_id = 151646;
         end_id_1 = end_id_0;
-        tokenizer = temp->createTokenizer(cache_path + "vocab_DeepSeek_Qwen.txt");
+        tokenizer = MNN::Transformer::Tokenizer::createTokenizer(cache_path + "vocab_DeepSeek_Qwen.txt");
     } else {
-        tokenizer = temp->createTokenizer(cache_path + "vocab_Qwen.txt");
+        tokenizer = MNN::Transformer::Tokenizer::createTokenizer(cache_path + "vocab_Qwen.txt");
     }
     return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, jstring jquery,
-                                                     jboolean chatting,
                                                      jboolean add_prompt,
                                                      jboolean clear) {
     if (add_prompt) {
+        chatting = true;
         if (clear) {
             clear_history();
         } else {
@@ -158,39 +158,42 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             input_tensors_A[i] = input_tensors_kv_init_A[i];
         }
     }
-    if (chatting) {
-        ort_runtime_A->Run(session_model_A, run_options_A, input_names_A.data(),
-                           (const OrtValue *const *)input_tensors_A.data(),
-                           input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
-                           output_tensors_A[buffer_index].data());
-        void *max_logit_id;
-        ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
-        int token_id = reinterpret_cast<int*>(max_logit_id)[0];
-        if ((token_id != end_id_0) && (token_id != end_id_1) && (response_count < single_chat_limit) && (history_len < max_seq_len)) {
-            input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
-            for (int i = 0; i < num_keys_values; i++) {
-                input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
+    ort_runtime_A->Run(session_model_A, run_options_A, input_names_A.data(),
+                       (const OrtValue *const *)input_tensors_A.data(),
+                       input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
+                       output_tensors_A[buffer_index].data());
+    void *max_logit_id;
+    ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
+    int token_id = reinterpret_cast<int*>(max_logit_id)[0];
+    if ((token_id != end_id_0) && (token_id != end_id_1) && (response_count < single_chat_limit) && (history_len < max_seq_len)) {
+        input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
+        for (int i = 0; i < num_keys_values; i++) {
+            input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
+        }
+        if (buffer_index > 0) {
+            int clear_idx = buffer_index - 1;
+            for (int i = 0; i < amount_of_output; i++) {
+                ort_runtime_A->ReleaseValue(output_tensors_A[clear_idx][i]);
             }
-            if (buffer_index > 0) {
-                int clear_idx = buffer_index - 1;
-                for (int i = 0; i < amount_of_output; i++) {
-                    ort_runtime_A->ReleaseValue(output_tensors_A[clear_idx][i]);
-                }
-            }
-            buffer_index += 1;
-            if (buffer_index >= output_tensors_A.size()) {
-                return env->NewStringUTF("Out_of_Buffer");
-            }
-            if (add_prompt) {
-                attention_mask = 0;
-                history_len += ids_len;
-            } else {
-                history_len += 1;
-            }
+        }
+        buffer_index += 1;
+        if (buffer_index >= output_tensors_A.size()) {
+            return env->NewStringUTF("Out_of_Buffer");
+        }
+        if (add_prompt) {
+            attention_mask = 0;
+            history_len += ids_len;
+        } else {
+            history_len += 1;
+        }
+        if (chatting) {   // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
             save_max_logit_position[response_count] = token_id;
             response_count += 1;
-            return env->NewStringUTF(get_output_words(token_id).c_str());
-        } else {
+        }
+        return env->NewStringUTF(get_output_words(token_id).c_str());
+    } else {
+        if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
+            chatting = false;
             save_max_logit_position[response_count] = end_id_1;
             response_count += 1;
             num_ids_per_chat[save_index] += response_count;
@@ -227,10 +230,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                     save_index += 1;
                 }
             }
-            return env->NewStringUTF("END");
         }
+        return env->NewStringUTF("END");
     }
-    return env->NewStringUTF("PASS");
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
