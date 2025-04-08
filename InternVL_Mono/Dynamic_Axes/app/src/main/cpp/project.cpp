@@ -103,8 +103,7 @@ Java_com_example_myapplication_MainActivity_Process_1Init(JNIEnv *env, jclass cl
     glBufferData(GL_PIXEL_PACK_BUFFER, rgbSize, nullptr, GL_DYNAMIC_COPY);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbo_A);
     glBindImageTexture(0, static_cast<GLuint> (texture_id), 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
-    std::unique_ptr<MNN::Transformer::Tokenizer> temp = std::make_unique<MNN::Transformer::HuggingfaceTokenizer>();
-    tokenizer = temp->createTokenizer(vocab_file);
+    tokenizer = MNN::Transformer::Tokenizer::createTokenizer(vocab_file);
     return JNI_TRUE;
 }
 
