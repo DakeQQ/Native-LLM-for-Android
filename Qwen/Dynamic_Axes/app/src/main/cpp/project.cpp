@@ -73,6 +73,7 @@ inline static void clear_history()
     num_ids_per_chat[0] = 0;
     accumulate_num_ids[0] = 0;
     attention_mask = 1;
+    token_id = end_id_0;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -194,7 +195,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             return env->NewStringUTF(get_output_words(token_id).c_str());
         } else {
             chatting = false;
-            token_id = end_id_0;
             save_max_logit_position[response_count] = end_id_1;
             response_count += 1;
             num_ids_per_chat[save_index] += response_count;
