@@ -17,7 +17,7 @@ except:
 
 
 use_dynamic_input_image_size = False                                                # False for fixed image size as input.
-use_center_crop = True                                                              # Set true for focus on the center object.
+use_center_crop = False                                                             # Set true for focus on the center object.
 path = r'/home/DakeQQ/Downloads/Mono-InternVL-2B-S1-3'                              # Set the folder path where the Mono-InternVL whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_A.onnx'                # Assign a path where the exported InternVL model stored.
 onnx_model_B = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_B.onnx'
