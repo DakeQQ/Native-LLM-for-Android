@@ -145,7 +145,7 @@ public class MainActivity extends AppCompatActivity {
         @SuppressLint("DefaultLocale")
         @Override
         public void run() {
-            LLM_Talk = Run_LLM(usrInputText, true,true, clear_flag);
+            LLM_Talk = Run_LLM(usrInputText,true, clear_flag);
             usrInputText = "";
             if (clear_flag) {
                 clear_flag = false;
@@ -156,19 +156,22 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     switch (LLM_Talk) {
                         case "END" -> {
-                            chatting = false;
-                            addHistory(ChatMessage.TYPE_SERVER, "\n\nDecode: " + String.format("%.4f", ((float) 1000 * response_count / (System.currentTimeMillis() - start_time))) + " token/s");
+                            if (chatting) {
+                                chatting = false;
+                                addHistory(ChatMessage.TYPE_SERVER, "\n\nDecode: " + String.format("%.4f", ((float) 1000 * response_count / (System.currentTimeMillis() - start_time))) + " token/s");
+                            }
                         }
                         case "Over_Inputs" -> {
-                            chatting = false;
-                            addHistory(ChatMessage.TYPE_SERVER, over_inputs);
+                            if (chatting) {
+                                chatting = false;
+                                addHistory(ChatMessage.TYPE_SERVER, over_inputs);
+                            }
                         }
                         case "Out_of_Buffer" -> {
-                            chatting = false;
-                            addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
-                        }
-                        case "PASS" -> {
-                            // Do Nothing
+                            if (chatting) {
+                                chatting = false;
+                                addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
+                            }
                         }
                         default -> {
                             addHistory(ChatMessage.TYPE_SERVER, LLM_Talk);
@@ -176,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 });
-                LLM_Talk = Run_LLM(usrInputText, chatting, false, clear_flag);
+                LLM_Talk = Run_LLM(usrInputText, false, clear_flag);
             }
         }
     }
@@ -230,5 +233,5 @@ public class MainActivity extends AppCompatActivity {
 
     private native boolean Pre_Process();
     private native boolean Load_Models_A(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
-    private static native String Run_LLM(String QUERY, boolean CHATTING,boolean ADD_PROMPT, boolean CLEAR);
+    private static native String Run_LLM(String QUERY, boolean ADD_PROMPT, boolean CLEAR);
 }
