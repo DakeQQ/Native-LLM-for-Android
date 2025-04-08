@@ -53,7 +53,8 @@ inline static void correctUtfBytes(char* bytes) {
     }
 }
 
-inline static std::string get_output_words(const int &id) {
+inline static std::string get_output_words(const int &id)
+{
     std::string words = tokenizer->decode(id);
     if (words.length() == 6 && words[0] == '<' && words[words.length() - 1] == '>' && words[1] == '0' && words[2] == 'x')
     {
@@ -64,7 +65,8 @@ inline static std::string get_output_words(const int &id) {
     return words;
 }
 
-inline static void clear_history() {
+inline static void clear_history()
+{
     save_index = 0;
     history_len = 0;
     response_count = 0;
@@ -88,8 +90,7 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
-                                                     jstring jquery,
+Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, jstring jquery,
                                                      jboolean add_prompt,
                                                      jboolean clear) {
     if (add_prompt) {
@@ -161,12 +162,15 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz,
                        (const OrtValue *const *)input_tensors_A.data(),
                        input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
                        output_tensors_A[buffer_index].data());
-    void *max_logit_id;
-    ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
-    int token_id = reinterpret_cast<int*>(max_logit_id)[0];
-    input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
-    for (int i = 0; i < num_keys_values; i++) {
-        input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
+    int token_id = end_id_0;
+    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
+        void *max_logit_id;
+        ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
+        token_id = reinterpret_cast<int*>(max_logit_id)[0];
+        input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
+        for (int i = 0; i < num_keys_values; i++) {
+            input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
+        }
     }
     if (buffer_index > 0) {
         int clear_idx = buffer_index - 1;
