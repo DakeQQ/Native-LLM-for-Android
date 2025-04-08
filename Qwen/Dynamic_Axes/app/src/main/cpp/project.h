@@ -36,6 +36,7 @@ const std::string storage_path = "/storage/emulated/0/Android/data/com.example.m
 const std::string cache_path = "/data/user/0/com.example.myapplication/cache/"; // We have moved the vocab.txt from assets to the cache folder in Java process.
 
 // Counters and Indices
+bool chatting = true;
 int response_count = 0;
 int save_index = 0;
 int buffer_index = 0;
