@@ -104,7 +104,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### InternVL
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Mono-2B-S1-3<br>q4f32 | 10.5 token/s     |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Mono-2B-S1-3<br>q4f32<br>dynamic | 10.5 token/s     |
 
 ## Demo Results
 ### Qwen2VL-2B / 1024 Context
