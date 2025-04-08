@@ -195,7 +195,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1CD(JNIEnv *env, jclass cla
     if (buffer_index_D >= output_tensors_D.size()) {
         return env->NewStringUTF("Out_of_Buffer");
     }
-    if (chatting) {
+    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
         if ((token_id != end_id_0) && (token_id != end_id_1) && (history_len < max_seq_len)) {
             ort_runtime_C->ReleaseValue(output_tensors_C[buffer_index_C][0]);
             buffer_index_C += 1;
