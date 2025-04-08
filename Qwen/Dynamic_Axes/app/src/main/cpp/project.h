@@ -27,6 +27,7 @@ const int single_chat_limit = max_seq_len / 2 - 1;                              
 const int next_chat_buffer = max_seq_len - single_chat_limit;
 
 // Token IDs
+int token_id = 0;
 int start_id = 151644;
 int end_id_1 = 151645;
 const int end_id_0 = 151643;
