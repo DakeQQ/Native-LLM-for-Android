@@ -10,9 +10,10 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Gemma2-it**: 2B
 - **Phi3.5-mini-instruct**: 3.8B
 - **Llama-3.2-Instruct**: 1B
+- **InternVL-Mono**: 2B
 
 ## Recent Updates
-- 2025/04/05：Update Qwen `q4f32` + `dynamic_axes`.
+- 2025/04/05：Update Qwen, InternVL-Mono `q4f32` + `dynamic_axes`.
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
 
@@ -100,6 +101,11 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | Android 13 | Nubia Z50    | 8_Gen2-CPU              | Llama3.2-1B-Instruct<br>q8f32 | 25 token/s     |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Llama3.2-1B-Instruct<br>q8f32 | 16 token/s     |
 
+### InternVL
+| OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
+|:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Mono-2B-S1-3<br>q4f32 | 10.5 token/s     |
+
 ## Demo Results
 ### Qwen2VL-2B / 1024 Context
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_QwenVL.gif?raw=true)
@@ -118,10 +124,11 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Gemma2-it**: 2B
 - **Phi3.5-mini-instruct**: 3.8B
 - **Llama-3.2-Instruct**: 1B
+- **InternVL-Mono**: 2B
 
 
 ## 最近更新
-- 2025/04/05: 更新 Qwen `q4f32` + `dynamic_axes`。
+- 2025/04/05: 更新 Qwen, InternVL-Mono `q4f32` + `dynamic_axes`。
 - 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）。
 
