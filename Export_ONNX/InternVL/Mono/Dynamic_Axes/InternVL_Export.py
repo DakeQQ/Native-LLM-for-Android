@@ -17,6 +17,7 @@ except:
 
 
 use_dynamic_input_image_size = False                                                # False for fixed image size as input.
+use_center_crop = True                                                              # Set true for focus on the center object.
 path = r'/home/DakeQQ/Downloads/Mono-InternVL-2B-S1-3'                              # Set the folder path where the Mono-InternVL whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_A.onnx'                # Assign a path where the exported InternVL model stored.
 onnx_model_B = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_B.onnx'
@@ -52,19 +53,30 @@ class InternVL_PartA(torch.nn.Module):
         self.mlp1 = intern_chat_model.mlp1
         self.num_image_token = num_image_token
         self.image_size = image_size
+        self.image_size_2 = image_size + image_size
+        self.center_crop = [image_size // 2, image_size // 2 + image_size]
         self.h_w_half = h_w_factor // 2
         means = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1).expand(1, 3, image_size, image_size)
         inv_std = torch.tensor([1.0 / 0.229, 1.0 / 0.224, 1.0 / 0.225], dtype=torch.float32).view(1, 3, 1, 1).expand(1, 3, image_size, image_size)
         self.means_inv_std = means * inv_std
         self.inv_255_std = inv_std / 255.0
-
+        
     def forward(self, pixel_values):
         # The original repository uses 9 grid-cropped images along with thumbnails. However, we are using only the thumbnail, which is expected to result in lower OCR performance. It takes time to process multi-cropped images as input.
-        pixel_values = torch.nn.functional.interpolate(
-            pixel_values.float(),
-            (self.image_size, self.image_size),
-            mode='bicubic',     # bilinear for speed / bicubic for accuracy
-            align_corners=True) * self.inv_255_std - self.means_inv_std
+        pixel_values = pixel_values.float()
+        if use_center_crop:
+            pixel_values = torch.nn.functional.interpolate(
+                pixel_values,
+                (self.image_size_2, self.image_size_2),
+                mode='bilinear',     # bilinear for speed / bicubic for accuracy
+                align_corners=True)[:, :, self.center_crop[0]:self.center_crop[1], self.center_crop[0]:self.center_crop[1]]
+        else:
+            pixel_values = torch.nn.functional.interpolate(
+                pixel_values,
+                (self.image_size, self.image_size),
+                mode='bicubic',      # bilinear for speed / bicubic for accuracy
+                align_corners=True)
+        pixel_values = pixel_values * self.inv_255_std - self.means_inv_std
         vision_embed = self.vision_model(pixel_values=pixel_values) + self.position_embedding
         return self.mlp1(vision_embed.reshape(1, self.h_w_half, 2, self.h_w_half, -1).transpose(2, 3).contiguous().reshape(1, self.num_image_token, -1))
 
