@@ -171,50 +171,49 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1ABC(JNIEnv *env, jclass cl
 extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM_1CD(JNIEnv *env, jclass clazz,
-                                                        jboolean add_prompt,
-                                                        jboolean chatting) {
-    if (chatting) {
-        ort_runtime_D->Run(session_model_D, run_options_D, input_names_D.data(),
-                           (const OrtValue *const *)input_tensors_D.data(),
-                           input_tensors_D.size(), output_names_D.data(), output_names_D.size(),
-                           output_tensors_D[buffer_index_D].data());
-        void* max_logit_id;
-        ort_runtime_D->GetTensorMutableData(output_tensors_D[buffer_index_D][0], &max_logit_id);
-        int token_id = reinterpret_cast<int*>(max_logit_id)[0];
-        input_tensors_C[0] = output_tensors_D[buffer_index_D][0];
-        for (int i = 0; i < num_keys_values; i++) {
-            input_tensors_D[i] = output_tensors_D[buffer_index_D][layer_indices[i]];
-        }
-        if (buffer_index_D > 0) {
-            int clear_idx = buffer_index_D - 1;
-            if (output_tensors_D[clear_idx][0] != nullptr) {
-                for (int i = 0; i < amount_of_output_D; i++) {
-                    ort_runtime_D->ReleaseValue(output_tensors_D[clear_idx][i]);
-                }
+                                                        jboolean add_prompt) {
+    ort_runtime_D->Run(session_model_D, run_options_D, input_names_D.data(),
+                       (const OrtValue *const *)input_tensors_D.data(),
+                       input_tensors_D.size(), output_names_D.data(), output_names_D.size(),
+                       output_tensors_D[buffer_index_D].data());
+    void* max_logit_id;
+    ort_runtime_D->GetTensorMutableData(output_tensors_D[buffer_index_D][0], &max_logit_id);
+    int token_id = reinterpret_cast<int*>(max_logit_id)[0];
+    input_tensors_C[0] = output_tensors_D[buffer_index_D][0];
+    for (int i = 0; i < num_keys_values; i++) {
+        input_tensors_D[i] = output_tensors_D[buffer_index_D][layer_indices[i]];
+    }
+    if (buffer_index_D > 0) {
+        int clear_idx = buffer_index_D - 1;
+        if (output_tensors_D[clear_idx][0] != nullptr) {
+            for (int i = 0; i < amount_of_output_D; i++) {
+                ort_runtime_D->ReleaseValue(output_tensors_D[clear_idx][i]);
             }
         }
-        buffer_index_D += 1;
-        if (buffer_index_D >= output_tensors_D.size()) {
-            return env->NewStringUTF("Out_of_Buffer");
-        }
-        ort_runtime_C->ReleaseValue(output_tensors_C[buffer_index_C][0]);
-        buffer_index_C += 1;
-        if (buffer_index_C >= output_tensors_C.size()) {
-            return env->NewStringUTF("Out_of_Buffer");
-        }
-        ort_runtime_C->Run(session_model_C, run_options_C, input_names_C.data(),
-                           (const OrtValue* const*) input_tensors_C.data(),
-                           input_tensors_C.size(), output_names_C.data(), output_names_C.size(),
-                           output_tensors_C[buffer_index_C].data());
-        input_tensors_D[last_indices] = output_tensors_C[buffer_index_C][0];
-        if (add_prompt) {
-            history_len += ids_len;
-            split_factor = prompt_head_len;
-            attention_mask = 0;
-        } else {
-            history_len += 1;
-        }
+    }
+    buffer_index_D += 1;
+    if (buffer_index_D >= output_tensors_D.size()) {
+        return env->NewStringUTF("Out_of_Buffer");
+    }
+    if (chatting) {
         if ((token_id != end_id_0) && (token_id != end_id_1) && (history_len < max_seq_len)) {
+            ort_runtime_C->ReleaseValue(output_tensors_C[buffer_index_C][0]);
+            buffer_index_C += 1;
+            if (buffer_index_C >= output_tensors_C.size()) {
+                return env->NewStringUTF("Out_of_Buffer");
+            }
+            ort_runtime_C->Run(session_model_C, run_options_C, input_names_C.data(),
+                               (const OrtValue* const*) input_tensors_C.data(),
+                               input_tensors_C.size(), output_names_C.data(), output_names_C.size(),
+                               output_tensors_C[buffer_index_C].data());
+            input_tensors_D[last_indices] = output_tensors_C[buffer_index_C][0];
+            if (add_prompt) {
+                history_len += ids_len;
+                split_factor = prompt_head_len;
+                attention_mask = 0;
+            } else {
+                history_len += 1;
+            }
             return env->NewStringUTF(get_output_words(token_id).c_str());
         } else {
             return env->NewStringUTF("END");
