@@ -53,8 +53,7 @@ inline static void correctUtfBytes(char* bytes) {
     }
 }
 
-inline static std::string get_output_words(const int &id)
-{
+inline static std::string get_output_words(const int &id) {
     std::string words = tokenizer->decode(id);
     if (words.length() == 6 && words[0] == '<' && words[words.length() - 1] == '>' && words[1] == '0' && words[2] == 'x')
     {
@@ -65,8 +64,7 @@ inline static std::string get_output_words(const int &id)
     return words;
 }
 
-inline static void clear_history()
-{
+inline static void clear_history() {
     save_index = 0;
     history_len = 0;
     response_count = 0;
@@ -90,7 +88,8 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject cl
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, jstring jquery,
+Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
+                                                     jstring jquery,
                                                      jboolean add_prompt,
                                                      jboolean clear) {
     if (add_prompt) {
