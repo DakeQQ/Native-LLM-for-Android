@@ -176,12 +176,15 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1CD(JNIEnv *env, jclass cla
                        (const OrtValue *const *)input_tensors_D.data(),
                        input_tensors_D.size(), output_names_D.data(), output_names_D.size(),
                        output_tensors_D[buffer_index_D].data());
-    void* max_logit_id;
-    ort_runtime_D->GetTensorMutableData(output_tensors_D[buffer_index_D][0], &max_logit_id);
-    int token_id = reinterpret_cast<int*>(max_logit_id)[0];
-    input_tensors_C[0] = output_tensors_D[buffer_index_D][0];
-    for (int i = 0; i < num_keys_values; i++) {
-        input_tensors_D[i] = output_tensors_D[buffer_index_D][layer_indices[i]];
+    int token_id = end_id_0;
+    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
+        void* max_logit_id;
+        ort_runtime_D->GetTensorMutableData(output_tensors_D[buffer_index_D][0], &max_logit_id);
+        token_id = reinterpret_cast<int*>(max_logit_id)[0];
+        input_tensors_C[0] = output_tensors_D[buffer_index_D][0];
+        for (int i = 0; i < num_keys_values; i++) {
+            input_tensors_D[i] = output_tensors_D[buffer_index_D][layer_indices[i]];
+        }
     }
     if (buffer_index_D > 0) {
         int clear_idx = buffer_index_D - 1;
@@ -195,7 +198,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1CD(JNIEnv *env, jclass cla
     if (buffer_index_D >= output_tensors_D.size()) {
         return env->NewStringUTF("Out_of_Buffer");
     }
-    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
+    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
         if ((token_id != end_id_0) && (token_id != end_id_1) && (history_len < max_seq_len)) {
             ort_runtime_C->ReleaseValue(output_tensors_C[buffer_index_C][0]);
             buffer_index_C += 1;
