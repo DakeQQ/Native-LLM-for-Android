@@ -162,7 +162,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                        (const OrtValue *const *)input_tensors_A.data(),
                        input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
                        output_tensors_A[buffer_index].data());
-    int token_id = end_id_0;
     if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
         void *max_logit_id;
         ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
@@ -195,6 +194,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             return env->NewStringUTF(get_output_words(token_id).c_str());
         } else {
             chatting = false;
+            token_id = end_id_0;
             save_max_logit_position[response_count] = end_id_1;
             response_count += 1;
             num_ids_per_chat[save_index] += response_count;
