@@ -58,6 +58,7 @@ const int last_indices = split_factor_indices + 1;
 
 // Integer variables for tracking state
 int ids_len = 0;
+int token_id = 0;
 int history_len = 0;
 int buffer_index_B = 0;
 int buffer_index_C = 0;
