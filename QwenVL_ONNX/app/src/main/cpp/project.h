@@ -9,7 +9,7 @@
 
 const char* computeShaderSource = "#version 320 es\n"
                                   "#extension GL_OES_EGL_image_external_essl3 : require\n"
-                                  "precision highp float;\n"
+                                  "precision mediump float;\n"
                                   "layout(binding = 0) uniform samplerExternalOES yuvTex;\n"
                                   "layout(local_size_x = 16, local_size_y = 16) in;\n"  // gpu_num_group=16, Customize it to fit your device's specifications.
                                   "const int camera_width = 960;\n"                     //  camera_width, Remember edit the value if using custom param in export_config.py.
