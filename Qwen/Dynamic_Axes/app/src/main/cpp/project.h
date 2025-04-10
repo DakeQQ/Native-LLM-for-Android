@@ -63,7 +63,7 @@ std::vector<ONNXTensorElementDataType> output_types_A;
 // Tensors
 std::vector<OrtValue*> input_tensors_A;
 std::vector<OrtValue*> input_tensors_kv_init_A(num_keys_values);
-std::vector<std::vector<OrtValue *>> output_tensors_A(max_seq_len);
+std::vector<std::vector<OrtValue*>> output_tensors_A(2);
 
 // Arrays and Vectors
 std::vector<int> input_ids(max_seq_len, 0);
