@@ -65,7 +65,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String first_talk = "请输入问题 Enter Questions";
     private static final String load_failed = "模型加载失败。\nModel loading failed.";
     private static final String over_inputs = "一次输入太多单词 \nInput too many words at once.";
-    private static final String out_of_buffer = "缓冲区已满。请重新启动应用以清除KV缓存。 \nBuffer full. Please restart the app to clear the temporary KV cache.";
     private static final String low_memory_mode_error = "低内存模式必须使用外部数据格式，例如 '*.onnx + ONNX文件数据'。\nThe low_memory_mode must use an external data format, such as '*.onnx + onnx_data_file.'";
     private boolean clear_flag = false;
     public static boolean chatting = false;
@@ -404,48 +403,39 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             use_vision = switch_vision.isChecked();
             long image_embed_count = System.currentTimeMillis();
-            if (Run_LLM_ABC(usrInputText, pixel_values, use_vision)) {
-                if (use_vision) {
-                    runOnUiThread(() -> addHistory(ChatMessage.TYPE_SERVER, "Image Process Complete. \n\nTime Cost: " + String.format("%.4f", (System.currentTimeMillis() - image_embed_count) * 0.001f) + " seconds\n\n"));
-                }
-                usrInputText = "";
-                if (clear_flag) {
-                    clear_flag = false;
-                }
-                chatting = true;
-                LLM_Talk = Run_LLM_CD(true);
-                long start_time = System.currentTimeMillis();
-                while (chatting) {
-                    runOnUiThread(() -> {
-                        switch (LLM_Talk) {
-                            case "END" -> {
-                                if (chatting) {
-                                    chatting = false;
-                                    addHistory(ChatMessage.TYPE_SERVER,"\n\nDecode: " + String.format("%.4f", 1000.0f * response_count / (System.currentTimeMillis() - start_time)) + " token/s");
-                                }
-                            }
-                            case "Over_Inputs" -> {
-                                if (chatting) {
-                                    chatting = false;
-                                    addHistory(ChatMessage.TYPE_SERVER, over_inputs);
-                                }
-                            }
-                            case "Out_of_Buffer" -> {
-                                if (chatting) {
-                                    chatting = false;
-                                    addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
-                                }
-                            }
-                            default -> {
-                                addHistory(ChatMessage.TYPE_SERVER, LLM_Talk);
-                                response_count += 1;
+            Run_LLM_ABC(usrInputText, pixel_values, use_vision);
+            if (use_vision) {
+                runOnUiThread(() -> addHistory(ChatMessage.TYPE_SERVER, "Image Process Complete. \n\nTime Cost: " + String.format("%.4f", (System.currentTimeMillis() - image_embed_count) * 0.001f) + " seconds\n\n"));
+            }
+            usrInputText = "";
+            if (clear_flag) {
+                clear_flag = false;
+            }
+            chatting = true;
+            LLM_Talk = Run_LLM_CD(true);
+            long start_time = System.currentTimeMillis();
+            while (chatting) {
+                runOnUiThread(() -> {
+                    switch (LLM_Talk) {
+                        case "END" -> {
+                            if (chatting) {
+                                chatting = false;
+                                addHistory(ChatMessage.TYPE_SERVER,"\n\nDecode: " + String.format("%.4f", 1000.0f * response_count / (System.currentTimeMillis() - start_time)) + " token/s");
                             }
                         }
-                    });
-                    LLM_Talk = Run_LLM_CD(false);
-                }
-            } else {
-                addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
+                        case "Over_Inputs" -> {
+                            if (chatting) {
+                                chatting = false;
+                                addHistory(ChatMessage.TYPE_SERVER, over_inputs);
+                            }
+                        }
+                        default -> {
+                            addHistory(ChatMessage.TYPE_SERVER, LLM_Talk);
+                            response_count += 1;
+                        }
+                    }
+                });
+                LLM_Talk = Run_LLM_CD(false);
             }
         }
     }
@@ -469,6 +459,6 @@ public class MainActivity extends AppCompatActivity {
     private static native boolean Load_Models_B(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
     private static native boolean Load_Models_C(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
     private static native boolean Load_Models_D(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
-    private static native boolean Run_LLM_ABC(String QUERY, byte[] PIXEL_VALUES, boolean USE_VISION);
+    private static native void Run_LLM_ABC(String QUERY, byte[] PIXEL_VALUES, boolean USE_VISION);
     private static native String Run_LLM_CD(boolean ADD_PROMPT);
 }
