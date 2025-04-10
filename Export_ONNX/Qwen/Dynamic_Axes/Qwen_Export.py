@@ -136,9 +136,9 @@ out_name_A = ort_session_A.get_outputs()
 
 # Pre-process inputs
 if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
-    #  prompt = f'<|begin▁of▁sentence|><｜User｜>\n{query}<|end▁of▁sentence|>\n<|begin▁of▁sentence|><｜Assistant｜>\n'
+    #  prompt = f'<|begin▁of▁sentence|><｜User｜>\n{query}<｜Assistant｜>\n'
     head = torch.tensor([[151646, 151644, 198]], dtype=torch.int32)
-    tail = torch.tensor([[151643, 198, 151646, 151645, 198]], dtype=torch.int32)
+    tail = torch.tensor([[151645, 198]], dtype=torch.int32)
     tokens = tokenizer(query, return_tensors='pt')['input_ids']
     tokens = torch.cat((head, tokens, tail), dim=-1)
 else:
