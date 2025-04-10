@@ -36,7 +36,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String first_talk = "请输入问题 Enter Questions";
     private static final String load_failed = "模型加载失败。\nModel loading failed.";
     private static final String over_inputs = "一次输入太多单词 \nInput too many words at once.";
-    private static final String out_of_buffer = "缓冲区已满。请重新启动应用以清除KV缓存。 \nBuffer full. Please restart the app to clear the temporary KV cache.";
     private static final String low_memory_mode_error = "低内存模式必须使用外部数据格式，例如 '*.onnx + ONNX文件数据'。\nThe low_memory_mode must use an external data format, such as '*.onnx + onnx_data_file.'";
     private boolean clear_flag = false;
     private static boolean chatting = false;
@@ -165,12 +164,6 @@ public class MainActivity extends AppCompatActivity {
                             if (chatting) {
                                 chatting = false;
                                 addHistory(ChatMessage.TYPE_SERVER, over_inputs);
-                            }
-                        }
-                        case "Out_of_Buffer" -> {
-                            if (chatting) {
-                                chatting = false;
-                                addHistory(ChatMessage.TYPE_SERVER, out_of_buffer);
                             }
                         }
                         default -> {
