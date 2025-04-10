@@ -72,6 +72,18 @@ inline static void clear_history() {
     for (int i = 0; i < num_keys_values; i++) {
         input_tensors_D[i] = input_tensors_kv_init_D[i];
     }
+    if (output_tensors_D[0][0] != nullptr) {
+        for (int i = 0; i < amount_of_output_D; i++) {
+            ort_runtime_D->ReleaseValue(output_tensors_D[0][i]);
+            output_tensors_D[0][i] = nullptr;
+        }
+    }
+    if (output_tensors_D[1][0] != nullptr) {
+        for (int i = 0; i < amount_of_output_D; i++) {
+            ort_runtime_D->ReleaseValue(output_tensors_D[1][i]);
+            output_tensors_D[1][i] = nullptr;
+        }
+    }
 }
 
 extern "C"
@@ -109,7 +121,7 @@ Java_com_example_myapplication_MainActivity_Process_1Init(JNIEnv *env, jclass cl
 }
 
 extern "C"
-JNIEXPORT jboolean JNICALL
+JNIEXPORT void JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM_1ABC(JNIEnv *env, jclass clazz,
                                                           jstring jquery,
                                                           jbyteArray pixel_values,
@@ -128,17 +140,14 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1ABC(JNIEnv *env, jclass cl
             reinterpret_cast<void*>(input_ids.data()), input_ids_buffer_size[ids_len],
             input_dims_C[0].data(), input_dims_C[0].size(), input_types_C[0],
             &input_tensors_C[0]);
-    if (output_tensors_C[buffer_index_C][0] != nullptr) {
-        ort_runtime_C->ReleaseValue(output_tensors_C[buffer_index_C][0]);
-        buffer_index_C += 1;
-        if (buffer_index_C >= output_tensors_C.size()) {
-            return JNI_FALSE;
-        }
+    if (output_tensors_C[0] != nullptr) {
+        ort_runtime_C->ReleaseValue(output_tensors_C[0]);
+        output_tensors_C[0] = nullptr;
     }
     ort_runtime_C->Run(session_model_C, run_options_C, input_names_C.data(),
                        (const OrtValue* const*) input_tensors_C.data(),
                        input_tensors_C.size(), output_names_C.data(), output_names_C.size(),
-                       output_tensors_C[buffer_index_C].data());
+                       output_tensors_C.data());
     if (use_vision) {
         ids_len += num_image_token;
         split_factor = prompt_head_len + num_image_token;
@@ -150,72 +159,56 @@ Java_com_example_myapplication_MainActivity_Run_1LLM_1ABC(JNIEnv *env, jclass cl
                            (const OrtValue* const*) input_tensors_A.data(),
                            input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
                            output_tensors_A.data());
-        input_tensors_B[0] = output_tensors_C[buffer_index_C][0];
+        input_tensors_B[0] = output_tensors_C[0];
         input_tensors_B[1] = output_tensors_A[0];
-        if (output_tensors_B[buffer_index_B][0] != nullptr) {
-            ort_runtime_B->ReleaseValue(output_tensors_B[buffer_index_B][0]);
-            buffer_index_B += 1;
-            if (buffer_index_B >= output_tensors_B.size()) {
-                return JNI_FALSE;
-            }
+        if (output_tensors_B[0] != nullptr) {
+            ort_runtime_B->ReleaseValue(output_tensors_B[0]);
+            output_tensors_B[0] = nullptr;
         }
         ort_runtime_B->Run(session_model_B, run_options_B, input_names_B.data(),
                            (const OrtValue* const*) input_tensors_B.data(),
                            input_tensors_B.size(), output_names_B.data(), output_names_B.size(),
-                           output_tensors_B[buffer_index_B].data());
-        input_tensors_D[last_indices] = output_tensors_B[buffer_index_B][0];
+                           output_tensors_B.data());
+        input_tensors_D[last_indices] = output_tensors_B[0];
     } else {
-        input_tensors_D[last_indices] = output_tensors_C[buffer_index_C][0];
+        input_tensors_D[last_indices] = output_tensors_C[0];
     }
-    return JNI_TRUE;
 }
 
 extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM_1CD(JNIEnv *env, jclass clazz,
                                                         jboolean add_prompt) {
-    ort_runtime_D->Run(session_model_D, run_options_D, input_names_D.data(),
-                       (const OrtValue *const *)input_tensors_D.data(),
-                       input_tensors_D.size(), output_names_D.data(), output_names_D.size(),
-                       output_tensors_D[buffer_index_D].data());
     if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
+        ort_runtime_D->Run(session_model_D, run_options_D, input_names_D.data(),
+                           (const OrtValue *const *)input_tensors_D.data(),
+                           input_tensors_D.size(), output_names_D.data(), output_names_D.size(),
+                           output_tensors_D[buffer_index_D].data());
         void* max_logit_id;
         ort_runtime_D->GetTensorMutableData(output_tensors_D[buffer_index_D][0], &max_logit_id);
         token_id = reinterpret_cast<int*>(max_logit_id)[0];
-        input_tensors_C[0] = output_tensors_D[buffer_index_D][0];
-        for (int i = 0; i < num_keys_values; i++) {
-            input_tensors_D[i] = output_tensors_D[buffer_index_D][layer_indices[i]];
-        }
-    }
-    if (buffer_index_D > 0) {
-        int clear_idx = buffer_index_D - 1;
-        if (output_tensors_D[clear_idx][0] != nullptr) {
-            for (int i = 0; i < amount_of_output_D; i++) {
-                ort_runtime_D->ReleaseValue(output_tensors_D[clear_idx][i]);
-            }
-        }
-    }
-    buffer_index_D += 1;
-    if (buffer_index_D >= output_tensors_D.size()) {
-        return env->NewStringUTF("Out_of_Buffer");
-    }
-    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
         if ((token_id != end_id_0) && (token_id != end_id_1) && (history_len < max_seq_len)) {
-            ort_runtime_C->ReleaseValue(output_tensors_C[buffer_index_C][0]);
-            buffer_index_C += 1;
-            if (buffer_index_C >= output_tensors_C.size()) {
-                return env->NewStringUTF("Out_of_Buffer");
+            input_tensors_C[0] = output_tensors_D[buffer_index_D][0];
+            for (int i = 0; i < num_keys_values; i++) {
+                input_tensors_D[i] = output_tensors_D[buffer_index_D][layer_indices[i]];
             }
+            ort_runtime_C->ReleaseValue(output_tensors_C[0]);
+            output_tensors_C[0] = nullptr;
             ort_runtime_C->Run(session_model_C, run_options_C, input_names_C.data(),
                                (const OrtValue* const*) input_tensors_C.data(),
                                input_tensors_C.size(), output_names_C.data(), output_names_C.size(),
-                               output_tensors_C[buffer_index_C].data());
-            input_tensors_D[last_indices] = output_tensors_C[buffer_index_C][0];
+                               output_tensors_C.data());
+            input_tensors_D[last_indices] = output_tensors_C[0];
+            buffer_index_D = (buffer_index_D != 0) ? 0 : 1;
             if (add_prompt) {
                 history_len += ids_len;
                 split_factor = prompt_head_len;
                 attention_mask = 0;
             } else {
+                for (int i = 0; i < amount_of_output_D; i++) {
+                    ort_runtime_D->ReleaseValue(output_tensors_D[buffer_index_D][i]);
+                    output_tensors_D[buffer_index_D][i] = nullptr;
+                }
                 history_len += 1;
             }
             return env->NewStringUTF(get_output_words(token_id).c_str());
@@ -602,9 +595,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env, jclass 
     output_names_B.resize(amount_of_output);
     output_dims_B.resize(amount_of_output);
     output_types_B.resize(amount_of_output);
-    for (auto & i : output_tensors_B) {
-        i.resize(amount_of_output);
-    }
+    output_tensors_B.resize(amount_of_output);
     for (int i = 0; i < amount_of_output; i++) {
         char* name;
         OrtTypeInfo* typeinfo;
@@ -799,9 +790,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1C(JNIEnv *env, jclass 
     output_names_C.resize(amount_of_output);
     output_dims_C.resize(amount_of_output);
     output_types_C.resize(amount_of_output);
-    for (auto & i : output_tensors_C) {
-        i.resize(amount_of_output);
-    }
+    output_tensors_C.resize(amount_of_output);
     for (int i = 0; i < amount_of_output; i++) {
         char* name;
         OrtTypeInfo* typeinfo;
