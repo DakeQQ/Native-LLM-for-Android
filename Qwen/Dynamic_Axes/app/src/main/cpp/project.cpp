@@ -53,8 +53,7 @@ inline static void correctUtfBytes(char* bytes) {
     }
 }
 
-inline static std::string get_output_words(const int &id)
-{
+inline static std::string get_output_words(const int &id) {
     std::string words = tokenizer->decode(id);
     if (words.length() == 6 && words[0] == '<' && words[words.length() - 1] == '>' && words[1] == '0' && words[2] == 'x')
     {
@@ -65,8 +64,7 @@ inline static std::string get_output_words(const int &id)
     return words;
 }
 
-inline static void clear_history()
-{
+inline static void clear_history() {
     save_index = 0;
     history_len = 0;
     response_count = 0;
@@ -105,7 +103,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         std::vector<int> get_ids = tokenizer->encode(query);
         if (use_deepseek) {
             get_ids.insert(get_ids.begin(), {151646, 151644, 198});             // DeepSeek-Distill-Qwen Chat prompt head
-            get_ids.insert(get_ids.end(), {151643, 198, 151646, 151645, 198});  // DeepSeek-Distill-Qwen Chat prompt tail
+            get_ids.insert(get_ids.end(), {151645, 198});                       // DeepSeek-Distill-Qwen Chat prompt tail
         } else {
             get_ids.insert(get_ids.begin(), {151644, 872, 198});                // Qwen Chat prompt head
             get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198});   // Qwen Chat prompt tail
@@ -158,36 +156,41 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         for (int i = 0; i < num_keys_values; i++) {
             input_tensors_A[i] = input_tensors_kv_init_A[i];
         }
+        if (output_tensors_A[0][0] != nullptr) {
+            for (int i = 0; i < amount_of_output; i++) {
+                ort_runtime_A->ReleaseValue(output_tensors_A[0][i]);
+                output_tensors_A[0][i] = nullptr;
+            }
+        }
+        if (output_tensors_A[1][0] != nullptr) {
+            for (int i = 0; i < amount_of_output; i++) {
+                ort_runtime_A->ReleaseValue(output_tensors_A[1][i]);
+                output_tensors_A[1][i] = nullptr;
+            }
+        }
     }
-    ort_runtime_A->Run(session_model_A, run_options_A, input_names_A.data(),
-                       (const OrtValue *const *)input_tensors_A.data(),
-                       input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
-                       output_tensors_A[buffer_index].data());
-    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
+    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
+        ort_runtime_A->Run(session_model_A, run_options_A, input_names_A.data(),
+                           (const OrtValue *const *)input_tensors_A.data(),
+                           input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
+                           output_tensors_A[buffer_index].data());
         void *max_logit_id;
         ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
         token_id = reinterpret_cast<int*>(max_logit_id)[0];
-        input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
-        for (int i = 0; i < num_keys_values; i++) {
-            input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
-        }
-    }
-    if (buffer_index > 0) {
-        int clear_idx = buffer_index - 1;
-        for (int i = 0; i < amount_of_output; i++) {
-            ort_runtime_A->ReleaseValue(output_tensors_A[clear_idx][i]);
-        }
-    }
-    buffer_index += 1;
-    if (buffer_index >= output_tensors_A.size()) {
-        return env->NewStringUTF("Out_of_Buffer");
-    }
-    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
         if ((token_id != end_id_0) && (token_id != end_id_1) && (response_count < single_chat_limit) && (history_len < max_seq_len)) {
+            input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
+            for (int i = 0; i < num_keys_values; i++) {
+                input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
+            }
+            buffer_index = (buffer_index != 0) ? 0 : 1;
             if (add_prompt) {
                 attention_mask = 0;
                 history_len += ids_len;
             } else {
+                for (int i = 0; i < amount_of_output; i++) {
+                    ort_runtime_A->ReleaseValue(output_tensors_A[buffer_index][i]);
+                    output_tensors_A[buffer_index][i] = nullptr;
+                }
                 history_len += 1;
             }
             save_max_logit_position[response_count] = token_id;
