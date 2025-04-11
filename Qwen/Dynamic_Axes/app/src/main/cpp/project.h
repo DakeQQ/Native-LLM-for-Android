@@ -22,7 +22,6 @@ const bool use_deepseek = true;                                                 
 const int num_layers = 28;                                                        // Transformer layers. Refer to config.json for the value. Qwen2.5-0.5B = 24; 1.5B = 28; 3B = 36;
 const int max_seq_len = 4096;                                                     // Please set this value to match the exported model.
 const int num_keys_values = num_layers + num_layers;
-const int last_indices = num_keys_values + 1;
 const int single_chat_limit = max_seq_len / 2 - 1;                                // You can adjust this value. If you set it greater than (max_seq_len / 2 - 1), the previous context may be cleared.
 const int next_chat_buffer = max_seq_len - single_chat_limit;
 
