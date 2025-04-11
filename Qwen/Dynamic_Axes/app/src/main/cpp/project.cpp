@@ -77,7 +77,6 @@ inline static void clear_history() {
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv *env, jobject clazz)
 {
-    std::unique_ptr<MNN::Transformer::Tokenizer> temp = std::make_unique<MNN::Transformer::HuggingfaceTokenizer>();
     if (use_deepseek) {
         start_id = 151646;
         end_id_1 = end_id_0;
@@ -102,8 +101,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
         const char *query = env->GetStringUTFChars(jquery, nullptr);
         std::vector<int> get_ids = tokenizer->encode(query);
         if (use_deepseek) {
-            get_ids.insert(get_ids.begin(), {151646, 151644, 198});             // DeepSeek-Distill-Qwen Chat prompt head
-            get_ids.insert(get_ids.end(), {151645, 198});                       // DeepSeek-Distill-Qwen Chat prompt tail
+            get_ids.insert(get_ids.begin(), {151646, 151644});             // DeepSeek-Distill-Qwen Chat prompt head
+            get_ids.insert(get_ids.end(), {151645});                       // DeepSeek-Distill-Qwen Chat prompt tail
         } else {
             get_ids.insert(get_ids.begin(), {151644, 872, 198});                // Qwen Chat prompt head
             get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198});   // Qwen Chat prompt tail
@@ -147,12 +146,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                 std::move(get_ids.begin(), get_ids.end(), input_ids.begin());
             }
         }
-        input_dims_A[last_indices][1] = ids_len;
+        input_dims_A[num_keys_values][1] = ids_len;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
                 reinterpret_cast<void*>(input_ids.data()), input_ids_buffer_size[ids_len],
-                input_dims_A[last_indices].data(), input_dims_A[last_indices].size(), input_types_A[last_indices],
-                &input_tensors_A[last_indices]);
+                input_dims_A[num_keys_values].data(), input_dims_A[num_keys_values].size(), input_types_A[num_keys_values],
+                &input_tensors_A[num_keys_values]);
         for (int i = 0; i < num_keys_values; i++) {
             input_tensors_A[i] = input_tensors_kv_init_A[i];
         }
@@ -175,12 +174,11 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
                            input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
                            output_tensors_A[buffer_index].data());
         void *max_logit_id;
-        ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][0], &max_logit_id);
+        ort_runtime_A->GetTensorMutableData(output_tensors_A[buffer_index][num_keys_values], &max_logit_id);
         token_id = reinterpret_cast<int*>(max_logit_id)[0];
         if ((token_id != end_id_0) && (token_id != end_id_1) && (response_count < single_chat_limit) && (history_len < max_seq_len)) {
-            input_tensors_A[last_indices] = output_tensors_A[buffer_index][0];
-            for (int i = 0; i < num_keys_values; i++) {
-                input_tensors_A[i] = output_tensors_A[buffer_index][layer_indices[i]];
+            for (int i = 0; i < amount_of_output; i++) {
+                input_tensors_A[i] = output_tensors_A[buffer_index][i];
             }
             buffer_index = (buffer_index != 0) ? 0 : 1;
             if (add_prompt) {
@@ -423,8 +421,8 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
     ort_runtime_A->CreateTensorWithDataAsOrtValue(
             memory_info,
             reinterpret_cast<void *>(&attention_mask), sizeof(int8_t),
-            input_dims_A[num_keys_values].data(), input_dims_A[num_keys_values].size(), input_types_A[num_keys_values],
-            &input_tensors_A[num_keys_values]);
+            input_dims_A[last_indices].data(), input_dims_A[last_indices].size(), input_types_A[last_indices],
+            &input_tensors_A[last_indices]);
 
     for (int i = 0; i < num_layers; i++) {
         input_dims_A[i][2] = 0;
@@ -441,9 +439,6 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 reinterpret_cast<void *>(past_key_values_init.data()), 0,
                 input_dims_A[i].data(), input_dims_A[i].size(), input_types_A[i],
                 &input_tensors_kv_init_A[i]);
-    }
-    for (int i = 1; i < num_keys_values; i++) {
-        layer_indices[i] += i;
     }
     input_ids_buffer_size[1] = sizeof(int);
     for (int i = 2; i < max_seq_len; i++) {
