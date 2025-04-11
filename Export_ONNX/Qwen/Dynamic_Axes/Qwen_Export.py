@@ -154,7 +154,7 @@ attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np
 past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, head_dim, 0), dtype=np.float16), 'cpu', 0)
 past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
 num_keys_values = num_layers + num_layers
-last_indices = num_keys_values + 1
+amount_of_outputs = len(out_name_A)
 num_decode = 0
 print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 
@@ -182,7 +182,7 @@ while num_decode < max_single_chat_length:
     if max_logit_ids in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
         break
     else:
-        for i in range(last_indices):
+        for i in range(amount_of_outputs):
             input_feed[in_name_A[i].name] = all_outputs[i]
         if num_decode < 1:
             input_feed[in_name_A[-1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
