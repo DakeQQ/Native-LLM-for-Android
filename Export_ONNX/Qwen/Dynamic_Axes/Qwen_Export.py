@@ -71,7 +71,7 @@ gc.collect()
 # Prepare input and output names
 input_names = []
 keys_values = []
-output_names = ['max_logit_id']
+output_names = []
 dynamic_axes = {'input_ids': {1: 'ids_len'}}
 for i in range(num_layers):
     name = f'in_key_{i}'
@@ -91,14 +91,15 @@ for i in range(num_layers):
     output_names.append(name)
     dynamic_axes[name] = {1: 'history_len_plus_ids_len'}
 
-input_names.append('attention_mask')
 input_names.append('input_ids')
+input_names.append('attention_mask')
+output_names.append('max_logit_id')
 
 print('Export start ...')
 with torch.inference_mode():
     torch.onnx.export(
         model,
-        tuple(keys_values + [attention_mask, input_ids]),
+        tuple(keys_values + [input_ids, attention_mask]),
         onnx_model_A,
         input_names=input_names,
         output_names=output_names,
@@ -119,7 +120,7 @@ gc.collect()
 print('\nExport done!\n\nStart running the Qwen by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
 # Run the exported model by ONNX Runtime
-query = "山东省最高的山是哪座山, 它比黄山高还是矮？差距多少？"
+query = "地球最高的山是哪座山？"
 max_single_chat_length = 512  # It an adjustable value, but must less than max_seq_len.
 tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
 
@@ -140,9 +141,9 @@ out_name_A = ort_session_A.get_outputs()
 
 # Pre-process inputs
 if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
-    #  prompt = f'<|begin▁of▁sentence|><｜User｜>\n{query}<｜Assistant｜>\n'
-    head = torch.tensor([[151646, 151644, 198]], dtype=torch.int32)
-    tail = torch.tensor([[151645, 198]], dtype=torch.int32)
+    #  prompt = f'<|begin▁of▁sentence|><｜User｜>{query}<｜Assistant｜>'
+    head = torch.tensor([[151646, 151644]], dtype=torch.int32)
+    tail = torch.tensor([[151645]], dtype=torch.int32)
     tokens = tokenizer(query, return_tensors='pt')['input_ids']
     tokens = torch.cat((head, tokens, tail), dim=-1)
 else:
@@ -153,13 +154,14 @@ attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np
 past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, head_dim, 0), dtype=np.float16), 'cpu', 0)
 past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
 num_keys_values = num_layers + num_layers
+last_indices = num_keys_values + 1
 num_decode = 0
 print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 
 output_names = []
 input_feed = {
-    in_name_A[-1].name: input_ids,
-    in_name_A[-2].name: attention_mask
+    in_name_A[-2].name: input_ids,
+    in_name_A[-1].name: attention_mask
 }
 for i in range(num_layers):
     input_feed[in_name_A[i].name] = past_keys_A
@@ -172,20 +174,19 @@ output_names.append(out_name_A[num_keys_values].name)
 # Start to run LLM
 start_time = time.time()
 while num_decode < max_single_chat_length:
-    max_logit_ids, *keys_values = ort_session_A.run_with_ort_values(
+    all_outputs = ort_session_A.run_with_ort_values(
         output_names,
         input_feed
     )
-    token_id = onnxruntime.OrtValue.numpy(max_logit_ids)
-    if token_id in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
+    max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-1])
+    if max_logit_ids in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
         break
     else:
-        input_feed[in_name_A[-1].name] = max_logit_ids
-        for i in range(num_keys_values):
-            input_feed[in_name_A[i].name] = keys_values[i]
+        for i in range(last_indices):
+            input_feed[in_name_A[i].name] = all_outputs[i]
         if num_decode < 1:
-            input_feed[in_name_A[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+            input_feed[in_name_A[-1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
         num_decode += 1
-        print(tokenizer.decode(token_id[0]), end="", flush=True)
+        print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 
