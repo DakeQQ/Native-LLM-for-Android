@@ -725,8 +725,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             self,
             *all_inputs
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        input_ids = all_inputs[-1]
-        attention_mask = all_inputs[-2]
+        input_ids = all_inputs[-2]
+        attention_mask = all_inputs[-1]
         ids_len = input_ids.shape[1]
         history_len = all_inputs[0].shape[-1]
         kv_seq_len = ids_len + history_len
@@ -748,9 +748,9 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 past_value_states=all_inputs[i + self.num_layers].float(),
                 kv_seq_len=kv_seq_len
             )
-        return (torch.argmax(self.lm_head(self.model.norm(hidden_states[:, -1])), dim=-1, keepdim=True).int(),
-                *self.save_key,
-                *self.save_value)
+        return (*self.save_key,
+                *self.save_value,
+                torch.argmax(self.lm_head(self.model.norm(hidden_states[:, -1])), dim=-1, keepdim=True).int())
 
     def prepare_inputs_for_generation(
         self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
@@ -940,3 +940,4 @@ class Qwen2ForSequenceClassification(Qwen2PreTrainedModel):
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
         )
+        
