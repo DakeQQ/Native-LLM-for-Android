@@ -74,22 +74,22 @@ keys_values = []
 output_names = ['max_logit_id']
 dynamic_axes = {'input_ids': {1: 'ids_len'}}
 for i in range(num_layers):
-    key_name = f'in_key_{i}'
-    input_names.append(key_name)
+    name = f'in_key_{i}'
+    input_names.append(name)
     keys_values.append(past_keys)
-    dynamic_axes[key_name] = {2: 'history_len'}
-    key_name = f'out_key_{i}'
-    output_names.append(key_name)
-    dynamic_axes[key_name] = {2: 'history_len_plus_ids_len'}
+    dynamic_axes[name] = {2: 'history_len'}
+    name = f'out_key_{i}'
+    output_names.append(name)
+    dynamic_axes[name] = {2: 'history_len_plus_ids_len'}
 
 for i in range(num_layers):
-    value_name = f'in_value_{i}'
-    input_names.append(value_name)
+    name = f'in_value_{i}'
+    input_names.append(name)
     keys_values.append(past_values)
-    dynamic_axes[value_name] = {1: 'history_len'}
-    value_name = f'out_value_{i}'
-    output_names.append(value_name)
-    dynamic_axes[value_name] = {1: 'history_len_plus_ids_len'}
+    dynamic_axes[name] = {1: 'history_len'}
+    name = f'out_value_{i}'
+    output_names.append(name)
+    dynamic_axes[name] = {1: 'history_len_plus_ids_len'}
 
 input_names.append('attention_mask')
 input_names.append('input_ids')
@@ -111,6 +111,10 @@ del input_ids
 del attention_mask
 del past_keys
 del past_values
+del input_names
+del output_names
+del dynamic_axes
+del keys_values
 gc.collect()
 print('\nExport done!\n\nStart running the Qwen by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
