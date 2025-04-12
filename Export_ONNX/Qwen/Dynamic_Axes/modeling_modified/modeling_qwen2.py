@@ -182,11 +182,11 @@ class Qwen2MLP(nn.Module):
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
 def repeat_k(kv_states, num_key_value_groups, head_dim, kv_seq_len):
-    return kv_states.expand(-1, num_key_value_groups, -1, -1).contiguous().view(-1, head_dim, kv_seq_len)
+    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(-1, head_dim, kv_seq_len)
 
 
 def repeat_v(kv_states, num_key_value_groups, head_dim, kv_seq_len):
-    return kv_states.expand(-1, num_key_value_groups, -1, -1).contiguous().view(-1, kv_seq_len, head_dim)
+    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(-1, kv_seq_len, head_dim)
 
 
 class Qwen2Attention(nn.Module):
