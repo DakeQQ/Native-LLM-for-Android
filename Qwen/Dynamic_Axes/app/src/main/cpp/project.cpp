@@ -168,7 +168,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             }
         }
     }
-    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent incorrect saves.
+    if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent over runs.
         ort_runtime_A->Run(session_model_A, run_options_A, input_names_A.data(),
                            (const OrtValue *const *)input_tensors_A.data(),
                            input_tensors_A.size(), output_names_A.data(), output_names_A.size(),
