@@ -72,7 +72,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
 | Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2-1.5B-Instruct<br>q8f32 | 20 token/s         |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5-1.5B-Instruct<br>q4f32<br>dynamic | 20 token/s  |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5-1.5B-Instruct<br>q4f32<br>dynamic | 20.5 token/s  |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
 | Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
 
