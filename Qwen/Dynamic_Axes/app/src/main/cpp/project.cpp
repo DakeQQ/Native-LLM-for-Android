@@ -425,7 +425,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
             &input_tensors_A[amount_of_output]);
 
     for (int i = 0; i < num_layers; i++) {
-        input_dims_A[i][2] = 0;
+        input_dims_A[i][3] = 0;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
                 reinterpret_cast<void *>(past_key_values_init.data()), 0,
@@ -433,7 +433,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
                 &input_tensors_kv_init_A[i]);
     }
     for (int i = num_layers; i < num_keys_values; i++) {
-        input_dims_A[i][1] = 0;
+        input_dims_A[i][2] = 0;
         ort_runtime_A->CreateTensorWithDataAsOrtValue(
                 memory_info,
                 reinterpret_cast<void *>(past_key_values_init.data()), 0,
