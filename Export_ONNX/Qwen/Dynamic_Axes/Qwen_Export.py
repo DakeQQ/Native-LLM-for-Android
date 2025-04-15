@@ -11,6 +11,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 path = '/home/DakeQQ/Downloads/DeepSeek-R1-Distill-Qwen-1.5B'  # Set the folder path where the Qwen whole project downloaded.
 onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'    # Assign a path where the exported Qwen model stored.
+STOP_TOKEN = [151643, 151645]                                  # The stop_id in Qwen is "151643" & "151645"
+query = "地球最高的山是哪座山？"                                   # The test query after the export process.
+
 
 # Load the model
 shutil.copyfile("./modeling_modified/modeling_qwen2.py", site.getsitepackages()[-1] + "/transformers/models/qwen2/modeling_qwen2.py")
@@ -120,8 +123,7 @@ gc.collect()
 print('\nExport done!\n\nStart running the Qwen by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
 # Run the exported model by ONNX Runtime
-query = "地球最高的山是哪座山？"
-max_single_chat_length = 512  # It an adjustable value, but must less than max_seq_len.
+max_single_chat_length = 512                # It an adjustable value, but must less than max_seq_len.
 tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
 
 # ONNX Runtime settings
@@ -179,7 +181,7 @@ while num_decode < max_single_chat_length:
         input_feed
     )
     max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-1])
-    if max_logit_ids in [151643, 151645]:  # the stop_id in Qwen is "151643" & "151645"
+    if max_logit_ids in STOP_TOKEN:  
         break
     else:
         for i in range(amount_of_outputs):
