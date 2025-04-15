@@ -23,6 +23,7 @@ onnx_model_A = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_A.onnx'            
 onnx_model_B = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_B.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_C.onnx'
 onnx_model_D = r'/home/DakeQQ/Downloads/Intern_ONNX/InternVL_D.onnx'
+STOP_TOKEN = [2, 92542]                                                             # The stop_id in Intern is "2" & "92542"
 image_path = r"./psyduck.png"                                                       # Test image for the exported onnx model.
 query = "Provide a detailed description of the image."                              # Test query for the exported onnx model.
 
@@ -369,7 +370,7 @@ while num_decode < max_single_chat_length:
         input_feed
     )
     token_id = onnxruntime.OrtValue.numpy(max_logit_ids)
-    if token_id in [2, 92542]:  # the stop_id in Intern is "2" & "92542"
+    if token_id in STOP_TOKEN:  
         break
     else:
         for i in range(num_keys_values):
