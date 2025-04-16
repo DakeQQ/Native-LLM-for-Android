@@ -104,7 +104,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             get_ids.insert(get_ids.begin(), {151646, 151644});             // DeepSeek-Distill-Qwen Chat prompt head
             get_ids.insert(get_ids.end(), {151645});                       // DeepSeek-Distill-Qwen Chat prompt tail
         } else {
-            get_ids.insert(get_ids.begin(), {151644, 872, 198});                // Qwen Chat prompt head
+            get_ids.insert(get_ids.begin(), {198, 151644, 872, 198});           // Qwen Chat prompt head
             get_ids.insert(get_ids.end(), {151645, 198, 151644, 77091, 198});   // Qwen Chat prompt tail
         }
         ids_len = static_cast<int> (get_ids.size());
