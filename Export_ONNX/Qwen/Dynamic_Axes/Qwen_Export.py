@@ -28,8 +28,8 @@ hidden_size = model.config.hidden_size
 # Generate dummies for torch.onnx.export()
 attention_mask = torch.tensor([0], dtype=torch.int8)
 input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value.
-past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float16)
-past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float16)
+past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float32)
+past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float32)
 position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
 theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
 idx_theta = position_ids * theta
@@ -153,8 +153,8 @@ else:
     tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
-past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, head_dim, 0), dtype=np.float16), 'cpu', 0)
-past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, 0, head_dim), dtype=np.float16), 'cpu', 0)
+past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, head_dim, 0), dtype=np.float32), 'cpu', 0)
+past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, 0, head_dim), dtype=np.float32), 'cpu', 0)
 num_keys_values = num_layers + num_layers
 amount_of_outputs = len(out_name_A)
 num_decode = 0
