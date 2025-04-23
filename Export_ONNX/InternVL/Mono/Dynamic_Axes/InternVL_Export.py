@@ -370,20 +370,19 @@ while num_decode < max_single_chat_length:
         input_feed
     )
     token_id = onnxruntime.OrtValue.numpy(max_logit_ids)
+    num_decode += 1
     if token_id in STOP_TOKEN:  
         break
-    else:
-        for i in range(num_keys_values):
-            input_feed[in_name_D[i].name] = keys_values[i]
-        if num_decode < 1:
-            input_feed[in_name_D[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([PROMPT_HEAD_LENGTH], dtype=np.int64), 'cpu', 0)
-            input_feed[in_name_D[-3].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
-        num_decode += 1
-        print(tokenizer.decode(token_id[0]), end="", flush=True)
-        hidden_states = ort_session_C.run_with_ort_values(
-            [out_name_C0],
-            {
-                in_name_C0: max_logit_ids
-            })[0]
-        input_feed[in_name_D[-1].name] = hidden_states
+    for i in range(num_keys_values):
+        input_feed[in_name_D[i].name] = keys_values[i]
+    if num_decode < 2:
+        input_feed[in_name_D[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([PROMPT_HEAD_LENGTH], dtype=np.int64), 'cpu', 0)
+        input_feed[in_name_D[-3].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+    print(tokenizer.decode(token_id[0]), end="", flush=True)
+    hidden_states = ort_session_C.run_with_ort_values(
+        [out_name_C0],
+        {
+            in_name_C0: max_logit_ids
+        })[0]
+    input_feed[in_name_D[-1].name] = hidden_states
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
