@@ -286,12 +286,12 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv *env, jobject
         ort_runtime_A->EnableCpuMemArena(session_options_A);
         ort_runtime_A->EnableMemPattern(session_options_A);
         ort_runtime_A->SetSessionExecutionMode(session_options_A, ORT_SEQUENTIAL);
-        ort_runtime_A->SetInterOpNumThreads(session_options_A, 4);
+        ort_runtime_A->SetInterOpNumThreads(session_options_A, 6);
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.dynamic_block_base",                   // One block can contain 1 or more cores, and sharing 1 job.
-                                             "2");
+                                             "3");
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.intra_op_thread_affinities",           // Binding the #cpu to run the model. 'A;B' means A & B work respectively. 'A,B' means A & B work cooperatively.
-                                             "1,3;2,4");                                                        // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on my device, due to limitations imposed by the RAM bandwidth.
-        ort_runtime_A->SetIntraOpNumThreads(session_options_A, 3);                                              // dynamic_block_base + 1
+                                             "1,3;2,4;5,7");                                                    // It is the best cost/performance (C/P) value setting for running the Qwen 1.8B LLM on my device, due to limitations imposed by the RAM bandwidth.
+        ort_runtime_A->SetIntraOpNumThreads(session_options_A, 4);                                              // dynamic_block_base + 1
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.inter_op.allow_spinning",
                                              "1");                                                              // 0 for low power
         ort_runtime_A->AddSessionConfigEntry(session_options_A, "session.intra_op.allow_spinning",
