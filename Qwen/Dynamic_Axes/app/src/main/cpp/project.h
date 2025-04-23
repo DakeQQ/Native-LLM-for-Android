@@ -71,7 +71,7 @@ std::vector<int> num_ids_per_chat(20, 0);                      // Same size with
 std::vector<int> save_max_logit_position(max_seq_len, 0);
 std::vector<int> layer_indices(num_keys_values, 1);
 std::vector<size_t> input_ids_buffer_size(max_seq_len, 0);
-std::vector<Ort::Float16_t> past_key_values_init(1, Ort::Float16_t(0.f));
+std::vector<float> past_key_values_init(1, 0.f);
 
 // Tokenizer
 MNN::Transformer::Tokenizer* tokenizer;
