@@ -181,14 +181,13 @@ while num_decode < max_single_chat_length:
         input_feed
     )
     max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-1])
+    num_decode += 1
     if max_logit_ids in STOP_TOKEN:  
         break
-    else:
-        for i in range(amount_of_outputs):
-            input_feed[in_name_A[i].name] = all_outputs[i]
-        if num_decode < 1:
-            input_feed[in_name_A[-1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
-        num_decode += 1
-        print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
+    for i in range(amount_of_outputs):
+        input_feed[in_name_A[i].name] = all_outputs[i]
+    if num_decode < 2:
+        input_feed[in_name_A[-1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+    print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 
