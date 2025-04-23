@@ -250,8 +250,8 @@ class Qwen2Attention(nn.Module):
         key_states = self.k_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).permute(2, 1, 3, 0)
         key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos_k + rotate_half(key_states, self.head_dim_half, 2) * rotary_pos_emb_sin_k), dim=-1)
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)), dim=2)
-        save_key_states = key_states.half()
-        save_value_states = value_states.half()
+        save_key_states = key_states
+        save_value_states = value_states
         key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
         value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
@@ -288,8 +288,8 @@ class Qwen2FlashAttention2(Qwen2Attention):
         key_states = self.k_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).permute(2, 1, 3, 0)
         key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos_k + rotate_half(key_states, self.head_dim_half, 2) * rotary_pos_emb_sin_k), dim=-1)
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)), dim=2)
-        save_key_states = key_states.half()
-        save_value_states = value_states.half()
+        save_key_states = key_states
+        save_value_states = value_states
         key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
         value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
@@ -322,8 +322,8 @@ class Qwen2SdpaAttention(Qwen2Attention):
         key_states = self.k_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).permute(2, 1, 3, 0)
         key_states = torch.cat((past_key_states, key_states * rotary_pos_emb_cos_k + rotate_half(key_states, self.head_dim_half, 2) * rotary_pos_emb_sin_k), dim=-1)
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)), dim=2)
-        save_key_states = key_states.half()
-        save_value_states = value_states.half()
+        save_key_states = key_states
+        save_value_states = value_states
         key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
         value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
