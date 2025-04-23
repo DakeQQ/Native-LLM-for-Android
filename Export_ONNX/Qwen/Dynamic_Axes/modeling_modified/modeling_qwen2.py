@@ -739,8 +739,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 rotary_pos_emb_sin_k=rotary_pos_emb_sin_k,
                 rotary_pos_emb_cos_q=rotary_pos_emb_cos_q,
                 rotary_pos_emb_sin_q=rotary_pos_emb_sin_q,
-                past_key_states=all_inputs[i].float(),
-                past_value_states=all_inputs[i + self.num_layers].float(),
+                past_key_states=all_inputs[i],
+                past_value_states=all_inputs[i + self.num_layers],
                 kv_seq_len=kv_seq_len
             )
         return (*self.save_key,
