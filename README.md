@@ -17,7 +17,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - 2025/04/29：Update Qwen3 ONNX export script.
 - 2025/04/05：Update Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`.
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen2_&2.5 Qwen_Export.py)
 
 ## Getting Started
 1. **Download Models:**
@@ -117,20 +117,21 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 展示在 Android 设备上运行原生大型语言模型 (LLM) 的示范。目前支持的模型包括：
 
-- **DeepSeek-R1-Distill-Qwen**: 1.5B
-- **Qwen2.5-Instruct**: 0.5B, 1.5B
+- **Qwen3**: 0.6B, 1.7B, 4B...
+- **Qwen2.5-Instruct**: 0.5B, 1.5B, 3B...
 - **Qwen2/2.5VL**: 2B, 3B
+- **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
 - **Gemma2-it**: 2B
 - **Phi3.5-mini-instruct**: 3.8B
 - **Llama-3.2-Instruct**: 1B
 - **InternVL-Mono**: 2B
 
-
 ## 最近更新
-- 2025/04/05: 更新 Qwen, InternVL-Mono `q4f32` + `dynamic_axes`。
+- 2025/04/29：更新 Qwen3 ONNX 导出脚本。
+- 2025/04/05: 更新 Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`。
 - 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用Qwen_Export.py）。
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用 Qwen2_&2.5 Qwen_Export.py）。
 
 ## 入门指南
 
