@@ -3,9 +3,10 @@
 ## Overview
 Demonstration of running a native Large Language Model (LLM) on Android devices. Currently supported models include:
 
-- **DeepSeek-R1-Distill-Qwen**: 1.5B
-- **Qwen2.5-Instruct**: 0.5B, 1.5B
+- **Qwen3**: 0.6B, 1.7B, 4B...
+- **Qwen2.5-Instruct**: 0.5B, 1.5B, 3B...
 - **Qwen2/2.5VL**: 2B, 3B
+- **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
 - **Gemma2-it**: 2B
 - **Phi3.5-mini-instruct**: 3.8B
@@ -13,7 +14,8 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **InternVL-Mono**: 2B
 
 ## Recent Updates
-- 2025/04/05：Update Qwen, InternVL-Mono `q4f32` + `dynamic_axes`.
+- 2025/04/29：Update Qwen3 ONNX export script.
+- 2025/04/05：Update Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`.
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen_Export.py)
 
