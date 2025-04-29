@@ -7,8 +7,8 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path = '/home/iamj/Downloads/Qwen3-1.7B'                        # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = '/home/iamj/Downloads/Qwen_ONNX/Qwen.onnx'       # Assign a path where the exported Qwen model stored.
+path = '/home/DakeQQ/Downloads/Qwen3-1.7B'                      # Set the folder path where the Qwen whole project downloaded.
+onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'     # Assign a path where the exported Qwen model stored.
 STOP_TOKEN = [151643, 151645]                                   # The stop_id in Qwen is "151643" & "151645"
 MAX_SEQ_LEN = 4096                                              # The max context length.
 test_think_mode = True                                          # Test the query with thinking mode.
