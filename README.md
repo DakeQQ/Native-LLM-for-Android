@@ -14,14 +14,14 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **InternVL-Mono**: 2B
 
 ## Recent Updates
-- 2025/04/29：Update Qwen3 ONNX export script.
+- 2025/04/29：Update Qwen3.
 - 2025/04/05：Update Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`.
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using Qwen2_&2.5 Qwen_Export.py)
 
 ## Getting Started
 1. **Download Models:**
-   - Quick Try: [DeepSeek-R1-Distill-Qwen-1.5B-Android](https://drive.google.com/drive/folders/1cwVeZj14DLYvl75wOH0_Cf8CWJKjSO1M?usp=sharing) / [Qwen2VL-2B](https://drive.google.com/file/d/11POekmCRLsYk9B_ivJ9st5zRIqjJKlov/view?usp=sharing)
+   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main) / [Qwen2VL-2B](https://drive.google.com/file/d/11POekmCRLsYk9B_ivJ9st5zRIqjJKlov/view?usp=sharing)
 
 2. **Setup Instructions:**
    - Place the downloaded model files into the `assets` folder.
@@ -54,6 +54,15 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - Explore more projects: [DakeQQ Projects](https://github.com/DakeQQ?tab=repositories)
 
 ## Performance Metrics
+### Qwen
+| OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
+|:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2-1.5B-Instruct<br>q8f32 | 20 token/s         |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen3-1.7B-Instruct<br>q4f32<br>dynamic | 18.5 token/s  |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5-1.5B-Instruct<br>q4f32<br>dynamic | 20.5 token/s  |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
+| Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
+
 ### DeepSeek-R1
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
@@ -67,14 +76,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 |:----------:|:------------:|:-----------------------:|:-----------------:|:------------------------:|
 | Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2VL-2B<br>q8f32 | 15 token/s              |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2VL-2B<br>q8f32 | 9 token/s               |
-
-### Qwen
-| OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
-|:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2-1.5B-Instruct<br>q8f32 | 20 token/s         |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5-1.5B-Instruct<br>q4f32<br>dynamic | 20.5 token/s  |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
-| Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
 
 ### MiniCPM
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
@@ -128,7 +129,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **InternVL-Mono**: 2B
 
 ## 最近更新
-- 2025/04/29：更新 Qwen3 ONNX 导出脚本。
+- 2025/04/29：更新 Qwen3。
 - 2025/04/05: 更新 Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`。
 - 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `Phi_single`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用 Qwen2_&2.5 Qwen_Export.py）。
@@ -136,7 +137,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ## 入门指南
 
 1. **下载模型：**
-   - Quick Try: [DeepSeek-R1-Distill-Qwen-1.5B-Android](https://drive.google.com/drive/folders/1cwVeZj14DLYvl75wOH0_Cf8CWJKjSO1M?usp=sharing) / [Qwen2VL-2B](https://drive.google.com/file/d/11POekmCRLsYk9B_ivJ9st5zRIqjJKlov/view?usp=sharing)
+   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main) / [Qwen2VL-2B](https://drive.google.com/file/d/11POekmCRLsYk9B_ivJ9st5zRIqjJKlov/view?usp=sharing)
 
 2. **设置说明：**
    - 将下载的模型文件放入 `assets` 文件夹。
