@@ -199,8 +199,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv *env, jclass clazz, 
             chatting = false;
             save_max_logit_position[response_count] = end_id_1;
             response_count += 1;
-            save_max_logit_position[response_count] = 198;
-            response_count += 1;
             num_ids_per_chat[save_index] += response_count;
             attention_mask = 1;
             history_len = 0;
