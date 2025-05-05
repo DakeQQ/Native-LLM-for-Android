@@ -23,7 +23,7 @@ download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                       
 use_gpu = True                                                                   # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider']
 use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
-upgrade_opset = 21                                                               # Optional process. Set 0 for close.
+upgrade_opset = 20                                                               # Optional process. Set 0 for close.
 
 # Start Quantize
 quantize_dynamic(
@@ -99,7 +99,7 @@ model.convert_float_to_float16(
     force_fp16_initializers=True,
     use_symbolic_shape_infer=True,                            # True for more optimize but may get errors.
     max_finite_val=65504.0,
-    op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range', 'MatMulIntegerToFloat']
+    op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'Range', 'MatMulIntegerToFloat', 'Pow', 'ReduceMean']
 )
 model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
 del model
