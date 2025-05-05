@@ -35,7 +35,7 @@ block_size = 128                                                                
 accuracy_level = 2                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 quant_symmetric = False                                                          # False may get more accuracy.
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
-upgrade_opset = 21                                                               # Optional process. Set 0 for close.
+upgrade_opset = 20                                                               # Optional process. Set 0 for close.
 
 
 # Start Weight-Only Quantize
