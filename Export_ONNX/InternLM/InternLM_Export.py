@@ -56,7 +56,6 @@ class INTERNLM(torch.nn.Module):
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         theta = self.internlm.config.rope_theta ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
         idx_theta = position_ids * theta
-        idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
         self.cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0).half()
