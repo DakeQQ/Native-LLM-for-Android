@@ -11,7 +11,6 @@ path = '/home/DakeQQ/Downloads/Phi-4-mini-instruct'             # Set the folder
 onnx_model_A = '/home/DakeQQ/Downloads/Phi_ONNX/Phi.onnx'       # Assign a path where the exported Phi model stored.
 STOP_TOKEN = [200020, 199999]                                   # The stop_id in Phi is "200020" & "199999"
 MAX_SEQ_LEN = 4096                                              # The max context length.
-test_think_mode = True                                          # Test the query with thinking mode.
 test_query = "地球最高的山是哪座山？"                               # The test query after the export process.
 
 
