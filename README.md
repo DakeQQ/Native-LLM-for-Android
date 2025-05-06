@@ -8,10 +8,11 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Qwen2/2.5VL**: 2B, 3B
 - **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
-- **Gemma3-it**: 1B, 4B...
-- **Phi4-mini-Instruct**: 3.8B
+- **Gemma-3-it**: 1B, 4B...
+- **Phi-4-mini-Instruct**: 3.8B
 - **Llama-3.2-Instruct**: 1B
 - **InternVL-Mono**: 2B
+- **InternLM-3**: 8B
 
 ## Recent Updates
 - 2025/04/29：Update Qwen3.
@@ -123,10 +124,11 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Qwen2/2.5VL**: 2B, 3B
 - **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
-- **Gemma3-it**: 1B, 4B...
-- **Phi4-mini-Instruct**: 3.8B
+- **Gemma-3-it**: 1B, 4B...
+- **Phi-4-mini-Instruct**: 3.8B
 - **Llama-3.2-Instruct**: 1B
 - **InternVL-Mono**: 2B
+- **InternLM-3**: 8B
 
 ## 最近更新
 - 2025/04/29：更新 Qwen3。
