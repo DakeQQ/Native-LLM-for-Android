@@ -8,7 +8,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 path = r'/home/DakeQQ/Downloads/internlm3-8b-instruct'                      # Set the folder path where the InternLM whole project downloaded.
-onnx_model_A = r'/home/DakeQQ/Downloads/InternLM_Optimized\InternLM.onnx'   # Assign a path where the exported InternLM model stored.
+onnx_model_A = r'/home/DakeQQ/Downloads/InternLM_ONNX\InternLM.onnx'        # Assign a path where the exported InternLM model stored.
 STOP_TOKEN = [2, 128131]                                                    # The stop_id in InternLM is "2" & "128131"
 MAX_SEQ_LEN = 4096                                                          # The max context length.
 test_query = "地球最高的山是哪座山？"                                           # The test query after the export process.
