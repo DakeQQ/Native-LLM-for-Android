@@ -7,8 +7,8 @@ import onnxruntime
 from transformers import Gemma3ForCausalLM, AutoTokenizer
 
 
-path = '/home/iamj/Downloads/gemma-3-1b-it'                       # Set the folder path where the Gemma whole project downloaded.
-onnx_model_A = '/home/iamj/Downloads/Gemma_ONNX/Gemma.onnx'       # Assign a path where the exported Gemma model stored.
+path = '/home/DakeQQ/Downloads/gemma-3-1b-it'                     # Set the folder path where the Gemma whole project downloaded.
+onnx_model_A = '/home/DakeQQ/Downloads/Gemma_ONNX/Gemma.onnx'     # Assign a path where the exported Gemma model stored.
 STOP_TOKEN = [106, 1]                                             # The stop_id in Gemma is "106" & "1"
 MAX_SEQ_LEN = 4096                                                # The max context length.
 test_query = "地球最高的山是哪座山？"                                 # The test query after the export process.
@@ -62,14 +62,14 @@ class GEMMA(torch.nn.Module):
 
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         head_dim_range = -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
-        theta = 10000.0 ** head_dim_range
+        theta = self.gemma.config.rope_theta ** head_dim_range
         idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
         self.cos_rotary_pos_emb_global = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0).half()
         self.sin_rotary_pos_emb_global = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
 
-        theta = 1000000.0 ** head_dim_range
+        theta = self.gemma.config.rope_local_base_freq ** head_dim_range
         idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
