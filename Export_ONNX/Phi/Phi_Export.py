@@ -62,7 +62,7 @@ class PHI(torch.nn.Module):
         self.head_dim_rot = int(head_dim * self.phi.config.partial_rotary_factor)
         self.head_dim_pass = self.head_dim - self.head_dim_rot
         self.head_dim_rot_half = self.head_dim_rot // 2
-        theta = 10000.0 ** -(torch.arange(0, self.head_dim_rot, 2, dtype=torch.float32) / self.head_dim_rot)
+        theta = self.phi.config.rope_theta ** -(torch.arange(0, self.head_dim_rot, 2, dtype=torch.float32) / self.head_dim_rot)
         idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta) * self.phi.model.rotary_emb.attention_scaling
         sin_rotary_pos_emb = torch.sin(idx_theta) * self.phi.model.rotary_emb.attention_scaling
