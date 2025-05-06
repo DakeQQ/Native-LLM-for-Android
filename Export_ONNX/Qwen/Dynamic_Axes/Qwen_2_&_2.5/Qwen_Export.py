@@ -31,7 +31,7 @@ input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value
 past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float32)
 past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float32)
 position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
-theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+theta = model.config.rope_theta ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
 idx_theta = position_ids * theta
 cos_rotary_pos_emb = torch.cos(idx_theta)
 sin_rotary_pos_emb = torch.sin(idx_theta)
