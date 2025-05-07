@@ -62,14 +62,20 @@ class GEMMA(torch.nn.Module):
 
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         head_dim_range = -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
-        theta = self.gemma.config.rope_theta ** head_dim_range
+        if hasattr(model.config, 'rope_scaling') and hasattr(model.config.rope_scaling, "factor"):
+            theta = (self.gemma.config.rope_theta ** head_dim_range) / model.config.rope_scaling["factor"]
+        else:
+            theta = (self.gemma.config.rope_theta ** head_dim_range)
         idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
         self.cos_rotary_pos_emb_global = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0).half()
         self.sin_rotary_pos_emb_global = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).unsqueeze(0).half()
-
-        theta = self.gemma.config.rope_local_base_freq ** head_dim_range
+        if hasattr(model.config, 'rope_scaling') and hasattr(model.config.rope_scaling, "factor"):
+            theta = (self.gemma.config.rope_local_base_freq ** head_dim_range) / model.config.rope_scaling["factor"]
+        else:
+            theta = (self.gemma.config.rope_local_base_freq ** head_dim_range)
+        idx_theta = position_ids * theta
         idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
