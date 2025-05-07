@@ -100,7 +100,7 @@ model = optimize_model(quanted_model_path,
                        verbose=False,
                        model_type='bert')
 model.convert_float_to_float16(
-    keep_io_types=True,
+    keep_io_types=False,
     force_fp16_initializers=True,
     use_symbolic_shape_infer=True,                            # True for more optimize but may get errors.
     max_finite_val=65504.0,
