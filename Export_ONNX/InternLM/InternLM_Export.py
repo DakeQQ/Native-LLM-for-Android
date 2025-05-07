@@ -179,10 +179,15 @@ session_opts.intra_op_num_threads = 0                 # Under the node, execute 
 session_opts.enable_cpu_mem_arena = True              # True for execute speed; False for less memory usage.
 session_opts.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
 session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+session_opts.add_session_config_entry("session.set_denormal_as_zero", "1")
 session_opts.add_session_config_entry("session.intra_op.allow_spinning", "1")
 session_opts.add_session_config_entry("session.inter_op.allow_spinning", "1")
-session_opts.add_session_config_entry("session.set_denormal_as_zero", "1")
+session_opts.add_session_config_entry("session.enable_quant_qdq_cleanup", "1")
+session_opts.add_session_config_entry("session.qdq_matmulnbits_accuracy_level", "4")
+session_opts.add_session_config_entry("optimization.enable_gelu_approximation", "1")
 session_opts.add_session_config_entry("disable_synchronize_execution_providers", "1")
+session_opts.add_session_config_entry("optimization.minimal_build_optimizations", "")
+session_opts.add_session_config_entry("session.use_device_allocator_for_initializers", "1")
 
 
 ort_session_A = onnxruntime.InferenceSession(onnx_model_A, sess_options=session_opts, providers=['CPUExecutionProvider'])
