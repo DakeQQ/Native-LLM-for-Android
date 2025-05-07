@@ -378,7 +378,7 @@ class Qwen2DecoderLayer(nn.Module):
             past_value_states=past_value_states,
             kv_seq_len=kv_seq_len
         )
-        hidden_states_attn = hidden_states_attn + hidden_states
+        hidden_states_attn += hidden_states
         return hidden_states_attn + self.mlp(self.post_attention_layernorm(hidden_states_attn)), past_key_states, past_value_states
 
 
@@ -719,18 +719,17 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
     def forward(
             self,
             *all_inputs
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        input_ids = all_inputs[-2]
-        attention_mask = all_inputs[-1]
-        ids_len = input_ids.shape[1].unsqueeze(0)
-        history_len = all_inputs[0].shape[-1].unsqueeze(0)
-        kv_seq_len = ids_len + history_len
-        rotary_pos_emb_cos_q = self.cos_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
-        rotary_pos_emb_sin_q = self.sin_rotary_pos_emb[:, history_len:kv_seq_len, :].float()
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        history_len = all_inputs[-4]
+        input_ids = all_inputs[-3]
+        ids_len = all_inputs[-2]
+        kv_seq_len = history_len + ids_len
+        rotary_pos_emb_cos_q = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        rotary_pos_emb_sin_q = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
         rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2)
         rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2)
         hidden_states = self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
-        attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * attention_mask).float()
+        attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * all_inputs[-1]).float()
         for i in range(self.num_layers):
             hidden_states, self.save_key[i], self.save_value[i] = self.model.layers[i](
                 hidden_states=hidden_states,
@@ -745,6 +744,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             )
         return (*self.save_key,
                 *self.save_value,
+                kv_seq_len,
                 torch.argmax(self.lm_head(self.model.norm(hidden_states[:, -1])), dim=-1, keepdim=True).int())
 
     def prepare_inputs_for_generation(
