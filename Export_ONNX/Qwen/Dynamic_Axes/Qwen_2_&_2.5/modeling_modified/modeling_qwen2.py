@@ -181,12 +181,12 @@ class Qwen2MLP(nn.Module):
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
-def repeat_k(kv_states, num_key_value_groups, head_dim, kv_seq_len):
-    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(-1, head_dim, kv_seq_len)
+def repeat_k(kv_states, num_key_value_groups, head_dim, num_heads):
+    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(num_heads, head_dim, -1)
 
 
-def repeat_v(kv_states, num_key_value_groups, head_dim, kv_seq_len):
-    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(-1, kv_seq_len, head_dim)
+def repeat_v(kv_states, num_key_value_groups, head_dim, num_heads):
+    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(num_heads, -1, head_dim)
 
 
 class Qwen2Attention(nn.Module):
@@ -252,8 +252,8 @@ class Qwen2Attention(nn.Module):
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)), dim=2)
         save_key_states = key_states
         save_value_states = value_states
-        key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
-        value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
+        key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, self.num_heads)
+        value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, self.num_heads)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
             query_states * rotary_pos_emb_cos_q + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_q, key_states)
                                                               + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(1, -1, self.hidden_size)), save_key_states, save_value_states
@@ -290,8 +290,8 @@ class Qwen2FlashAttention2(Qwen2Attention):
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)), dim=2)
         save_key_states = key_states
         save_value_states = value_states
-        key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
-        value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
+        key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, self.num_heads)
+        value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, self.num_heads)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
             query_states * rotary_pos_emb_cos_q + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_q, key_states)
                                                               + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(1, -1, self.hidden_size)), save_key_states, save_value_states
@@ -324,8 +324,8 @@ class Qwen2SdpaAttention(Qwen2Attention):
         value_states = torch.cat((past_value_states, self.v_proj(hidden_states).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)), dim=2)
         save_key_states = key_states
         save_value_states = value_states
-        key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
-        value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, kv_seq_len)
+        key_states = repeat_k(key_states, self.num_key_value_groups, self.head_dim, self.num_heads)
+        value_states = repeat_v(value_states, self.num_key_value_groups, self.head_dim, self.num_heads)
         return self.o_proj(torch.matmul(nn.functional.softmax(torch.matmul(
             query_states * rotary_pos_emb_cos_q + rotate_half(query_states, self.head_dim_half, -1) * rotary_pos_emb_sin_q, key_states)
                                                               + attention_mask, dim=-1, dtype=torch.float32), value_states).transpose(0, 1).contiguous().view(1, -1, self.hidden_size)), save_key_states, save_value_states
