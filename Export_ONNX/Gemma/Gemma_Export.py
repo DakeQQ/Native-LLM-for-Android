@@ -87,8 +87,8 @@ class GEMMA(torch.nn.Module):
         self.attention_mask = (1 - torch.tril(torch.ones([1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
 
     def forward(self, *all_inputs):
-        history_len = all_inputs[-4]
-        input_ids = all_inputs[-3]
+        input_ids = all_inputs[-4]
+        history_len = all_inputs[-3]
         ids_len = all_inputs[-2]
         kv_seq_len = ids_len + history_len
         rotary_pos_emb_cos_q_global = self.cos_rotary_pos_emb_global[:, history_len:kv_seq_len].float()
@@ -136,7 +136,7 @@ class GEMMA(torch.nn.Module):
             hidden_states = residual + layer.post_feedforward_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
         hidden_states = hidden_states[:, -1]
         hidden_states = self.gemma.model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
-        return *self.save_key, *self.save_value, torch.argmax(self.gemma.lm_head(hidden_states), dim=-1, keepdim=True).int()
+        return *self.save_key, *self.save_value, torch.argmax(self.gemma.lm_head(hidden_states), dim=-1, keepdim=True).int(), kv_seq_len
 
 
 print('Export start ...')
@@ -154,7 +154,7 @@ with torch.inference_mode():
     # Generate dummies for torch.onnx.export()
     attention_mask = torch.tensor([0], dtype=torch.int8)
     ids_len = torch.tensor([10], dtype=torch.int64)   # "10" is just a dummy value.
-    input_ids = torch.ones((1, ids_len), dtype=torch.int32)  
+    input_ids = torch.ones((1, ids_len), dtype=torch.int32)
     history_len = torch.zeros(1, dtype=torch.int64)
     past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float32)
     past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float32)
@@ -180,11 +180,11 @@ with torch.inference_mode():
         name = f'out_value_{i}'
         output_names.append(name)
         dynamic_axes[name] = {2: 'history_len_plus_ids_len'}
+    input_names.append('input_ids')
+    all_inputs.append(input_ids)
     input_names.append('history_len')
     all_inputs.append(history_len)
     output_names.append('kv_seq_len')
-    input_names.append('input_ids')
-    all_inputs.append(input_ids)
     input_names.append('ids_len')
     all_inputs.append(ids_len)
     input_names.append('attention_mask')
@@ -259,8 +259,8 @@ print(f'\n\nTest Question: {test_query}\nGemma Answering:\n')
 
 output_names = []
 input_feed = {
-    in_name_A[-4].name: history_len,
-    in_name_A[-3].name: input_ids,
+    in_name_A[-4].name: input_ids,
+    in_name_A[-3].name: history_len,
     in_name_A[-2].name: ids_len,
     in_name_A[-1].name: attention_mask
 }
@@ -280,7 +280,7 @@ while num_decode < max_single_chat_length:
         output_names,
         input_feed
     )
-    max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-1])
+    max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-2])
     num_decode += 1
     if max_logit_ids in STOP_TOKEN:  
         break
