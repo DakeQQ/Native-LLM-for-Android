@@ -142,7 +142,7 @@ class InternLM2RMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
-        return self.weight * hidden_states / (torch.sqrt((hidden_states * hidden_states).mean(-1, keepdim=True)) + self.variance_epsilon)
+        return self.weight * (hidden_states / (torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True)) + self.variance_epsilon))
 
 
 try:
