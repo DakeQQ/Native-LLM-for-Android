@@ -113,7 +113,7 @@ class GEMMA(torch.nn.Module):
                 rotary_pos_emb_cos_k = rotary_pos_emb_cos_k_global
                 rotary_pos_emb_sin_k = rotary_pos_emb_sin_k_global
             residual = hidden_states
-            hidden_states_norm = layer.input_layernorm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states_norm = layer.input_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             q = layer.self_attn.q_proj(hidden_states_norm).view(-1, self.num_heads, self.head_dim)
             k = layer.self_attn.k_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim)
             v = layer.self_attn.v_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)
@@ -129,13 +129,13 @@ class GEMMA(torch.nn.Module):
             v = repeat_v(v, self.num_key_value_groups, self.head_dim, kv_seq_len)
             attn = torch.nn.functional.softmax(torch.matmul(q, k) + attention_mask, dim=-1, dtype=torch.float32)
             attn_out = layer.self_attn.o_proj(torch.matmul(attn, v).transpose(0, 1).contiguous().view(1, ids_len, -1))
-            hidden_states = residual + layer.post_attention_layernorm.weight * attn_out / torch.sqrt(attn_out.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states = residual + layer.post_attention_layernorm.weight * (attn_out / torch.sqrt(attn_out.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             residual = hidden_states
-            hidden_states = layer.pre_feedforward_layernorm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states = layer.pre_feedforward_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(layer.mlp.gate_proj(hidden_states)) * layer.mlp.up_proj(hidden_states))
-            hidden_states = residual + layer.post_feedforward_layernorm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states = residual + layer.post_feedforward_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
         hidden_states = hidden_states[:, -1]
-        hidden_states = self.gemma.model.norm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+        hidden_states = self.gemma.model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
         return *self.save_key, *self.save_value, torch.argmax(self.gemma.lm_head(hidden_states), dim=-1, keepdim=True).int()
 
 
