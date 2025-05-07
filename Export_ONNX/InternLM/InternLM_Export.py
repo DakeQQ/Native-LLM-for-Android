@@ -67,8 +67,8 @@ class INTERNLM(torch.nn.Module):
         self.attention_mask = (1 - torch.tril(torch.ones([1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
 
     def forward(self, *all_inputs):
-        history_len = all_inputs[-4]
-        input_ids = all_inputs[-3]
+        input_ids = all_inputs[-4]
+        history_len = all_inputs[-3]
         ids_len = all_inputs[-2]
         kv_seq_len = history_len + ids_len
         rotary_pos_emb_cos_q = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
@@ -97,7 +97,7 @@ class INTERNLM(torch.nn.Module):
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
         hidden_states = self.internlm.model.norm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
-        return *self.save_key, *self.save_value, torch.argmax(self.internlm.lm_head(hidden_states), dim=-1, keepdim=True).int()
+        return *self.save_key, *self.save_value, torch.argmax(self.internlm.lm_head(hidden_states), dim=-1, keepdim=True).int(), kv_seq_len
 
 
 print('Export start ...')
@@ -141,17 +141,17 @@ with torch.inference_mode():
         name = f'out_value_{i}'
         output_names.append(name)
         dynamic_axes[name] = {2: 'history_len_plus_ids_len'}
+    input_names.append('input_ids')
+    all_inputs.append(input_ids)
     input_names.append('history_len')
     all_inputs.append(history_len)
     output_names.append('kv_seq_len')
-    input_names.append('input_ids')
-    all_inputs.append(input_ids)
     input_names.append('ids_len')
     all_inputs.append(ids_len)
     input_names.append('attention_mask')
     all_inputs.append(attention_mask)
     output_names.append('max_logit_id')
-    
+
     torch.onnx.export(
         model,
         tuple(all_inputs),
@@ -220,8 +220,8 @@ print('\n\nTest Question: ' + test_query + "\nInternLM Answering:\n")
 
 output_names = []
 input_feed = {
-    in_name_A[-4].name: history_len,
-    in_name_A[-3].name: input_ids,
+    in_name_A[-4].name: input_ids,
+    in_name_A[-3].name: history_len,
     in_name_A[-2].name: ids_len,
     in_name_A[-1].name: attention_mask
 }
@@ -241,7 +241,7 @@ while num_decode < max_single_chat_length:
         output_names,
         input_feed
     )
-    max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-1])
+    max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-2])
     num_decode += 1
     if max_logit_ids in STOP_TOKEN:
         break
