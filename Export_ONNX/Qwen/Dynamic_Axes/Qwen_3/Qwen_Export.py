@@ -221,7 +221,7 @@ past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value
 num_keys_values = num_layers + num_layers
 amount_of_outputs = len(out_name_A)
 num_decode = 0
-print('\n\nTest Question: ' + test_query + "\nQwen Answering:\n")
+print(f'\n\nTest Question: {test_query}\nQwen Answering:\n')
 
 output_names = []
 input_feed = {
