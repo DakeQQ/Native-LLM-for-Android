@@ -84,7 +84,7 @@ class PHI(torch.nn.Module):
         hidden_states = self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
         attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * all_inputs[-1]).float()
         for i, layer in enumerate(self.phi.model.layers):
-            hidden_states_norm = layer.input_layernorm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states_norm = layer.input_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             qkv = layer.self_attn.qkv_proj(hidden_states_norm)
             q, k, v = torch.split(qkv, [self.query_pos, self.key_pos, self.value_pos], dim=-1)
             q = q.view(-1, self.num_heads, self.head_dim).transpose(0, 1)
@@ -104,12 +104,12 @@ class PHI(torch.nn.Module):
             attn_out = layer.self_attn.o_proj(torch.matmul(attn, v).transpose(0, 1).contiguous().view(1, ids_len, -1))
             hidden_states += attn_out
             residual = hidden_states
-            hidden_states = layer.post_attention_layernorm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states = layer.post_attention_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             gate, up_states = layer.mlp.gate_up_proj(hidden_states).split([self.phi.config.intermediate_size, self.phi.config.intermediate_size], dim=-1)
             hidden_states = layer.mlp.down_proj(layer.mlp.activation_fn(gate) * up_states)
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
-        hidden_states = self.phi.model.norm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+        hidden_states = self.phi.model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
         return *self.save_key, *self.save_value, torch.argmax(self.phi.lm_head(hidden_states), dim=-1, keepdim=True).int()
 
 
