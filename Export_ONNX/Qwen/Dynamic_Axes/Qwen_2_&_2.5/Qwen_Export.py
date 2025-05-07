@@ -9,7 +9,7 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path = '/home/DakeQQ/Downloads/DeepSeek-R1-Distill-Qwen-1.5B'  # Set the folder path where the Qwen whole project downloaded.
+path = '/home/DakeQQ/Downloads/Qwen2.5-1.5B-Instruct'          # Set the folder path where the Qwen whole project downloaded.
 onnx_model_A = '/home/DakeQQ/Downloads/Qwen_ONNX/Qwen.onnx'    # Assign a path where the exported Qwen model stored.
 STOP_TOKEN = [151643, 151645]                                  # The stop_id in Qwen is "151643" & "151645"
 query = "地球最高的山是哪座山？"                                   # The test query after the export process.
@@ -18,7 +18,7 @@ query = "地球最高的山是哪座山？"                                   # 
 # Load the model
 shutil.copyfile("./modeling_modified/modeling_qwen2.py", site.getsitepackages()[-1] + "/transformers/models/qwen2/modeling_qwen2.py")
 model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-max_seq_len = 4096  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 692, at the same time.
+max_seq_len = 4096  # Please modify the same variable, which declared in the modified modeling_qwen2.py on line 687, at the same time.
 num_heads = model.config.num_attention_heads
 num_key_value_heads = model.config.num_key_value_heads
 head_dim = model.config.hidden_size // num_heads
@@ -27,7 +27,9 @@ hidden_size = model.config.hidden_size
 
 # Generate dummies for torch.onnx.export()
 attention_mask = torch.tensor([0], dtype=torch.int8)
-input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value.
+ids_len = torch.tensor([10], dtype=torch.int64)   # "10" is just a dummy value.
+input_ids = torch.ones((1, ids_len), dtype=torch.int32)
+history_len = torch.zeros(1, dtype=torch.int64)
 past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float32)
 past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float32)
 position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
@@ -73,13 +75,13 @@ gc.collect()
 
 # Prepare input and output names
 input_names = []
-keys_values = []
+all_inputs = []
 output_names = []
 dynamic_axes = {'input_ids': {1: 'ids_len'}}
 for i in range(num_layers):
     name = f'in_key_{i}'
     input_names.append(name)
-    keys_values.append(past_keys)
+    all_inputs.append(past_keys)
     dynamic_axes[name] = {3: 'history_len'}
     name = f'out_key_{i}'
     output_names.append(name)
@@ -88,21 +90,28 @@ for i in range(num_layers):
 for i in range(num_layers):
     name = f'in_value_{i}'
     input_names.append(name)
-    keys_values.append(past_values)
+    all_inputs.append(past_values)
     dynamic_axes[name] = {2: 'history_len'}
     name = f'out_value_{i}'
     output_names.append(name)
     dynamic_axes[name] = {2: 'history_len_plus_ids_len'}
 
+input_names.append('history_len')
+all_inputs.append(history_len)
+output_names.append('kv_seq_len')
 input_names.append('input_ids')
+all_inputs.append(input_ids)
+input_names.append('ids_len')
+all_inputs.append(ids_len)
 input_names.append('attention_mask')
+all_inputs.append(attention_mask)
 output_names.append('max_logit_id')
 
 print('Export start ...')
 with torch.inference_mode():
     torch.onnx.export(
         model,
-        tuple(keys_values + [input_ids, attention_mask]),
+        tuple(all_inputs),
         onnx_model_A,
         input_names=input_names,
         output_names=output_names,
@@ -112,13 +121,15 @@ with torch.inference_mode():
     )
 del model
 del input_ids
+del ids_len
+del history_len
 del attention_mask
 del past_keys
 del past_values
 del input_names
 del output_names
 del dynamic_axes
-del keys_values
+del all_inputs
 gc.collect()
 print('\nExport done!\n\nStart running the Qwen by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
@@ -128,7 +139,8 @@ tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
 
 # ONNX Runtime settings
 session_opts = onnxruntime.SessionOptions()
-session_opts.log_severity_level = 4         # fatal level, it an adjustable value.
+session_opts.log_severity_level = 4         # fatal level = 4, it an adjustable value.
+session_opts.log_verbosity_level = 4        # fatal level = 4, it an adjustable value.
 session_opts.inter_op_num_threads = 0       # Run different nodes with num_threads. Set 0 for auto.
 session_opts.intra_op_num_threads = 0       # Under the node, execute the operators with num_threads. Set 0 for auto.
 session_opts.enable_cpu_mem_arena = True    # True for execute speed; False for less memory usage.
@@ -159,6 +171,8 @@ else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
     tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
+ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), 'cpu', 0)
+history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
 past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, head_dim, 0), dtype=np.float32), 'cpu', 0)
 past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, 0, head_dim), dtype=np.float32), 'cpu', 0)
@@ -169,7 +183,9 @@ print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 
 output_names = []
 input_feed = {
-    in_name_A[-2].name: input_ids,
+    in_name_A[-4].name: history_len,
+    in_name_A[-3].name: input_ids,
+    in_name_A[-2].name: ids_len,
     in_name_A[-1].name: attention_mask
 }
 for i in range(num_layers):
@@ -178,7 +194,8 @@ for i in range(num_layers):
 for i in range(num_layers, num_keys_values):
     input_feed[in_name_A[i].name] = past_values_A
     output_names.append(out_name_A[i].name)
-output_names.append(out_name_A[num_keys_values].name)
+output_names.append(out_name_A[-2].name)
+output_names.append(out_name_A[-1].name)
 
 # Start to run LLM
 start_time = time.time()
@@ -195,6 +212,6 @@ while num_decode < max_single_chat_length:
         input_feed[in_name_A[i].name] = all_outputs[i]
     if num_decode < 2:
         input_feed[in_name_A[-1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+        input_feed[in_name_A[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
-
