@@ -77,7 +77,7 @@ class INTERNLM(torch.nn.Module):
         hidden_states = self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
         attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * all_inputs[-1]).float()
         for i, layer in enumerate(self.internlm.model.layers):
-            hidden_states_norm = layer.input_layernorm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states_norm = layer.input_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             q = layer.self_attn.q_proj(hidden_states_norm).view(-1, self.num_heads, self.head_dim).transpose(0, 1)
             k = layer.self_attn.k_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim).permute(2, 1, 3, 0)
             v = layer.self_attn.v_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)
@@ -91,11 +91,11 @@ class INTERNLM(torch.nn.Module):
             attn_out = layer.self_attn.o_proj(torch.matmul(attn, v).transpose(0, 1).contiguous().view(1, ids_len, -1))
             hidden_states += attn_out
             residual = hidden_states
-            hidden_states = layer.post_attention_layernorm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states = layer.post_attention_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(layer.mlp.gate_proj(hidden_states)) * layer.mlp.up_proj(hidden_states))
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
-        hidden_states = self.internlm.model.norm.weight * hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+        hidden_states = self.internlm.model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
         return *self.save_key, *self.save_value, torch.argmax(self.internlm.lm_head(hidden_states), dim=-1, keepdim=True).int()
 
 
