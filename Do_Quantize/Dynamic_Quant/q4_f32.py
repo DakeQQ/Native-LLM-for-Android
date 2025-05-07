@@ -25,7 +25,7 @@ download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                       
 target_platform = "arm"                                                          # ['arm', 'amd64']
 use_gpu = False                                                                  # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider']
-use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
+use_low_memory_mode_in_Android = True                                            # If you need to use low memory mode on Android, please set it to True.
 algorithm = "DEFAULT"                                                            # ["DEFAULT", "RTN", "HQQ",], HQQ will very slow both in quant and inference.
 bits = 4                                                                         # [4], Only work for 4 bits.
 op_types = ["MatMul"]                                                            # ["MatMul", "Gather"]; Adding Gather may get errors.
@@ -34,7 +34,7 @@ block_size = 128                                                                
 accuracy_level = 4                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 quant_symmetric = False                                                          # False may get more accuracy.
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
-upgrade_opset = 20                                                               # Optional process. Set 0 for close.
+upgrade_opset = 32                                                               # Optional process. Set 0 for close.
 
 
 # Start Weight-Only Quantize
