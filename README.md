@@ -18,7 +18,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - 2025/04/29：Update Qwen3.
 - 2025/04/05：Update Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`.
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using `Qwen2_&2.5 Qwen_Export.py`)
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using `Qwen v2.5 Qwen_Export.py`)
 
 ## Getting Started
 1. **Download Models:**
@@ -59,7 +59,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
 | Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2-1.5B-Instruct<br>q8f32 | 20 token/s         |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen3-1.7B-Instruct<br>q4f32<br>dynamic | 18.5 token/s  |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen3-1.7B-Instruct<br>q4f32<br>dynamic | 19.5 token/s  |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5-1.5B-Instruct<br>q4f32<br>dynamic | 20.5 token/s  |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
 | Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
@@ -134,7 +134,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - 2025/04/29：更新 Qwen3。
 - 2025/04/05: 更新 Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`。
 - 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
-- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用 `Qwen2_&2.5 Qwen_Export.py`）。
+- 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用 `Qwen v2.5 Qwen_Export.py`）。
 
 ## 入门指南
 
