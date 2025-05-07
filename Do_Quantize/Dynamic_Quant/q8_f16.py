@@ -66,15 +66,20 @@ if download_path == "NONE":
     num_heads = 0    # default
     hidden_size = 0  # default
 else:
-    if ('vl' in download_path.lower()) & ('qwen' in download_path.lower()):
-        if "2.5" in download_path or "3b" in download_path.lower():
+    download_path_lower = download_path.lower()
+    if ('vl' in download_path_lower) & ('qwen' in download_path_lower):
+        if ("2.5" in download_path) or ("3b" in download_path_lower):
             from transformers import Qwen2_5_VLForConditionalGeneration
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
         else:
             from transformers import Qwen2VLForConditionalGeneration
             model = Qwen2VLForConditionalGeneration.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
     else:
-        model = AutoModelForCausalLM.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
+        if ("gemma3" in download_path_lower) or ("gemma 3" in download_path_lower) or ("gemma-3" in download_path_lower):
+            from transformers import Gemma3ForCausalLM
+            model = Gemma3ForCausalLM.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
+        else:
+            model = AutoModelForCausalLM.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
     try:
         num_heads = model.config.num_attention_heads
         hidden_size = model.config.hidden_size
