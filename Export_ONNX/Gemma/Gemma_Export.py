@@ -117,8 +117,8 @@ class GEMMA(torch.nn.Module):
             q = layer.self_attn.q_proj(hidden_states_norm).view(-1, self.num_heads, self.head_dim)
             k = layer.self_attn.k_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim)
             v = layer.self_attn.v_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim).transpose(0, 2)
-            q = (layer.self_attn.q_norm.weight * q / torch.sqrt(q.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)).transpose(0, 1)
-            k = (layer.self_attn.k_norm.weight * k / torch.sqrt(k.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)).permute(2, 1, 3, 0)
+            q = (layer.self_attn.q_norm.weight * (q / torch.sqrt(q.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).transpose(0, 1)
+            k = (layer.self_attn.k_norm.weight * (k / torch.sqrt(k.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).permute(2, 1, 3, 0)
             q = q * rotary_pos_emb_cos_q + rotate_half(q, self.head_dim_half, -1) * rotary_pos_emb_sin_q
             k = k * rotary_pos_emb_cos_k + rotate_half(k, self.head_dim_half, 2) * rotary_pos_emb_sin_k
             k = torch.cat((all_inputs[i], k), dim=-1)
