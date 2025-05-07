@@ -28,10 +28,10 @@ model = onnx.load(model_path)
 model = float16.convert_float_to_float16(model,
                                          min_positive_val=1e-7,
                                          max_finite_val=65504,
-                                         keep_io_types=True,        # True for keep original input format.
-                                         disable_shape_infer=False, # False for more optimize.
-                                         op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'Resize'],  # The op type list for skip the conversion. These are known unsupported op type for fp16.
-                                         node_block_list=None)      # The node name list for skip the conversion.
+                                         keep_io_types=False,        # True for keep original input format.
+                                         disable_shape_infer=False,  # False for more optimize.
+                                         op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'Resize', 'Range'],  # The op type list for skip the conversion. These are known unsupported op type for fp16.
+                                         node_block_list=None)       # The node name list for skip the conversion.
 onnx.save(model, quanted_model_path)
 model_size_bytes = sys.getsizeof(model.SerializeToString())
 model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
@@ -93,7 +93,7 @@ slim(
 #                        verbose=False,
 #                        model_type='bert')
 # model.convert_float_to_float16(
-#     keep_io_types=True,
+#     keep_io_types=False,
 #     force_fp16_initializers=True,
 #     use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
 #     max_finite_val=65504.0,
