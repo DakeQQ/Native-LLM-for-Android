@@ -21,8 +21,8 @@ quanted_model_path = os.path.join(quanted_folder_path, "Model_Optimized.onnx")  
 download_path = r'C:\Users\Downloads\Qwen2-1.5B-Instruct'                        # Set the folder path where the LLM whole project downloaded, otherwise set "NONE".
 use_gpu = False                                                                  # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider']
-use_low_memory_mode_in_Android = False                                           # If you need to use low memory mode on Android, please set it to True.
-upgrade_opset = 20                                                               # Optional process. Set 0 for close.
+use_low_memory_mode_in_Android = True                                            # If you need to use low memory mode on Android, please set it to True.
+upgrade_opset = 23                                                               # Optional process. Set 0 for close.
 
 
 # Start Quantize
