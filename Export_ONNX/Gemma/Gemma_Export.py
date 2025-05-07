@@ -77,7 +77,6 @@ class GEMMA(torch.nn.Module):
         else:
             theta = (self.gemma.config.rope_local_base_freq ** head_dim_range)
         idx_theta = position_ids * theta
-        idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
         self.cos_rotary_pos_emb_local = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0).half()
@@ -88,9 +87,9 @@ class GEMMA(torch.nn.Module):
         self.attention_mask = (1 - torch.tril(torch.ones([1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
 
     def forward(self, *all_inputs):
-        input_ids = all_inputs[-2]
-        ids_len = input_ids.shape[1].unsqueeze(0)
-        history_len = all_inputs[0].shape[-1].unsqueeze(0)
+        history_len = all_inputs[-4]
+        input_ids = all_inputs[-3]
+        ids_len = all_inputs[-2]
         kv_seq_len = ids_len + history_len
         rotary_pos_emb_cos_q_global = self.cos_rotary_pos_emb_global[:, history_len:kv_seq_len].float()
         rotary_pos_emb_sin_q_global = self.sin_rotary_pos_emb_global[:, history_len:kv_seq_len].float()
@@ -154,7 +153,9 @@ with torch.inference_mode():
 
     # Generate dummies for torch.onnx.export()
     attention_mask = torch.tensor([0], dtype=torch.int8)
-    input_ids = torch.ones((1, 10), dtype=torch.int32)  # "10" is just a dummy value.
+    ids_len = torch.tensor([10], dtype=torch.int64)   # "10" is just a dummy value.
+    input_ids = torch.ones((1, ids_len), dtype=torch.int32)  
+    history_len = torch.zeros(1, dtype=torch.int64)
     past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float32)
     past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float32)
 
@@ -179,8 +180,13 @@ with torch.inference_mode():
         name = f'out_value_{i}'
         output_names.append(name)
         dynamic_axes[name] = {2: 'history_len_plus_ids_len'}
+    input_names.append('history_len')
+    all_inputs.append(history_len)
+    output_names.append('kv_seq_len')
     input_names.append('input_ids')
     all_inputs.append(input_ids)
+    input_names.append('ids_len')
+    all_inputs.append(ids_len)
     input_names.append('attention_mask')
     all_inputs.append(attention_mask)
     output_names.append('max_logit_id')
@@ -197,6 +203,8 @@ with torch.inference_mode():
     )
 del model
 del input_ids
+del ids_len
+del history_len
 del attention_mask
 del past_keys
 del past_values
@@ -205,7 +213,7 @@ del output_names
 del dynamic_axes
 del all_inputs
 gc.collect()
-print('\nExport done!\n\nStart running the Gemma by ONNXRuntime.\nNow loading . . . it could cost minutes.')
+print('\nExport done!\n\nStart running the Gemma by ONNX Runtime.\nNow loading . . . it could cost minutes.')
 
 # Run the exported model by ONNX Runtime
 max_single_chat_length = 512   # It an adjustable value, but must less than max_seq_len.
@@ -239,6 +247,8 @@ out_name_A = ort_session_A.get_outputs()
 prompt = f'<bos><start_of_turn>user\nYou are a helpful assistant.\n\n{test_query}<end_of_turn>\n<start_of_turn>model\n'
 tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
+ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), 'cpu', 0)
+history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
 past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, head_dim, 0), dtype=np.float32), 'cpu', 0)
 past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, 0, head_dim), dtype=np.float32), 'cpu', 0)
@@ -249,7 +259,9 @@ print(f'\n\nTest Question: {test_query}\nGemma Answering:\n')
 
 output_names = []
 input_feed = {
-    in_name_A[-2].name: input_ids,
+    in_name_A[-4].name: history_len,
+    in_name_A[-3].name: input_ids,
+    in_name_A[-2].name: ids_len,
     in_name_A[-1].name: attention_mask
 }
 for i in range(num_layers):
@@ -258,7 +270,8 @@ for i in range(num_layers):
 for i in range(num_layers, num_keys_values):
     input_feed[in_name_A[i].name] = past_values_A
     output_names.append(out_name_A[i].name)
-output_names.append(out_name_A[num_keys_values].name)
+output_names.append(out_name_A[-2].name)
+output_names.append(out_name_A[-1].name)
 
 # Start to run LLM
 start_time = time.time()
@@ -275,5 +288,6 @@ while num_decode < max_single_chat_length:
         input_feed[in_name_A[i].name] = all_outputs[i]
     if num_decode < 2:
         input_feed[in_name_A[-1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+        input_feed[in_name_A[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
