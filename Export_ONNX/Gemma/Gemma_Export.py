@@ -23,12 +23,12 @@ def rotate_half(x, head_dim_half, dim):
     return torch.cat((-x2, x1), dim=dim)
 
 
-def repeat_k(kv_states, num_key_value_groups, head_dim, kv_seq_len):
-    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(-1, head_dim, kv_seq_len)
+def repeat_k(kv_states, num_key_value_groups, head_dim, num_heads):
+    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(num_heads, head_dim, -1)
 
 
-def repeat_v(kv_states, num_key_value_groups, head_dim, kv_seq_len):
-    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(-1, kv_seq_len, head_dim)
+def repeat_v(kv_states, num_key_value_groups, head_dim, num_heads):
+    return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=1).view(num_heads, -1, head_dim)
 
 
 class GEMMA(torch.nn.Module):
@@ -42,6 +42,7 @@ class GEMMA(torch.nn.Module):
         self.head_dim_half = head_dim // 2
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.variance_epsilon = float(1e-6)
+        self.hidden_size = self.gemma.model.layers._modules['0'].self_attn.o_proj.in_features
 
         scale_factor = math.pow(head_dim, -0.25)
         for i in range(num_layers):
@@ -125,10 +126,10 @@ class GEMMA(torch.nn.Module):
             v = torch.cat((all_inputs[i + self.num_layers], v), dim=2)
             self.save_key[i] = k
             self.save_value[i] = v
-            k = repeat_k(k, self.num_key_value_groups, self.head_dim, kv_seq_len)
-            v = repeat_v(v, self.num_key_value_groups, self.head_dim, kv_seq_len)
+            k = repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads)
+            v = repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads)
             attn = torch.nn.functional.softmax(torch.matmul(q, k) + attention_mask, dim=-1, dtype=torch.float32)
-            attn_out = layer.self_attn.o_proj(torch.matmul(attn, v).transpose(0, 1).contiguous().view(1, ids_len, -1))
+            attn_out = layer.self_attn.o_proj(torch.matmul(attn, v).transpose(0, 1).contiguous().view(1, -1, self.hidden_size))
             hidden_states = residual + layer.post_attention_layernorm.weight * (attn_out / torch.sqrt(attn_out.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             residual = hidden_states
             hidden_states = layer.pre_feedforward_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
