@@ -95,12 +95,11 @@ for i in range(num_layers):
     name = f'out_value_{i}'
     output_names.append(name)
     dynamic_axes[name] = {2: 'history_len_plus_ids_len'}
-
+input_names.append('input_ids')
+all_inputs.append(input_ids)
 input_names.append('history_len')
 all_inputs.append(history_len)
 output_names.append('kv_seq_len')
-input_names.append('input_ids')
-all_inputs.append(input_ids)
 input_names.append('ids_len')
 all_inputs.append(ids_len)
 input_names.append('attention_mask')
@@ -183,8 +182,8 @@ print('\n\nTest Question: ' + query + "\nQwen Answering:\n")
 
 output_names = []
 input_feed = {
-    in_name_A[-4].name: history_len,
-    in_name_A[-3].name: input_ids,
+    in_name_A[-4].name: input_ids,
+    in_name_A[-3].name: history_len,
     in_name_A[-2].name: ids_len,
     in_name_A[-1].name: attention_mask
 }
@@ -204,7 +203,7 @@ while num_decode < max_single_chat_length:
         output_names,
         input_feed
     )
-    max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-1])
+    max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-2])
     num_decode += 1
     if max_logit_ids in STOP_TOKEN:  
         break
