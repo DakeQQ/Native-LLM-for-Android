@@ -220,8 +220,8 @@ out_name_A = ort_session_A.get_outputs()
 
 # Pre-process inputs
 prompt = f'<|system|>You are a helpful AI assistant.<|end|><|user|>{test_query}<|end|><|assistant|>'
-tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
+tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
 ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), 'cpu', 0)
 history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
