@@ -162,14 +162,13 @@ out_name_A = ort_session_A.get_outputs()
 # Pre-process inputs
 if "Deep" in path or "deep" in path or "Distill" in path or "distill" in path:
     #  prompt = f'<|begin▁of▁sentence|><｜User｜>{query}<｜Assistant｜>'
-    head = torch.tensor([[151646, 151644]], dtype=torch.int32)
-    tail = torch.tensor([[151645]], dtype=torch.int32)
-    tokens = tokenizer(query, return_tensors='pt')['input_ids']
-    tokens = torch.cat((head, tokens, tail), dim=-1)
+    head = np.array([[151646, 151644]], dtype=np.int32)
+    tail = np.array([[151645]], dtype=np.int32)
+    tokens = np.concatenate((head, tokenizer(query, return_tensors='np')['input_ids'].astype(np.int32), tail), axis=1)
 else:
     prompt = f'<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n'
-    tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
+    tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
 ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), 'cpu', 0)
 history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
