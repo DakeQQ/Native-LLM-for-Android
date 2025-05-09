@@ -128,7 +128,7 @@ with torch.inference_mode():
     past_keys = torch.zeros((num_key_value_heads, head_dim, 0), dtype=torch.float16)
     past_values = torch.zeros((num_key_value_heads, 0, head_dim), dtype=torch.float16)
     position_ids = torch.arange(MAX_SEQ_LENGTH, dtype=torch.float32).unsqueeze(-1)
-    theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+    theta = model.config.llm_config.rope_theta ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
     idx_theta = position_ids * theta
     cos_rotary_pos_emb = torch.cos(idx_theta)
     sin_rotary_pos_emb = torch.sin(idx_theta)
@@ -323,8 +323,8 @@ else:
     use_vision = False
 
 prompt = f"<|im_start|>user\n<img></img>\n{query}<|im_end|><|im_start|>assistant\n"
-tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
+tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
 past_keys_D = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, head_dim, 0), dtype=np.float16), 'cpu', 0)
 past_values_D = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 0, head_dim), dtype=np.float16), 'cpu', 0)
