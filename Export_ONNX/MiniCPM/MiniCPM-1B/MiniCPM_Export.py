@@ -30,7 +30,7 @@ past_values_states = past_key_states
 position_ids = torch.zeros((max_seq_len, 1), dtype=torch.float32)
 for i in range(max_seq_len):
     position_ids[i, 0] = float(i)
-theta = 10000.0 ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+theta = model.config.rope_theta ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
 idx_theta = position_ids * theta
 cos_rotary_pos_emb = torch.cos(idx_theta)
 sin_rotary_pos_emb = torch.sin(idx_theta)
@@ -122,7 +122,7 @@ out_name_A2 = out_name_A[2].name
 
 # Pre-process inputs
 prompt = f"'role': '<user>', 'content': {query}\n'role': '<assistant>', 'content': "
-token = tokenizer(prompt, return_tensors='pt')['input_ids']
+token = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 ids_len = token.shape[1] + np.zeros(1, dtype=np.int64)
 input_ids = np.zeros(max_seq_len, dtype=np.int32)
 input_ids[:ids_len[0]] = token[0, :]
