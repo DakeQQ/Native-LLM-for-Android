@@ -211,8 +211,8 @@ if test_think_mode:
     prompt = f'<|im_start|>user\n{test_query}<|im_end|>\n<|im_start|>assistant\n'
 else:
     prompt = f'<|im_start|>user\n{test_query}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
-tokens = tokenizer(prompt, return_tensors='pt')['input_ids']
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens.int().numpy(), 'cpu', 0)
+tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
 ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), 'cpu', 0)
 history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), 'cpu', 0)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
