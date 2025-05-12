@@ -99,12 +99,12 @@ input_names.append('input_ids')
 all_inputs.append(input_ids)
 input_names.append('history_len')
 all_inputs.append(history_len)
-output_names.append('kv_seq_len')
 input_names.append('ids_len')
 all_inputs.append(ids_len)
 input_names.append('attention_mask')
 all_inputs.append(attention_mask)
 output_names.append('max_logit_id')
+output_names.append('kv_seq_len')
 
 print('Export start ...')
 with torch.inference_mode():
