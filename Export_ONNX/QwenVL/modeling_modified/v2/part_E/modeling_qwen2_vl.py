@@ -483,7 +483,7 @@ class Qwen2RMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
-        return self.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(dim=-1, keepdim=True) + self.variance_epsilon))
+        return self.weight * (hidden_states / torch.sqrt((hidden_states * hidden_states).mean(dim=-1, keepdim=True) + self.variance_epsilon))
 
     def extra_repr(self):
         return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
