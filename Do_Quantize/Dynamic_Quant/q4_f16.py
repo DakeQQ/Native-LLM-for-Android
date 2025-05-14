@@ -11,7 +11,7 @@ from onnxslim import slim
 from transformers import AutoModelForCausalLM
 from onnxruntime.transformers.optimizer import optimize_model
 from onnxruntime.quantization import (
-    matmul_4bits_quantizer,
+    matmul_nbits_quantizer,  # onnxruntime >= 1.22.0
     quant_utils
 )
 
@@ -28,26 +28,26 @@ use_gpu = True                                                                  
 provider = 'CUDAExecutionProvider'                                               # ['CPUExecutionProvider', 'CUDAExecutionProvider']
 use_low_memory_mode_in_Android = True                                            # If you need to use low memory mode on Android, please set it to True.
 algorithm = "DEFAULT"                                                            # ["DEFAULT", "RTN", "HQQ",], HQQ will very slow both in quant and inference.
-bits = 4                                                                         # [4], Only work for 4 bits.
+bits = 4                                                                         # [4, 8]
 op_types = ["MatMul"]                                                            # ["MatMul", "Gather"]; Adding Gather may get errors.
 quant_axes = [0]                                                                 # Target axes to quant the quant data.
 block_size = 128                                                                 # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
 accuracy_level = 2                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 quant_symmetric = False                                                          # False may get more accuracy.
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
-upgrade_opset = 22                                                               # Optional process. Set 0 for close.
+upgrade_opset = 20                                                               # Optional process. Set 0 for close.
 
 
 # Start Weight-Only Quantize
 model = quant_utils.load_model_with_shape_infer(Path(model_path))
 
 if algorithm == "RTN":
-    quant_config = matmul_4bits_quantizer.RTNWeightOnlyQuantConfig(
+    quant_config = matmul_nbits_quantizer.RTNWeightOnlyQuantConfig(
         quant_format=quant_utils.QuantFormat.QOperator,
         op_types_to_quantize=tuple(op_types)
     )
 elif algorithm == "HQQ":
-    quant_config = matmul_4bits_quantizer.HQQWeightOnlyQuantConfig(
+    quant_config = matmul_nbits_quantizer.HQQWeightOnlyQuantConfig(
         bits=bits,
         block_size=block_size,
         axis=quant_axes[0],
@@ -56,7 +56,7 @@ elif algorithm == "HQQ":
         quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types)))
     )
 else:
-    quant_config = matmul_4bits_quantizer.DefaultWeightOnlyQuantConfig(
+    quant_config = matmul_nbits_quantizer.DefaultWeightOnlyQuantConfig(
         block_size=block_size,
         is_symmetric=quant_symmetric,
         accuracy_level=accuracy_level,
@@ -65,7 +65,7 @@ else:
         quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types)))
     )
 quant_config.bits = bits
-quant = matmul_4bits_quantizer.MatMul4BitsQuantizer(
+quant = matmul_nbits_quantizer.MatMulNBitsQuantizer(
     model,
     block_size=block_size,
     is_symmetric=quant_symmetric,
