@@ -165,26 +165,24 @@ slim(
 
 
 # Upgrade the Opset version. (optional process)
+model = onnx.load(quanted_model_path)
 if upgrade_opset > 0:
     try:
-        model = onnx.load(quanted_model_path)
         model = onnx.version_converter.convert_version(model, upgrade_opset)
         onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
         del model
         gc.collect()
     except:
-        model = onnx.load(quanted_model_path)
         onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
         del model
         gc.collect()
 else:
-    model = onnx.load(quanted_model_path)
     onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
     del model
     gc.collect()
 
 
-pattern = os.path.join(quanted_folder_path, '*.data')
+pattern = os.path.join(quanted_folder_path, '*.onnx.data')
 files_to_delete = glob.glob(pattern)
 for file_path in files_to_delete:
     try:
