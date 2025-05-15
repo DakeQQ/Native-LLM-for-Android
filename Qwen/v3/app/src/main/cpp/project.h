@@ -18,7 +18,7 @@ const std::string file_name_A = "Qwen.onnx";
 const std::string file_name_A_external = "23d6fa22-2b12-11f0-b76b-bc091bee2d5c";  // The demo model is Qwen3-1.7B
 
 // Model Configuration
-const int num_layers = 28;                                                        // Transformer layers. Refer to config.json for the value. Qwen3-0.6B = 24; 1.7B = 28; 4B = 36;
+const int num_layers = 28;                                                        // Transformer layers. Refer to config.json for the value. Qwen3-0.6B = 28; 1.7B = 28; 4B = 36;
 const int max_seq_len = 4096;                                                     // Please set this value to match the exported model.
 const int num_keys_values = num_layers + num_layers;
 const int num_keys_values_plus_1 = num_keys_values + 1;
