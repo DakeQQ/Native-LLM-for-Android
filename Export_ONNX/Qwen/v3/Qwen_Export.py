@@ -1,5 +1,4 @@
 import gc
-import math
 import time
 import torch
 import numpy as np
@@ -43,9 +42,8 @@ class QWEN(torch.nn.Module):
         self.head_dim_half = head_dim // 2
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.variance_epsilon = float(1e-6)
-        self.hidden_size = self.qwen.model.layers._modules['0'].self_attn.o_proj.in_features
 
-        scale_factor = math.pow(head_dim, -0.25)
+        scale_factor = float(head_dim ** -0.25)
         for i in range(num_layers):
             self.qwen.model.layers._modules[f'{i}'].self_attn.q_norm.weight.data *= scale_factor
             self.qwen.model.layers._modules[f'{i}'].self_attn.k_norm.weight.data *= scale_factor
@@ -92,7 +90,7 @@ class QWEN(torch.nn.Module):
             k = repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads)
             v = repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads)
             attn = torch.nn.functional.softmax(torch.matmul(q * rotary_pos_emb_cos_q + rotate_half(q, self.head_dim_half, -1) * rotary_pos_emb_sin_q, k) + attention_mask, dim=-1, dtype=torch.float32)
-            attn_out = layer.self_attn.o_proj(torch.matmul(attn, v).transpose(0, 1).contiguous().view(1, -1, self.hidden_size))
+            attn_out = layer.self_attn.o_proj(torch.matmul(attn, v).transpose(0, 1).contiguous().view(1, -1, layer.self_attn.o_proj.in_features))
             hidden_states += attn_out
             residual = hidden_states
             hidden_states = layer.post_attention_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
