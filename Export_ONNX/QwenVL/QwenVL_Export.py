@@ -643,12 +643,12 @@ while num_decode < max_single_chat_length:
         input_feed_F[in_name_F[-2]] = ids_len
         input_feed_F[in_name_F[-1]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, device_id)
         
-    input_feed_F[in_name_F[num_layers_2_plus]] = ort_session_A.run_with_ort_values( [out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
+    input_feed_F[in_name_F[num_layers_2_plus]] = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
     
     if use_vision:
         rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: all_outputs_F[-2], in_name_D1: ids_len})
     else:
-        rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: all_outputs_F[-2],  in_name_E1: ids_len})
+        rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: all_outputs_F[-2], in_name_E1: ids_len})
         
     for i in range(rotary_outputs_len):
         input_feed_F[in_name_F[layer_indices[i]]] = rotary_outputs[i]
