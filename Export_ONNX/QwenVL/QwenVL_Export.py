@@ -8,7 +8,7 @@ from PIL import Image
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer
 
 
-path = r'/home/DakeQQ/Downloads/Qwen2.5-VL-3B-Instruct'             # Set the folder path where the Qwen2-VL or Qwen2.5-VL whole project downloaded.
+path = r'/home/DakeQQ/Downloads/Qwen2.5-VL-3B-Instruct'             # Set the folder path where the Qwen2.5-VL whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_A.onnx'    # Assign a path where the exported QwenVL model stored.
 onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_B.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_C.onnx'
