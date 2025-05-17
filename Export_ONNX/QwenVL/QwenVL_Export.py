@@ -585,7 +585,7 @@ else:
 
 
 # Start to run LLM
-hidden_states = ort_session_A.run_with_ort_values( [out_name_A0], {in_name_A0: input_ids})[0]
+hidden_states = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: input_ids})[0]
 
 
 if use_vision:
@@ -594,29 +594,14 @@ if use_vision:
 
     print('\nStart to Process the Image...')
     start_time = time.time()
-    vision_hidden_states = ort_session_B.run_with_ort_values( [out_name_B0], {in_name_B0: onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, device_id)})[0]
+    vision_hidden_states = ort_session_B.run_with_ort_values([out_name_B0], {in_name_B0: onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, device_id)})[0]
     print(f'\nImage Process Complete. Time Cost: {time.time() - start_time:.3f} Seconds')
 
-    hidden_states = ort_session_C.run_with_ort_values(
-        [out_name_C0],
-        {
-            in_name_C0: hidden_states,
-            in_name_C1: vision_hidden_states
-        })[0]
+    hidden_states = ort_session_C.run_with_ort_values([out_name_C0], {in_name_C0: hidden_states, in_name_C1: vision_hidden_states})[0]
 
-    rotary_outputs = ort_session_D.run_with_ort_values(
-        out_name_D,
-        {
-            in_name_D0: history_len,
-            in_name_D1: ids_len
-        })
+    rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: history_len, in_name_D1: ids_len})
 else:
-    rotary_outputs = ort_session_E.run_with_ort_values(
-        out_name_E,
-        {
-            in_name_E0: history_len,
-            in_name_E1: ids_len
-        })
+    rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: history_len, in_name_E1: ids_len})
 
 
 output_names_F = []
@@ -641,36 +626,33 @@ for i in range(rotary_outputs_len):
 print(f'\nTest Question: {query}\n\nQwenVL Answering:\n')
 start_time = time.time()
 while num_decode < max_single_chat_length:
-    all_outputs_F = ort_session_F.run_with_ort_values(
-        output_names_F,
-        input_feed_F
-    )
+    
+    all_outputs_F = ort_session_F.run_with_ort_values(output_names_F, input_feed_F)
+    
     max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs_F[-1])[0]
     num_decode += 1
+    
     if max_logit_ids in STOP_TOKEN:
         break
+        
     for i in range(amount_of_outputs_F):
         input_feed_F[in_name_F[i]] = all_outputs_F[i]
+        
     if num_decode < 2:
         ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, device_id)
         input_feed_F[in_name_F[-2]] = ids_len
         input_feed_F[in_name_F[-1]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, device_id)
+        
     input_feed_F[in_name_F[num_layers_2_plus]] = ort_session_A.run_with_ort_values( [out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
+    
     if use_vision:
-        rotary_outputs = ort_session_D.run_with_ort_values(
-            out_name_D,
-            {
-                in_name_D0: all_outputs_F[-2],
-                in_name_D1: ids_len
-            })
+        rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: all_outputs_F[-2], in_name_D1: ids_len})
     else:
-        rotary_outputs = ort_session_E.run_with_ort_values(
-            out_name_E,
-            {
-                in_name_E0: all_outputs_F[-2],
-                in_name_E1: ids_len
-            })
+        rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: all_outputs_F[-2],  in_name_E1: ids_len})
+        
     for i in range(rotary_outputs_len):
         input_feed_F[in_name_F[layer_indices[i]]] = rotary_outputs[i]
+        
     print(tokenizer.decode(max_logit_ids), end="", flush=True)
+    
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
