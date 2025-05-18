@@ -565,7 +565,6 @@ else:
     past_values_F = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((ort_session_F._inputs_meta[num_layers].shape[0], 1, 0, ort_session_F._inputs_meta[num_layers].shape[3]), dtype=np.float32), 'cpu', device_id)
 
 
-
 # Load input image
 if is_valid_image_path(image_path):
     image = Image.open(image_path)
@@ -607,6 +606,7 @@ input_feed_F = {
     in_name_F[-2]: ids_len,
     in_name_F[-1]: attention_mask
 }
+
 for i in range(num_layers):
     input_feed_F[in_name_F[i]] = past_keys_F
 for i in range(num_layers, num_layers_2):
