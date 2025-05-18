@@ -306,6 +306,10 @@ out_name_C0 = out_name_C[0].name
 ort_session_D = onnxruntime.InferenceSession(onnx_model_D, sess_options=session_opts, providers=['CPUExecutionProvider'])
 in_name_D = ort_session_D.get_inputs()
 out_name_D = ort_session_D.get_outputs()
+amount_of_outputs_D = len(out_name_D)
+in_name_D = [in_name_D[i].name for i in range(len(in_name_D))]
+out_name_D = [out_name_D[i].name for i in range(amount_of_outputs_D)]
+
 
 # Pre-process inputs
 if is_valid_image_path(image_path):
@@ -355,25 +359,22 @@ if use_vision:
     split_factor = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([num_image_token_plus], dtype=np.int64), 'cpu', 0)
     print(f'\nImage Process Complete. Time Cost: {(time.time() - start_time):.3f} seconds')
 
-output_names = []
 input_feed = {
-    in_name_D[-1].name: hidden_states,
-    in_name_D[-2].name: split_factor,
-    in_name_D[-3].name: attention_mask
+    in_name_D[-1]: hidden_states,
+    in_name_D[-2]: split_factor,
+    in_name_D[-3]: attention_mask
 }
+
 for i in range(num_layers):
-    input_feed[in_name_D[i].name] = past_keys_D
-    output_names.append(out_name_D[i].name)
+    input_feed[in_name_D[i]] = past_keys_D
 for i in range(num_layers, num_keys_values):
-    input_feed[in_name_D[i].name] = past_values_D
-    output_names.append(out_name_D[i].name)
-output_names.append(out_name_D[num_keys_values].name)
+    input_feed[in_name_D[i]] = past_values_D
 
 print('\nTest Question: ' + query + "\n\nInternVL Answering:\n")
 start_time = time.time()
 while num_decode < max_single_chat_length:
     max_logit_ids, *keys_values = ort_session_D.run_with_ort_values(
-        output_names,
+        out_name_D,
         input_feed
     )
     token_id = onnxruntime.OrtValue.numpy(max_logit_ids)
@@ -381,15 +382,15 @@ while num_decode < max_single_chat_length:
     if token_id in STOP_TOKEN:  
         break
     for i in range(num_keys_values):
-        input_feed[in_name_D[i].name] = keys_values[i]
+        input_feed[in_name_D[i]] = keys_values[i]
     if num_decode < 2:
-        input_feed[in_name_D[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([PROMPT_HEAD_LENGTH], dtype=np.int64), 'cpu', 0)
-        input_feed[in_name_D[-3].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+        input_feed[in_name_D[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([PROMPT_HEAD_LENGTH], dtype=np.int64), 'cpu', 0)
+        input_feed[in_name_D[-3]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
     print(tokenizer.decode(token_id[0]), end="", flush=True)
     hidden_states = ort_session_C.run_with_ort_values(
         [out_name_C0],
         {
             in_name_C0: max_logit_ids
         })[0]
-    input_feed[in_name_D[-1].name] = hidden_states
+    input_feed[in_name_D[-1]] = hidden_states
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
