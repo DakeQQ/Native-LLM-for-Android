@@ -55,14 +55,11 @@ def rotate_half(x, head_dim_half, dim):
 class QwenVL_PartA(torch.nn.Module):
     def __init__(self, qwenvl):
         super(QwenVL_PartA, self).__init__()
-        data = qwenvl.model.embed_tokens.weight.data
-        self.zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
-        self.scale = ((torch.max(data, dim=1)[0] - self.zero_point[:, 0]) / 255.0).unsqueeze(1)
-        self.embed_data = quantize_to_uint8(data, 1.0 / self.scale, self.zero_point)
+        self.qwenvl = qwenvl
 
     def forward(self, input_ids):
         # text_hidden_states
-        return self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
+        return self.qwenvl.model.embed_tokens(input_ids)
 
 
 class QwenVL_PartB(torch.nn.Module):
