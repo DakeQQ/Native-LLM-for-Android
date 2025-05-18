@@ -217,6 +217,9 @@ session_opts.add_session_config_entry("session.use_device_allocator_for_initiali
 ort_session_A = onnxruntime.InferenceSession(onnx_model_A, sess_options=session_opts, providers=['CPUExecutionProvider'])
 in_name_A = ort_session_A.get_inputs()
 out_name_A = ort_session_A.get_outputs()
+amount_of_outputs = len(out_name_A)
+in_name_A = [in_name_A[i].name for i in range(len(in_name_A))]
+out_name_A = [out_name_A[i].name for i in range(amount_of_outputs)]
 
 # Pre-process inputs
 prompt = f'<|system|>You are a helpful AI assistant.<|end|><|user|>{test_query}<|end|><|assistant|>'
@@ -228,31 +231,26 @@ attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np
 past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, head_dim, 0), dtype=np.float32), 'cpu', 0)
 past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, 0, head_dim), dtype=np.float32), 'cpu', 0)
 num_keys_values = num_layers + num_layers
-amount_of_outputs = len(out_name_A)
 num_decode = 0
 print(f'\n\nTest Question: {test_query}\nPhi Answering:\n')
 
-output_names = []
 input_feed = {
-    in_name_A[-4].name: input_ids,
-    in_name_A[-3].name: history_len,
-    in_name_A[-2].name: ids_len,
-    in_name_A[-1].name: attention_mask
+    in_name_A[-4]: input_ids,
+    in_name_A[-3]: history_len,
+    in_name_A[-2]: ids_len,
+    in_name_A[-1]: attention_mask
 }
+
 for i in range(num_layers):
-    input_feed[in_name_A[i].name] = past_keys_A
-    output_names.append(out_name_A[i].name)
+    input_feed[in_name_A[i]] = past_keys_A
 for i in range(num_layers, num_keys_values):
-    input_feed[in_name_A[i].name] = past_values_A
-    output_names.append(out_name_A[i].name)
-output_names.append(out_name_A[-2].name)
-output_names.append(out_name_A[-1].name)
+    input_feed[in_name_A[i]] = past_values_A
 
 # Start to run LLM
 start_time = time.time()
 while num_decode < max_single_chat_length:
     all_outputs = ort_session_A.run_with_ort_values(
-        output_names,
+        out_name_A,
         input_feed
     )
     max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-2])
@@ -260,9 +258,9 @@ while num_decode < max_single_chat_length:
     if max_logit_ids in STOP_TOKEN:  
         break
     for i in range(amount_of_outputs):
-        input_feed[in_name_A[i].name] = all_outputs[i]
+        input_feed[in_name_A[i]] = all_outputs[i]
     if num_decode < 2:
-        input_feed[in_name_A[-1].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
-        input_feed[in_name_A[-2].name] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
+        input_feed[in_name_A[-1]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+        input_feed[in_name_A[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
