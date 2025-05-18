@@ -601,7 +601,6 @@ else:
     rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: history_len, in_name_E1: ids_len})
 
 
-output_names_F = []
 input_feed_F = {
     in_name_F[num_layers_2]: history_len,
     in_name_F[num_layers_2_plus]: hidden_states,
@@ -610,12 +609,8 @@ input_feed_F = {
 }
 for i in range(num_layers):
     input_feed_F[in_name_F[i]] = past_keys_F
-    output_names_F.append(out_name_F[i])
 for i in range(num_layers, num_layers_2):
     input_feed_F[in_name_F[i]] = past_values_F
-    output_names_F.append(out_name_F[i])
-output_names_F.append(out_name_F[-2])
-output_names_F.append(out_name_F[-1])
 for i in range(rotary_outputs_len):
     input_feed_F[in_name_F[layer_indices[i]]] = rotary_outputs[i]
 
@@ -624,7 +619,7 @@ print(f'\nTest Question: {query}\n\nQwenVL Answering:\n')
 start_time = time.time()
 while num_decode < max_single_chat_length:
     
-    all_outputs_F = ort_session_F.run_with_ort_values(output_names_F, input_feed_F)
+    all_outputs_F = ort_session_F.run_with_ort_values(out_name_F, input_feed_F)
     
     max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs_F[-1])[0]
     num_decode += 1
