@@ -42,6 +42,8 @@ if 'QwenVL_A' in model_path:  # Embedding part
     op_types = ["Gather"]
     quant_axes = [1]
 
+if ('QwenVL_C' in model_path) or ('QwenVL_D' in model_path) or ('QwenVL_E' in model_path):
+    use_low_memory_mode_in_Android = False
 
 # Start Weight-Only Quantize
 model = quant_utils.load_model_with_shape_infer(Path(model_path))
