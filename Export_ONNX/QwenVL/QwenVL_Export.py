@@ -538,9 +538,9 @@ out_name_F = [out_name_F[i].name for i in range(amount_of_outputs_F)]
 
 
 num_layers = (amount_of_outputs_F - 2) // 2
-num_layers_2 = num_layers + num_layers
-num_layers_2_plus = num_layers_2 + 1
-layer_indices = np.arange(num_layers_2, num_layers_2 + rotary_outputs_len, dtype=np.int32) + 2
+num_keys_values = num_layers + num_layers
+num_keys_values_plus = num_keys_values + 1
+rotary_indices = np.arange(num_keys_values, num_keys_values + rotary_outputs_len, dtype=np.int32) + 2
 amount_of_outputs_F -= 1
 
 
@@ -604,18 +604,18 @@ else:
 
 
 input_feed_F = {
-    in_name_F[num_layers_2]: kv_seq_len,
-    in_name_F[num_layers_2_plus]: hidden_states,
+    in_name_F[num_keys_values]: kv_seq_len,
+    in_name_F[num_keys_values_plus]: hidden_states,
     in_name_F[-2]: ids_len,
     in_name_F[-1]: attention_mask
 }
 
 for i in range(num_layers):
     input_feed_F[in_name_F[i]] = past_keys_F
-for i in range(num_layers, num_layers_2):
+for i in range(num_layers, num_keys_values):
     input_feed_F[in_name_F[i]] = past_values_F
 for i in range(rotary_outputs_len):
-    input_feed_F[in_name_F[layer_indices[i]]] = rotary_outputs[i]
+    input_feed_F[in_name_F[rotary_indices[i]]] = rotary_outputs[i]
 
 
 print(f'\nTest Question: {query}\n\nQwenVL Answering:\n')
@@ -630,7 +630,7 @@ while num_decode < max_single_chat_length:
     if max_logit_ids in STOP_TOKEN:
         break
 
-    history_len = input_feed_F[in_name_F[num_layers_2]]
+    history_len = input_feed_F[in_name_F[num_keys_values]]
     for i in range(amount_of_outputs_F):
         input_feed_F[in_name_F[i]] = all_outputs_F[i]
         
@@ -639,7 +639,7 @@ while num_decode < max_single_chat_length:
         input_feed_F[in_name_F[-2]] = ids_len
         input_feed_F[in_name_F[-1]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, device_id)
 
-    input_feed_F[in_name_F[num_layers_2_plus]] = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
+    input_feed_F[in_name_F[num_keys_values_plus]] = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
     
     if use_vision:
         rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: history_len, in_name_D1: all_outputs_F[-2]})
@@ -647,7 +647,7 @@ while num_decode < max_single_chat_length:
         rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: history_len, in_name_E1: all_outputs_F[-2]})
         
     for i in range(rotary_outputs_len):
-        input_feed_F[in_name_F[layer_indices[i]]] = rotary_outputs[i]
+        input_feed_F[in_name_F[rotary_indices[i]]] = rotary_outputs[i]
         
     print(tokenizer.decode(max_logit_ids), end="", flush=True)
     
