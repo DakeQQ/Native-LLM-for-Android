@@ -185,8 +185,7 @@ class QwenVL_PartD(torch.nn.Module):
         self.rotary_pos_emb_cos = torch.cat([m[:, i % 3] for i, m in enumerate(cos.split(self.mrope_section, dim=-2))], dim=-2).half()
         self.rotary_pos_emb_sin = torch.cat([m[:, i % 3] for i, m in enumerate(sin.split(self.mrope_section, dim=-2))], dim=-2).half()
         
-    def forward(self, history_len, ids_len):
-        kv_seq_len = history_len + ids_len
+    def forward(self, history_len, kv_seq_len):
         rotary_pos_emb_cos_k = self.rotary_pos_emb_cos[:, :, history_len:kv_seq_len].float()
         rotary_pos_emb_sin_k = self.rotary_pos_emb_sin[:, :, history_len:kv_seq_len].float()
         rotary_pos_emb_cos_q = rotary_pos_emb_cos_k.transpose(-1, -2)
@@ -207,8 +206,7 @@ class QwenVL_PartE(torch.nn.Module):
         self.rotary_pos_emb_cos = torch.cat([m[:, i % 3] for i, m in enumerate(cos.split(self.mrope_section, dim=-2))], dim=-2).half()
         self.rotary_pos_emb_sin = torch.cat([m[:, i % 3] for i, m in enumerate(sin.split(self.mrope_section, dim=-2))], dim=-2).half()
         
-    def forward(self, history_len, ids_len):
-        kv_seq_len = history_len + ids_len
+    def forward(self, history_len, kv_seq_len):
         rotary_pos_emb_cos_k = self.rotary_pos_emb_cos[:, :, history_len:kv_seq_len].float()
         rotary_pos_emb_sin_k = self.rotary_pos_emb_sin[:, :, history_len:kv_seq_len].float()
         rotary_pos_emb_cos_q = rotary_pos_emb_cos_k.transpose(-1, -2)
@@ -238,14 +236,13 @@ class QwenVL_PartF(torch.nn.Module):
             self.qwenvl.model.layers._modules[f'{i}'].self_attn.k_proj.bias.data *= scale_factor
 
     def forward(self, *all_inputs):
-        history_len = all_inputs[-8]
+        kv_seq_len = all_inputs[-8]
         hidden_states = all_inputs[-7]
         rotary_pos_emb_cos_q = all_inputs[-6]
         rotary_pos_emb_sin_q = all_inputs[-5]
         rotary_pos_emb_cos_k = all_inputs[-4]
         rotary_pos_emb_sin_k = all_inputs[-3]
         ids_len = all_inputs[-2]
-        kv_seq_len = history_len + ids_len
         attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * all_inputs[-1]).float()
         for i, layer in enumerate(self.qwenvl.model.layers):
             hidden_states_norm = layer.input_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
@@ -270,7 +267,7 @@ class QwenVL_PartF(torch.nn.Module):
         hidden_states = hidden_states[:, -1]
         hidden_states = self.qwenvl.model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
         max_logit_ids = torch.argmax(self.qwenvl.lm_head(hidden_states), dim=-1, keepdim=True).int()
-        return *self.save_key, *self.save_value, kv_seq_len, max_logit_ids
+        return *self.save_key, *self.save_value, kv_seq_len + 1, max_logit_ids
 
 
 # Load the model
@@ -300,6 +297,7 @@ with torch.inference_mode():
     past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float32)
     past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float32)
     hidden_states = torch.ones((1, ids_len, hidden_size), dtype=torch.float32)
+    kv_seq_len = history_len + ids_len
 
     print('\nExport Part_A Start...')
     model_A = QwenVL_PartA(model)
@@ -357,9 +355,9 @@ with torch.inference_mode():
     model_D = QwenVL_PartD(model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, max_seq_len)
     torch.onnx.export(
         model_D,
-        (history_len, ids_len),
+        (history_len, kv_seq_len),
         onnx_model_D,
-        input_names=['history_len', 'ids_len'],
+        input_names=['history_len', 'kv_seq_len'],
         output_names=['rotary_pos_emb_cos_q', 'rotary_pos_emb_sin_q', 'rotary_pos_emb_cos_k', 'rotary_pos_emb_sin_k'],
         dynamic_axes={
             'rotary_pos_emb_cos_q': {1: 'ids_len'},
@@ -376,9 +374,9 @@ with torch.inference_mode():
     model_E = QwenVL_PartE(model, max_seq_len)
     torch.onnx.export(
         model_E,
-        (history_len, ids_len),
+        (history_len, kv_seq_len),
         onnx_model_E,
-        input_names=['history_len', 'ids_len'],
+        input_names=['history_len', 'kv_seq_len'],
         output_names=['rotary_pos_emb_cos_q', 'rotary_pos_emb_sin_q', 'rotary_pos_emb_cos_k', 'rotary_pos_emb_sin_k'],
         dynamic_axes={
             'rotary_pos_emb_cos_q': {1: 'ids_len'},
@@ -420,8 +418,8 @@ with torch.inference_mode():
         name = f'out_value_{i}'
         output_names.append(name)
         dynamic_axes[name] = {2: 'history_len_plus_ids_len'}
-    input_names.append('history_len')
-    all_inputs.append(history_len)
+    input_names.append('kv_seq_len')
+    all_inputs.append(kv_seq_len)
     input_names.append('hidden_states')
     all_inputs.append(hidden_states)
     input_names.append('rotary_pos_emb_cos_q')
@@ -436,7 +434,7 @@ with torch.inference_mode():
     all_inputs.append(ids_len)
     input_names.append('attention_mask')
     all_inputs.append(attention_mask)
-    output_names.append('kv_seq_len')
+    output_names.append('next_kv_seq_len')
     output_names.append('max_logit_id')
 
     torch.onnx.export(
@@ -552,8 +550,11 @@ prompt_head_len = np.array([4], dtype=np.int64)
 image_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR
 tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, device_id)
-ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), device_type, device_id)
-history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), device_type, device_id)
+ids_len = np.array([tokens.shape[-1]], dtype=np.int64)
+history_len = np.array([0], dtype=np.int64)
+kv_seq_len = onnxruntime.OrtValue.ortvalue_from_numpy(ids_len + history_len, device_type, device_id)
+ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(ids_len, device_type, device_id)
+history_len = onnxruntime.OrtValue.ortvalue_from_numpy(history_len, device_type, device_id)
 attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), device_type, device_id)
 max_single_chat_length -= tokens.shape[-1]
 if device_type != 'dml':
@@ -586,6 +587,8 @@ hidden_states = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: in
 
 if use_vision:
     ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(onnxruntime.OrtValue.numpy(ids_len) + image_embed_size, device_type, device_id)
+    kv_seq_len = onnxruntime.OrtValue.ortvalue_from_numpy(onnxruntime.OrtValue.numpy(kv_seq_len) + image_embed_size, device_type, device_id)
+
     max_single_chat_length -= image_embed_size
 
     print('\nStart to Process the Image...')
@@ -595,13 +598,13 @@ if use_vision:
 
     hidden_states = ort_session_C.run_with_ort_values([out_name_C0], {in_name_C0: hidden_states, in_name_C1: vision_hidden_states})[0]
 
-    rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: history_len, in_name_D1: ids_len})
+    rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: history_len, in_name_D1: kv_seq_len})
 else:
-    rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: history_len, in_name_E1: ids_len})
+    rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: history_len, in_name_E1: kv_seq_len})
 
 
 input_feed_F = {
-    in_name_F[num_layers_2]: history_len,
+    in_name_F[num_layers_2]: kv_seq_len,
     in_name_F[num_layers_2_plus]: hidden_states,
     in_name_F[-2]: ids_len,
     in_name_F[-1]: attention_mask
@@ -626,7 +629,8 @@ while num_decode < max_single_chat_length:
     
     if max_logit_ids in STOP_TOKEN:
         break
-        
+
+    history_len = input_feed_F[in_name_F[num_layers_2]]
     for i in range(amount_of_outputs_F):
         input_feed_F[in_name_F[i]] = all_outputs_F[i]
         
@@ -634,13 +638,13 @@ while num_decode < max_single_chat_length:
         ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, device_id)
         input_feed_F[in_name_F[-2]] = ids_len
         input_feed_F[in_name_F[-1]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, device_id)
-        
+
     input_feed_F[in_name_F[num_layers_2_plus]] = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
     
     if use_vision:
-        rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: all_outputs_F[-2], in_name_D1: ids_len})
+        rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: history_len, in_name_D1: all_outputs_F[-2]})
     else:
-        rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: all_outputs_F[-2], in_name_E1: ids_len})
+        rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: history_len, in_name_E1: all_outputs_F[-2]})
         
     for i in range(rotary_outputs_len):
         input_feed_F[in_name_F[layer_indices[i]]] = rotary_outputs[i]
