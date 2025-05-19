@@ -628,11 +628,7 @@ while num_decode < max_single_chat_length:
     num_decode += 1
     
     if max_logit_ids in STOP_TOKEN:
-        break
-
-    history_len = input_feed_F[in_name_F[num_keys_values]]
-    for i in range(amount_of_outputs_F):
-        input_feed_F[in_name_F[i]] = all_outputs_F[i]
+        break    
         
     if num_decode < 2:
         ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, device_id)
@@ -642,9 +638,12 @@ while num_decode < max_single_chat_length:
     input_feed_F[in_name_F[num_keys_values_plus]] = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
     
     if use_vision:
-        rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: history_len, in_name_D1: all_outputs_F[-2]})
+        rotary_outputs = ort_session_D.run_with_ort_values(out_name_D, {in_name_D0: input_feed_F[in_name_F[num_keys_values]], in_name_D1: all_outputs_F[-2]})
     else:
-        rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: history_len, in_name_E1: all_outputs_F[-2]})
+        rotary_outputs = ort_session_E.run_with_ort_values(out_name_E, {in_name_E0: input_feed_F[in_name_F[num_keys_values]], in_name_E1: all_outputs_F[-2]})
+
+    for i in range(amount_of_outputs_F):
+        input_feed_F[in_name_F[i]] = all_outputs_F[i]
         
     for i in range(rotary_outputs_len):
         input_feed_F[in_name_F[rotary_indices[i]]] = rotary_outputs[i]
