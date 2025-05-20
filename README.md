@@ -58,18 +58,18 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### Qwen
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2-1.5B-Instruct<br>q8f32 | 20 token/s         |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen3-1.7B-Instruct<br>q4f32<br>dynamic | 18.5 token/s  |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5-1.5B-Instruct<br>q4f32<br>dynamic | 20.5 token/s  |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
-| Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen-2-1.5B-Instruct<br>q8f32 | 20 token/s         |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen-3-1.7B-Instruct<br>q4f32<br>dynamic | 18.5 token/s  |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen-2.5-1.5B-Instruct<br>q4f32<br>dynamic | 20.5 token/s  |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen-2-1.5B-Instruct<br>q8f32 | 13 token/s         |
+| Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen-2-1.5B-Instruct<br>q8f32 | 7 token/s          |
 
 ### QwenVL
 | OS         | Device       | Backend                 | Model             | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:-----------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2VL-2B<br>q8f32 | 15 token/s              |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2VL-2B<br>q8f32 | 9 token/s               |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5VL-3B<br>q4f32<br>dynamic | 9 token/s  |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | QwenVL-2-2B<br>q8f32 | 15 token/s              |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | QwenVL-2-2B<br>q8f32 | 9 token/s               |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | QwenVL-2.5-3B<br>q4f32<br>dynamic | 9 token/s  |
 
 
 ### DeepSeek-R1
@@ -91,19 +91,19 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### Gemma
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Gemma1.1-it-2B<br>q8f32 | 16 token/s               |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Gemma-1.1-it-2B<br>q8f32 | 16 token/s               |
 
 ### Phi
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Phi2-2B-Orange-V2<br>q8f32 | 9.5 token/s       |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Phi2-2B-Orange-V2<br>q8f32 | 5.8 token/s       |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Phi-2-2B-Orange-V2<br>q8f32 | 9.5 token/s       |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Phi-2-2B-Orange-V2<br>q8f32 | 5.8 token/s       |
 
 ### Llama
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Llama3.2-1B-Instruct<br>q8f32 | 25 token/s     |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Llama3.2-1B-Instruct<br>q8f32 | 16 token/s     |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Llama-3.2-1B-Instruct<br>q8f32 | 25 token/s     |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Llama-3.2-1B-Instruct<br>q8f32 | 16 token/s     |
 
 ### InternVL
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
