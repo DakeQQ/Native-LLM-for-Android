@@ -64,6 +64,14 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2-1.5B-Instruct<br>q8f32 | 13 token/s         |
 | Harmony 3  | 荣耀 20S      | Kirin_810-CPU           | Qwen2-1.5B-Instruct<br>q8f32 | 7 token/s          |
 
+### QwenVL
+| OS         | Device       | Backend                 | Model             | Inference (1024 Context) |
+|:----------:|:------------:|:-----------------------:|:-----------------:|:------------------------:|
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2VL-2B<br>q8f32 | 15 token/s              |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2VL-2B<br>q8f32 | 9 token/s               |
+| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2.5VL-3B<br>q4f32<br>dynamic | 9 token/s  |
+
+
 ### DeepSeek-R1
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
@@ -71,12 +79,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Distill-Qwen-1.5B<br>q4f32<br>dynamic | 20.5 token/s |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Distill-Qwen-1.5B<br>q8f32 | 13 token/s         |
 | HyperOS 2  | Xiaomi-14T-Pro | MediaTek_9300+-CPU    | Distill-Qwen-1.5B<br>q8f32 | 22 token/s         |
-
-### Qwen2VL
-| OS         | Device       | Backend                 | Model             | Inference (1024 Context) |
-|:----------:|:------------:|:-----------------------:|:-----------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | Qwen2VL-2B<br>q8f32 | 15 token/s              |
-| Harmony 4  | P40          | Kirin_990_5G-CPU        | Qwen2VL-2B<br>q8f32 | 9 token/s               |
 
 ### MiniCPM
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
