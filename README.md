@@ -31,9 +31,9 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 3. **Model Notes:**
    - Demo models are converted from HuggingFace or ModelScope and optimized for extreme execution speed.
    - Inputs and outputs may differ slightly from the original models.
-   - For Qwen2VL / Qwen2.5VL, adjust the key variables to match the model parameters and `export_config.py`.
+   - For Qwen2VL / Qwen2.5VL, adjust the key variables to match the model parameters.
       - `GLRender.java: Line 37, 38, 39`
-      - `project.h: Line 14, 15, 16, 35, 36, 39, 116, 117, 118, 121, 122`
+      - `project.h: Line 14, 15, 16, 35, 36, 41, 59, 60`
 
 4. **ONNX Export Considerations:**
    - It is recommended to use dynamic axes and q4f32 quantization.
@@ -148,9 +148,9 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 3. **模型说明：**
    - 演示模型是从 HuggingFace 或 ModelScope 转换而来，并针对极限执行速度进行了优化。
    - 输入和输出可能与原始模型略有不同。
-   - 对于Qwen2VL / Qwen2.5VL，请调整关键变量以匹配模型参数和`export_config.py`
+   - 对于Qwen2VL / Qwen2.5VL，请调整关键变量以匹配模型参数。
       - `GLRender.java: Line 37, 38, 39`
-      - `project.h: Line 14, 15, 16, 35, 36, 39, 116, 117, 118, 121, 122`
+      - `project.h: Line 14, 15, 16, 35, 36, 41, 59, 60`
 
 4. **ONNX 导出注意事项：**
    - 推荐使用动态轴以及`q4f32`量化。
