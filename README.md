@@ -22,7 +22,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 ## Getting Started
 1. **Download Models:**
-   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main) / [Qwen2VL-2B](https://drive.google.com/file/d/11POekmCRLsYk9B_ivJ9st5zRIqjJKlov/view?usp=sharing)
+   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main)
 
 2. **Setup Instructions:**
    - Place the downloaded model files into the `assets` folder.
@@ -139,7 +139,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ## 入门指南
 
 1. **下载模型：**
-   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main) / [Qwen2VL-2B](https://drive.google.com/file/d/11POekmCRLsYk9B_ivJ9st5zRIqjJKlov/view?usp=sharing)
+   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main)
 
 2. **设置说明：**
    - 将下载的模型文件放入 `assets` 文件夹。
