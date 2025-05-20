@@ -20,7 +20,7 @@
         android:roundIcon="@drawable/psyduck"
         android:supportsRtl="true"
         android:theme="@style/Theme.Material3.Dark.NoActionBar"
-        tools:targetApi="34">
+        tools:targetApi="36">
         <activity
             android:name=".MainActivity"
             android:exported="true">
