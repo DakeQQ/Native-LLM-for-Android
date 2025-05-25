@@ -223,7 +223,7 @@ JNIEXPORT jstring JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM_1Part_11(JNIEnv *env, jclass clazz, jboolean add_prompt, jboolean use_vision)
 {
     if (chatting) {
-        for (int i = 0; i < amount_of_output_F; i++) {
+        for (int i = 0; i < num_keys_values; i++) {
             if (output_tensors_F[buffer_index_F][i] != nullptr) {
                 ort_runtime_F->ReleaseValue(output_tensors_F[buffer_index_F][i]);
                 output_tensors_F[buffer_index_F][i] = nullptr;
