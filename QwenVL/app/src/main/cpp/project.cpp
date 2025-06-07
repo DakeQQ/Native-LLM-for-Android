@@ -592,8 +592,8 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env,  jobjec
             if (use_qnn_cpu) {
                 option_keys.push_back("backend_path");
                 option_values.push_back(qnn_cpu_so);
-                option_keys.push_back("backend_type");
-                option_values.push_back("cpu");
+                // option_keys.push_back("backend_type");
+                // option_values.push_back("cpu");
                 option_keys.push_back("profiling_level");
                 option_values.push_back("off");
                 option_keys.push_back("offload_graph_io_quantization");       // Offload quantization and dequantization of graph I/O to CPU EP else handle by QNN EP .
@@ -602,11 +602,13 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env,  jobjec
                 option_keys.push_back("backend_path");
                 if (use_qnn_npu) {
                     option_values.push_back(qnn_htp_so);
-                    ort_runtime_B->AddRunConfigEntry(run_options_B, "qnn.htp_perf_mode", "burst");  // Do not use "option_keys.push_back("htp_performance_mode")", it not work now. (demo version=1.20.1)
+                    ort_runtime_B->AddRunConfigEntry(run_options_B, "qnn.htp_perf_mode", "burst");  // Use run_options instead of "option_keys.push_back("htp_performance_mode")"
                     ort_runtime_B->AddRunConfigEntry(run_options_B, "qnn.htp_perf_mode_post_run", "burst");
                     ort_runtime_B->AddRunConfigEntry(run_options_B, "qnn.rpc_control_latency", "0");
-                    option_keys.push_back("backend_type");
-                    option_values.push_back("htp");
+                    option_keys.push_back("htp_performance_mode");  // It not work now.
+                    option_values.push_back("burst");
+                    // option_keys.push_back("backend_type");
+                    // option_values.push_back("htp"); 
                     option_keys.push_back("htp_graph_finalization_optimization_mode");
                     option_values.push_back("3");
                     option_keys.push_back("enable_htp_shared_memory_allocator");  // QNN HTP shared memory allocator.
@@ -623,8 +625,8 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1B(JNIEnv *env,  jobjec
                     }
                 } else {
                     option_values.push_back(qnn_gpu_so);
-                    option_keys.push_back("backend_type");
-                    option_values.push_back("gpu");
+                    // option_keys.push_back("backend_type");
+                    // option_values.push_back("gpu");
                 }
                 option_keys.push_back("profiling_level");
                 option_values.push_back("off");
