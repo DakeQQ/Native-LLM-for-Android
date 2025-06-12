@@ -631,8 +631,7 @@ while num_decode < max_single_chat_length:
         break    
         
     if num_decode < 2:
-        ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, device_id)
-        input_feed_F[in_name_F[-2]] = ids_len
+        input_feed_F[in_name_F[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, device_id)
         input_feed_F[in_name_F[-1]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, device_id)
 
     input_feed_F[in_name_F[num_keys_values_plus]] = ort_session_A.run_with_ort_values([out_name_A0], {in_name_A0: all_outputs_F[-1]})[0]
