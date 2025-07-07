@@ -6,8 +6,8 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path = '/home/DakeQQ/Downloads/MiniCPM4-0.5B'                            # Set the folder path where the MiniCPM4 whole project downloaded.
-onnx_model_A = '/home/DakeQQ/Downloads/MiniCPM_ONNX/MiniCPM.onnx'        # Assign a path where the exported Qwen model stored.
+path = '/home/DakeQQ/Downloads/MiniCPM4-0.5B'                            # Set the folder path where the MiniCPM4 or BitCPM4 whole project downloaded.
+onnx_model_A = '/home/DakeQQ/Downloads/MiniCPM_ONNX/MiniCPM.onnx'        # Assign a path where the exported MiniCPM4 model stored.
 STOP_TOKEN = [2, 73440]                                                  # The stop_id in MiniCPM4 is "2" & "73440"
 MAX_SEQ_LEN = 4096                                                       # The max context length.
 test_query = "地球最高的山是哪座山？"                                        # The test query after the export process.
