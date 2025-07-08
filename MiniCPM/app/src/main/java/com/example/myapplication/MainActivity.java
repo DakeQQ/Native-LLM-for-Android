@@ -27,7 +27,6 @@ public class MainActivity extends AppCompatActivity {
     private static final boolean low_memory_mode = true;  // Enable it for reduce peak memory consume. But only works for (*.onnx + external_data), not for *.ort format.
     public static final int font_size = 18;
     @SuppressLint("UseSwitchCompatOrMaterialCode")
-    private Switch thinkButton;
     private Button sendButton;
     private TextInputEditText inputBox;
     private static RecyclerView answerView;
