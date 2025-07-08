@@ -84,9 +84,10 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### MiniCPM
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | MiniCPM-2.7B<br>q8f32   | 9.5 token/s              |
+| Android 15 | Nubia Z50    | 8_Gen2-CPU              | MiniCPM4-0.5B<br>q4f32 | 78 token/s               |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | MiniCPM-2.7B<br>q8f32   | 9.5 token/s             |
+| Android 13 | Nubia Z50    | 8_Gen2-CPU              | MiniCPM-1.3B<br>q8f32   | 16.5 token/s            |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | MiniCPM-2.7B<br>q8f32   | 6 token/s               |
-| Android 13 | Nubia Z50    | 8_Gen2-CPU              | MiniCPM-1.3B<br>q8f32   | 16.5 token/s             |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | MiniCPM-1.3B<br>q8f32   | 11 token/s              |
 
 ### Gemma
@@ -110,6 +111,12 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | Mono-2B-S1-3<br>q4f32<br>dynamic | 10.5 token/s     |
+
+### MiniCPM
+| OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
+|:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
+| Android 15 | Nubia Z50    | 8_Gen2-CPU              | MiniCPM4-0.5B<br>q4f32 | 78 token/s               |
+
 
 ## Demo Results
 ### Qwen2VL-2B / 1024 Context
