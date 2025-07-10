@@ -75,7 +75,7 @@ class MINICPM(torch.nn.Module):
         rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2)
         hidden_states = self.embed_data[input_ids] * self.scale[input_ids] + self.zero_point[input_ids]
         attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * all_inputs[-1]).float()
-        for i, layer in enumerate(self.minicpm.model.layers):
+        for i, layer in enumerate(self.num_layers):
             hidden_states_norm = layer.input_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             q = layer.self_attn.q_proj(hidden_states_norm).view(-1, self.num_heads, self.head_dim).transpose(0, 1)
             k = layer.self_attn.k_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim).permute(2, 1, 3, 0)
