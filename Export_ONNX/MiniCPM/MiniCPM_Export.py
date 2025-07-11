@@ -50,6 +50,7 @@ class MINICPM(torch.nn.Module):
             self.minicpm.model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
             self.minicpm.model.layers._modules[f'{i}'].self_attn.o_proj.weight.data *= scale_depth_factor
             self.minicpm.model.layers._modules[f'{i}'].mlp.down_proj.weight.data *= scale_depth_factor
+        self.minicpm.model.norm.weight.data *= float(self.minicpm.config.dim_model_base / self.minicpm.config.hidden_size)
 
         data = self.minicpm.model.embed_tokens.weight.data * self.minicpm.model.config.scale_emb
         self.zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
@@ -62,7 +63,6 @@ class MINICPM(torch.nn.Module):
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers
         self.attention_mask = (1 - torch.tril(torch.ones([1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
-
 
     def forward(self, *all_inputs):
         input_ids = all_inputs[-4]
