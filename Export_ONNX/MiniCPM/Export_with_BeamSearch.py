@@ -241,16 +241,16 @@ with torch.inference_mode():
     output_names.append('logits')
     dynamic_axes['logits'] = {0: 'batch'}
 
-    # torch.onnx.export(
-    #     minicpm,
-    #     tuple(all_inputs),
-    #     onnx_model_A,
-    #     input_names=input_names,
-    #     output_names=output_names,
-    #     dynamic_axes=dynamic_axes,
-    #     do_constant_folding=True,
-    #     opset_version=17
-    # )
+    torch.onnx.export(
+        minicpm,
+        tuple(all_inputs),
+        onnx_model_A,
+        input_names=input_names,
+        output_names=output_names,
+        dynamic_axes=dynamic_axes,
+        do_constant_folding=True,
+        opset_version=17
+    )
     del hidden_states
     del ids_len
     del history_len
