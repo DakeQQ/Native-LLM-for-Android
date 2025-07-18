@@ -12,6 +12,7 @@ onnx_model_B = '/home/DakeQQ/Downloads/MiniCPM_ONNX/MiniCPM_Embed.onnx'         
 onnx_model_C = '/home/DakeQQ/Downloads/MiniCPM_ONNX/Greedy_Search.onnx'           # Assign a path where the exported MiniCPM4 model stored.
 onnx_model_D = '/home/DakeQQ/Downloads/MiniCPM_ONNX/First_Beam_Search.onnx'       # Assign a path where the exported MiniCPM4 model stored.
 onnx_model_E = '/home/DakeQQ/Downloads/MiniCPM_ONNX/Second_Beam_Search.onnx'      # Assign a path where the exported MiniCPM4 model stored.
+onnx_model_F = '/home/DakeQQ/Downloads/MiniCPM_ONNX/Reset_Penality.onnx'          # Assign a path where the exported MiniCPM4 model stored.
 
 
 STOP_TOKEN = [2, 73440]                                                         # The stop_id in MiniCPM4 is "2" & "73440"
@@ -20,7 +21,7 @@ REPEAT_PENALITY = 0.95                                                          
 PENALITY_RANGE = 30                                                             # Penalizes the most recent output. "30" means the last 30 tokens.
 USE_BEAM_SEARCH = True                                                          # Use beam search or greedy search.
 TOP_K = 5                                                                       # The top k candidate in decoding.
-BEAM_SIZE = 3                                                                   # Number of beams in searching.
+BEAM_SIZE = 5                                                                   # Number of beams in searching.
 test_query = "地球最高的山是哪座山？"                                               # The test query after the export process.
 
 
@@ -75,7 +76,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         top_beam_indices = top_beam_indices.int()
         save_id = torch.cat([save_id, top_beam_indices], dim=-1)
         max_logits_idx = top_beam_indices[0]
-        return *self.save_keys_values, save_id, repeat_penality, top_beam_prob.transpose(0, 1), top_beam_indices, max_logits_idx
+        return *self.save_keys_values, save_id, repeat_penality, top_beam_prob.transpose(0, 1), batch_indices, top_beam_indices, max_logits_idx
 
 
 class SECOND_BEAM_SEARCH(torch.nn.Module):
@@ -86,9 +87,10 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         self.batch_indices = torch.arange(255, dtype=torch.uint8)
 
     def forward(self, *all_inputs):
-        save_id = all_inputs[-7]
-        repeat_penality = all_inputs[-6]
-        previous_prob = all_inputs[-5]
+        save_id = all_inputs[-8]
+        repeat_penality = all_inputs[-7]
+        previous_prob = all_inputs[-6]
+        batch_indices = all_inputs[-5]
         logits = all_inputs[-4]
         penality_value = all_inputs[-3]
         beam_size = all_inputs[-2]
@@ -102,12 +104,22 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         for i in range(self.num_keys_values):
             self.save_keys_values[i] = all_inputs[i][beam_index]
         repeat_penality = repeat_penality[beam_index]
-        batch_indices = self.batch_indices[:beam_size].long()
         repeat_penality[batch_indices, top_beam_indices] *= penality_value
         top_beam_indices = top_beam_indices.int().unsqueeze(-1)
         save_id = torch.cat([save_id[beam_index], top_beam_indices], dim=-1)
         max_logits_idx = top_beam_indices[0]
         return *self.save_keys_values, save_id, repeat_penality, top_beam_prob.unsqueeze(-1), top_beam_indices, max_logits_idx
+
+
+class RESET_PENALITY(torch.nn.Module):
+    def __init__(self):
+        super(RESET_PENALITY, self).__init__()
+        pass
+
+    def forward(self, save_id, repeat_penality, penality_reset_count, batch_indices):
+        repeat_penality[batch_indices, save_id[batch_indices, penality_reset_count[batch_indices]]] = 1.0
+        penality_reset_count += 1
+        return save_id, repeat_penality, penality_reset_count
 
 
 class MINICPM_EMBED(torch.nn.Module):
@@ -283,8 +295,10 @@ with torch.inference_mode():
     greedy = GREEDY_SEARCH()
     beam_size = torch.tensor([BEAM_SIZE], dtype=torch.int64)
     repeat_penality = torch.ones((beam_size, vocab_size), dtype=torch.float32)
+    penality_reset_count = torch.zeros(beam_size, dtype=torch.int32)
     logits = torch.randn((beam_size, vocab_size), dtype=torch.float32)
     penality_value = torch.tensor(REPEAT_PENALITY, dtype=torch.float32)
+    batch_indices = torch.arange(BEAM_SIZE, dtype=torch.int64)
 
     torch.onnx.export(
         greedy,
@@ -343,6 +357,7 @@ with torch.inference_mode():
     all_inputs.append(beam_size)
     output_names.append('save_id_out')
     output_names.append('repeat_penality_out')
+    output_names.append('batch_indices')
     output_names.append('top_beam_prob')
     output_names.append('top_beam_indices')
     output_names.append('max_logits_idx')
@@ -354,6 +369,7 @@ with torch.inference_mode():
     dynamic_axes['top_beam_prob'] = {0: 'batch'}
     dynamic_axes['top_beam_indices'] = {0: 'batch'}
     dynamic_axes['max_logits_idx'] = {0: 'batch'}
+    dynamic_axes['batch_indices'] = {0: 'batch'}
 
     torch.onnx.export(
         first_beam_search,
@@ -383,6 +399,8 @@ with torch.inference_mode():
     all_inputs.append(repeat_penality)
     input_names.append('previous_prob')
     all_inputs.append(previous_prob)
+    input_names.append('batch_indices')
+    all_inputs.append(batch_indices)
     input_names.append('logits')
     all_inputs.append(logits)
     input_names.append('penality_value')
@@ -392,6 +410,7 @@ with torch.inference_mode():
     input_names.append('topK')
     all_inputs.append(topK)
     dynamic_axes['previous_prob'] = {0: 'batch'}
+    output_names.remove("batch_indices")
 
     second_beam_search = SECOND_BEAM_SEARCH(num_layers)
     torch.onnx.export(
@@ -404,6 +423,29 @@ with torch.inference_mode():
         do_constant_folding=True,
         opset_version=17
     )
+
+    reset_penality = RESET_PENALITY()
+    torch.onnx.export(
+        reset_penality,
+        (save_id, repeat_penality, penality_reset_count, batch_indices),
+        onnx_model_F,
+        input_names=['save_id_in', 'repeat_penality_in', 'penality_reset_count_in', 'batch_indices'],
+        output_names=['save_id_out', 'repeat_penality_out', 'penality_reset_count_out'],
+        dynamic_axes={
+            'save_id_in': {0: 'batch', 1: 'history_len'},
+            'save_id_out': {0: 'batch', 1: 'history_len'},
+            'repeat_penality_in': {0: 'batch'},
+            'repeat_penality_out': {0: 'batch'},
+            'penality_reset_count_in': {0: 'batch'},
+            'penality_reset_count_out': {0: 'batch'},
+            'batch_indices': {0: 'batch'}
+        },
+        do_constant_folding=True,
+        opset_version=17
+    )
+
+    del batch_indices
+    del reset_penality
     del second_beam_search
     del past_keys_greedy
     del past_values_greedy
@@ -411,6 +453,7 @@ with torch.inference_mode():
     del previous_prob
     del save_id
     del repeat_penality
+    del penality_reset_count
     del topK
     del input_names
     del output_names
@@ -477,6 +520,12 @@ out_name_E = ort_session_E.get_outputs()
 in_name_E = [in_name_E[i].name for i in range(len(in_name_E))]
 out_name_E = [out_name_E[i].name for i in range(len(out_name_E))]
 
+ort_session_F = onnxruntime.InferenceSession(onnx_model_F, sess_options=session_opts, providers=['CPUExecutionProvider'])
+in_name_F = ort_session_F.get_inputs()
+out_name_F = ort_session_F.get_outputs()
+in_name_F = [in_name_F[i].name for i in range(len(in_name_F))]
+out_name_F = [out_name_F[i].name for i in range(len(out_name_F))]
+
 
 # Pre-process inputs
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
@@ -512,7 +561,7 @@ repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, v
 penality_value = onnxruntime.OrtValue.ortvalue_from_numpy(np.array(REPEAT_PENALITY, dtype=np.float32), 'cpu', 0)
 
 if do_repeat_penality:
-    penality_reset_count = np.zeros(BEAM_SIZE, dtype=np.int32)
+    penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), 'cpu', 0)
     if not USE_BEAM_SEARCH:
         save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
         penality_reset_count_greedy = 0
@@ -568,6 +617,8 @@ while num_decode < max_single_chat_length:
             input_feed_D[in_name_D[-3]] = all_outputs_A[-1]
             all_outputs_D = ort_session_D.run_with_ort_values(out_name_D, input_feed_D)
             max_logits_idx = onnxruntime.OrtValue.numpy(all_outputs_D[-1])
+            input_feed_F = {in_name_F[3]: all_outputs_D[-3]}
+            input_feed_E[in_name_E[num_keys_values_plus_3]] = all_outputs_D[-3]
         else:
             input_feed_E[in_name_E[-4]] = all_outputs_A[-1]
             for i in range(num_keys_values):
@@ -583,15 +634,13 @@ while num_decode < max_single_chat_length:
             print(f"\nBest: {sentence}")
             break
         if do_repeat_penality and (num_decode >= PENALITY_RANGE):
-            save_id = onnxruntime.OrtValue.numpy(all_outputs_E[num_keys_values])
-            repeat_penality = onnxruntime.OrtValue.numpy(all_outputs_E[-4])
-            idx = onnxruntime.OrtValue.numpy(all_outputs_E[-2])
-            for i in range(BEAM_SIZE):
-                if save_id[i, penality_reset_count[i]] != idx[i]:
-                    repeat_penality[i, save_id[i, penality_reset_count[i]]] = 1.0
-                    penality_reset_count[i] += 1
-            input_feed_E[in_name_E[num_keys_values]] = onnxruntime.OrtValue.ortvalue_from_numpy(save_id, 'cpu', 0)
-            input_feed_E[in_name_E[-4]] = onnxruntime.OrtValue.ortvalue_from_numpy(repeat_penality, 'cpu', 0)
+            input_feed_F[in_name_F[0]] = all_outputs_E[num_keys_values]
+            input_feed_F[in_name_F[1]] = all_outputs_E[-4]
+            input_feed_F[in_name_F[2]] = penality_reset_count
+            all_outputs_F = ort_session_F.run_with_ort_values(out_name_F, input_feed_F)
+            input_feed_E[in_name_E[num_keys_values]] = all_outputs_F[0]
+            input_feed_E[in_name_E[-4]] = all_outputs_F[1]
+            penality_reset_count = all_outputs_F[2]
         if num_decode < 1:
             for i in range(num_keys_values):
                 input_feed_A[in_name_A[i]] = all_outputs_D[i]
