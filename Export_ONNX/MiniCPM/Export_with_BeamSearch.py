@@ -45,11 +45,12 @@ def repeat_v(kv_states, num_key_value_groups, head_dim, num_heads, batch_size):
 class GREEDY_SEARCH(torch.nn.Module):
     def __init__(self):
         super(GREEDY_SEARCH, self).__init__()
-        pass
+        self.batch_indices = torch.arange(16, dtype=torch.uint8)
 
     def forward(self, repeat_penality, logits, penality_value):
         max_logits_idx = torch.argmax(logits * repeat_penality, dim=-1, keepdim=True)
-        repeat_penality[:, max_logits_idx.squeeze(-1)] = penality_value
+        batch_indices = self.batch_indices[:logits.shape[0]].long()
+        repeat_penality[batch_indices, max_logits_idx.squeeze(-1)] = penality_value
         return repeat_penality, max_logits_idx.int()
 
 
@@ -58,7 +59,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         super(FIRST_BEAM_SEARCH, self).__init__()
         self.num_keys_values = num_layers + num_layers
         self.save_keys_values = [None] * self.num_keys_values
-        self.batch_indices = torch.arange(255, dtype=torch.uint8)
+        self.batch_indices = torch.arange(16, dtype=torch.uint8)
 
     def forward(self, *all_inputs):
         save_id = all_inputs[-5]
@@ -84,7 +85,7 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         super(SECOND_BEAM_SEARCH, self).__init__()
         self.num_keys_values = num_layers + num_layers
         self.save_keys_values = [None] * self.num_keys_values
-        self.batch_indices = torch.arange(255, dtype=torch.uint8)
+        self.batch_indices = torch.arange(16, dtype=torch.uint8)
 
     def forward(self, *all_inputs):
         save_id = all_inputs[-8]
