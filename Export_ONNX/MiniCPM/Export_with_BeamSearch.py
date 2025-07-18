@@ -617,8 +617,9 @@ while num_decode < max_single_chat_length:
             input_feed_D[in_name_D[-3]] = all_outputs_A[-1]
             all_outputs_D = ort_session_D.run_with_ort_values(out_name_D, input_feed_D)
             max_logits_idx = onnxruntime.OrtValue.numpy(all_outputs_D[-1])
-            input_feed_F = {in_name_F[3]: all_outputs_D[-3]}
             input_feed_E[in_name_E[num_keys_values_plus_3]] = all_outputs_D[-3]
+            if do_repeat_penality:
+                input_feed_F = {in_name_F[3]: all_outputs_D[-3]}
         else:
             input_feed_E[in_name_E[-4]] = all_outputs_A[-1]
             for i in range(num_keys_values):
