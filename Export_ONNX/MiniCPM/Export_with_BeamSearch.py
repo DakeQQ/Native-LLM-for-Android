@@ -644,19 +644,17 @@ while num_decode < max_single_chat_length:
         if num_decode < 1:
             for i in range(num_keys_values):
                 input_feed_A[in_name_A[i]] = all_outputs_D[i]
-            for i in range(num_keys_values, amount_of_outputs_A):
-                input_feed_A[in_name_A[i]] = all_outputs_A[i]
             for i in range(num_keys_values, num_keys_values_plus_3):
                 input_feed_E[in_name_E[i]] = all_outputs_D[i]
             input_feed_A[in_name_A[-3]] = ort_session_B.run_with_ort_values([out_name_B], {in_name_B: all_outputs_D[-2]})[0]
         else:
             for i in range(num_keys_values):
                 input_feed_A[in_name_A[i]] = all_outputs_E[i]
-            for i in range(num_keys_values, amount_of_outputs_A):
-                input_feed_A[in_name_A[i]] = all_outputs_A[i]
             for i in range(num_keys_values, num_keys_values_plus_3):
                 input_feed_E[in_name_E[i]] = all_outputs_E[i]
             input_feed_A[in_name_A[-3]] = ort_session_B.run_with_ort_values([out_name_B], {in_name_B: all_outputs_E[-2]})[0]
+        for i in range(num_keys_values, amount_of_outputs_A):
+            input_feed_A[in_name_A[i]] = all_outputs_A[i]
     else:
         input_feed_C[in_name_C[1]] = all_outputs_A[-1]
         all_outputs_C = ort_session_C.run_with_ort_values(out_name_C, input_feed_C)
