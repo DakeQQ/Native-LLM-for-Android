@@ -560,11 +560,9 @@ save_id = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtyp
 repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=np.float32), 'cpu', 0)
 penality_value = onnxruntime.OrtValue.ortvalue_from_numpy(np.array(REPEAT_PENALITY, dtype=np.float32), 'cpu', 0)
 
-if do_repeat_penality:
-    penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), 'cpu', 0)
-    if not USE_BEAM_SEARCH:
-        save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
-        penality_reset_count_greedy = 0
+if do_repeat_penality and not USE_BEAM_SEARCH:
+    save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
+    penality_reset_count_greedy = 0
 
 num_keys_values = num_layers + num_layers
 num_keys_values_plus_3 = num_keys_values + 3
