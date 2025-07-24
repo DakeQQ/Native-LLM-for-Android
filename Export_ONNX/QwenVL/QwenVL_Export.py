@@ -102,7 +102,7 @@ class QwenVL_PartB(torch.nn.Module):
             attention_mask = init_attention_mask
             for i in range(1, len(cu_seqlens_now)):
                 attention_mask[..., cu_seqlens_now[i - 1]: cu_seqlens_now[i], cu_seqlens_now[i - 1]: cu_seqlens_now[i]] = 0
-            self.attention_mask.append((attention_mask * -128.0).float())
+            self.attention_mask.append((attention_mask * -128).float())
 
     def forward(self, pixel_values):
         pixel_values = torch.nn.functional.interpolate(
