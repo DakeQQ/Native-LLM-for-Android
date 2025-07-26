@@ -328,7 +328,7 @@ with torch.inference_mode():
     all_inputs = []
     input_names = []
     output_names = []
-    dynamic_axes = {'save_id_in': {0: 'batch', 1: 'history_len'}}
+    dynamic_axes = {}
     for i in range(num_layers):
         name = f'in_key_{i}'
         input_names.append(name)
