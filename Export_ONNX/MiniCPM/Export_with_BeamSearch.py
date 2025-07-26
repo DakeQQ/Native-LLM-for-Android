@@ -50,7 +50,7 @@ class GREEDY_SEARCH(torch.nn.Module):
     def forward(self, repeat_penality, logits, penality_value):
         max_logits_idx = torch.argmax(logits * repeat_penality, dim=-1, keepdim=True)
         batch_indices = self.batch_indices[:logits.shape[0]].long()
-        repeat_penality[batch_indices, max_logits_idx.squeeze(-1)] = penality_value
+        repeat_penality[batch_indices, max_logits_idx.squeeze(-1)] *= penality_value
         return repeat_penality, max_logits_idx.int()
 
 
