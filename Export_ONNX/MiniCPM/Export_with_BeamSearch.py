@@ -297,7 +297,7 @@ with torch.inference_mode():
     beam_size = torch.tensor([BEAM_SIZE], dtype=torch.int64)
     repeat_penality = torch.ones((beam_size, vocab_size), dtype=torch.float32)
     penality_reset_count = torch.zeros(beam_size, dtype=torch.int32)
-    logits = torch.randn((beam_size, vocab_size), dtype=torch.float32)
+    logits = torch.ones((beam_size, vocab_size), dtype=torch.float32)
     penality_value = torch.tensor(REPEAT_PENALITY, dtype=torch.float32)
     batch_indices = torch.arange(BEAM_SIZE, dtype=torch.int64)
 
@@ -324,7 +324,6 @@ with torch.inference_mode():
     previous_prob = torch.zeros((beam_size, 1), dtype=torch.float32)
     past_keys_greedy = past_keys[[0]]
     past_values_greedy = past_values[[0]]
-    logits = torch.ones((beam_size, vocab_size), dtype=torch.float32)
 
     all_inputs = []
     input_names = []
