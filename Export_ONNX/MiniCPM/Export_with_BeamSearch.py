@@ -70,7 +70,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         logits = torch.log_softmax(logits, dim=-1)
         top_beam_prob, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=False, largest=True)
         for i in range(self.num_keys_values):
-            self.save_keys_values[i] = torch.cat([all_inputs[i] for _ in range(beam_size)], dim=0)
+            self.save_keys_values[i] = all_inputs[i].repeat(beam_size, *([1] * (all_inputs[i].dim() - 1)))
         top_beam_indices = top_beam_indices.transpose(0, 1)
         batch_indices = self.batch_indices[:beam_size].long()
         repeat_penality[batch_indices, top_beam_indices] *= penality_value
