@@ -35,7 +35,7 @@ public class MainActivity extends AppCompatActivity {
     private static List<ChatMessage> messages;
     private static String usrInputText = "";
     private static final String file_name_vocab_A = "vocab_Qwen.txt";
-    private static final String file_name_vocab_B = "vocab_DeepSeek_Qwen.txt";
+    // private static final String file_name_vocab_B = "vocab_DeepSeek_Qwen.txt";
     private static final String first_talk = "请输入问题 Enter Questions";
     private static final String load_failed = "模型加载失败。\nModel loading failed.";
     private static final String over_inputs = "一次输入太多单词 \nInput too many words at once.";
@@ -98,7 +98,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (success) {
             Copy_from_Asset_to_Cache(file_name_vocab_A, mgr);
-            Copy_from_Asset_to_Cache(file_name_vocab_B, mgr);
+            // Copy_from_Asset_to_Cache(file_name_vocab_B, mgr);
             Pre_Process();
             Start_Chat();
         } else {
