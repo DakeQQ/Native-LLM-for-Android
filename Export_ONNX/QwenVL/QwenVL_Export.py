@@ -14,7 +14,7 @@ onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_B.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_C.onnx'
 onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_D.onnx'
 onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_E.onnx'
-onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_F.onnx'
+onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX_2/QwenVL_F.onnx'  # You must assign a different folder path to avoid duplicate weight file names, which would cause loading failures.
 
 image_path = r"./psyduck.png"                                       # Test image for the exported onnx model.
 query = "Describe this image."                                      # Test query for the exported onnx model.
@@ -59,7 +59,7 @@ class QwenVL_PartA(torch.nn.Module):
 
     def forward(self, input_ids):
         # text_hidden_states
-        return self.qwenvl.model.embed_tokens(input_ids)
+        return self.qwenvl.model.language_model.embed_tokens(input_ids)
 
 
 class QwenVL_PartB(torch.nn.Module):
@@ -176,8 +176,8 @@ class QwenVL_PartD(torch.nn.Module):
             position_ids[2, :, i: i + width_factor] = fill_id
         fill_tail_position = torch.arange(self.start_id + 1, self.max_seq_len + self.start_id + 1, dtype=torch.float32).repeat(3, 1, 1)
         position_ids = torch.cat([position_ids[:, :, :self.image_factor_plus], fill_tail_position], dim=-1)
-        self.inv_freq_expanded = qwenvl.model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
-        self.mrope_section = qwenvl.model.layers._modules['0'].self_attn.rope_scaling["mrope_section"] * 2
+        self.inv_freq_expanded = qwenvl.model.language_model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
+        self.mrope_section = qwenvl.model.language_model.layers._modules['0'].self_attn.rope_scaling["mrope_section"] * 2
         freqs = (self.inv_freq_expanded @ position_ids).unsqueeze(0)
         emb = torch.cat((freqs, freqs), dim=-2)
         cos = emb.cos()
@@ -197,8 +197,8 @@ class QwenVL_PartE(torch.nn.Module):
     def __init__(self, qwenvl, max_seq_len):
         super(QwenVL_PartE, self).__init__()
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).repeat(3, 1, 1)
-        self.inv_freq_expanded = qwenvl.model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
-        self.mrope_section = qwenvl.model.layers._modules['0'].self_attn.rope_scaling["mrope_section"] * 2
+        self.inv_freq_expanded = qwenvl.model.language_model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
+        self.mrope_section = qwenvl.model.language_model.layers._modules['0'].self_attn.rope_scaling["mrope_section"] * 2
         freqs = (self.inv_freq_expanded @ position_ids).unsqueeze(0)
         emb = torch.cat((freqs, freqs), dim=-2)
         cos = emb.cos()
@@ -230,10 +230,10 @@ class QwenVL_PartF(torch.nn.Module):
         self.attention_mask = (1 - torch.tril(torch.ones([1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
         scale_factor = float(head_dim ** -0.25)
         for i in range(num_layers):
-            self.qwenvl.model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
-            self.qwenvl.model.layers._modules[f'{i}'].self_attn.q_proj.bias.data *= scale_factor
-            self.qwenvl.model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
-            self.qwenvl.model.layers._modules[f'{i}'].self_attn.k_proj.bias.data *= scale_factor
+            self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
+            self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.q_proj.bias.data *= scale_factor
+            self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
+            self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.k_proj.bias.data *= scale_factor
 
     def forward(self, *all_inputs):
         kv_seq_len = all_inputs[-8]
@@ -244,7 +244,7 @@ class QwenVL_PartF(torch.nn.Module):
         rotary_pos_emb_sin_k = all_inputs[-3]
         ids_len = all_inputs[-2]
         attention_mask = (self.attention_mask[:, :ids_len, :kv_seq_len] * all_inputs[-1]).float()
-        for i, layer in enumerate(self.qwenvl.model.layers):
+        for i, layer in enumerate(self.qwenvl.model.language_model.layers):
             hidden_states_norm = layer.input_layernorm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
             q = layer.self_attn.q_proj(hidden_states_norm).view(-1, self.num_heads, self.head_dim).transpose(0, 1)
             k = layer.self_attn.k_proj(hidden_states_norm).view(-1, 1, self.num_key_value_heads, self.head_dim).permute(2, 1, 3, 0)
@@ -265,7 +265,7 @@ class QwenVL_PartF(torch.nn.Module):
             hidden_states = layer.mlp(hidden_states)
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
-        hidden_states = self.qwenvl.model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
+        hidden_states = self.qwenvl.model.language_model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
         max_logit_ids = torch.argmax(self.qwenvl.lm_head(hidden_states), dim=-1, keepdim=True).int()
         return *self.save_key, *self.save_value, kv_seq_len + 1, max_logit_ids
 
