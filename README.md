@@ -13,8 +13,10 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Llama-3.2-Instruct**: 1B
 - **InternVL-Mono**: 2B
 - **InternLM-3**: 8B
+- **Seed-X**: [PRO-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-PPO-7B), [Instruct-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-Instruct-7B)
 
 ## Recent Updates
+- 2025/08/02：Update Seed-X.
 - 2025/04/29：Update Qwen3.
 - 2025/04/05：Update Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`.
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
@@ -139,8 +141,10 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Llama-3.2-Instruct**: 1B
 - **InternVL-Mono**: 2B
 - **InternLM-3**: 8B
+- **Seed-X**: [PRO-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-PPO-7B), [Instruct-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-Instruct-7B)
 
 ## 最近更新
+- 2025/08/02：更新 Seed-X。
 - 2025/04/29：更新 Qwen3。
 - 2025/04/05: 更新 Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`。
 - 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
