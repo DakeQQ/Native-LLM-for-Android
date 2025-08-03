@@ -628,9 +628,9 @@ while num_decode < max_single_chat_length:
             max_logits_idx = onnxruntime.OrtValue.numpy(all_outputs_E[-1])
         if max_logits_idx in STOP_TOKEN:
             save_id = onnxruntime.OrtValue.numpy(all_outputs_E[num_keys_values])[0]
-            for i in range(num_decode, -1, -1):
-                if save_id[i] not in STOP_TOKEN:
-                    sentence = tokenizer.decode(save_id[:i+1])
+            for i, idx in enumerate(save_id):
+                if idx in STOP_TOKEN:
+                    sentence = tokenizer.decode(save_id[:i])
                     break
             print(f"\nBest: {sentence}")
             break
@@ -659,13 +659,14 @@ while num_decode < max_single_chat_length:
     else:
         input_feed_C[in_name_C[1]] = all_outputs_A[-1]
         all_outputs_C = ort_session_C.run_with_ort_values(out_name_C, input_feed_C)
-        max_logits_idx = onnxruntime.OrtValue.numpy(all_outputs_C[-1])[0][0]
+        max_logits_idx = onnxruntime.OrtValue.numpy(all_outputs_C[-1])[0, 0]
         if max_logits_idx in STOP_TOKEN:
             break
         input_feed_A[in_name_A[-3]] = ort_session_B.run_with_ort_values([out_name_B], {in_name_B: all_outputs_C[-1]})[0]
         if do_repeat_penality and (num_decode >= PENALITY_RANGE) and (save_id_greedy[penality_reset_count_greedy] != max_logits_idx):
             repeat_penality = onnxruntime.OrtValue.numpy(all_outputs_C[0])
             repeat_penality[:, penality_reset_count_greedy] = 1.0
+            all_outputs_C[1] = onnxruntime.OrtValue.ortvalue_from_numpy(repeat_penality, 'cpu', 0)
             penality_reset_count_greedy += 1
         input_feed_C[in_name_C[0]] = all_outputs_C[0]
         save_id_greedy[num_decode] = max_logits_idx
