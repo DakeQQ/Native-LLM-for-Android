@@ -297,7 +297,7 @@ if original_language and target_language:
     past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, 0, head_dim), dtype=np.float32), 'cpu', 0)
     num_keys_values = num_layers + num_layers
     num_decode = 0
-    print(f'\n\nTest Query: Translate the following {original_language} sentence into {target_language}: {sentence}\nSeed-X Answering:\n')
+    print(f'\n\nTest Query: Translate the following {original_language} sentence into {target_language}:\n\n{sentence}\n\nSeed-X Answering:\n')
 
     output_names = []
     input_feed = {
@@ -331,4 +331,5 @@ if original_language and target_language:
         print(tokenizer.decode(max_logit_ids), end="", flush=True)
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
+
     print("\nError: The specified translation language is not supported.")
