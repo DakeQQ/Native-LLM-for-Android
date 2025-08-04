@@ -74,7 +74,7 @@ public class MainActivity extends AppCompatActivity {
                     for (String fileName : files) {
                         String[] subEntries = mgr.list(fileName);
                         if (subEntries == null || subEntries.length == 0) {
-                            if (fileName.endsWith(".onnx") || fileName.contains(".data")) {
+                            if (fileName.endsWith(".onnx") || fileName.contains("-")) {
                                 Copy_from_Asset_to_Cache(fileName, mgr);
                                 count_file += 1;
                                 if (count_file > 1) {
