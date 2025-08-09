@@ -42,7 +42,6 @@ public class GLRender implements GLSurfaceView.Renderer {
     private static final int camera_pixels_half = camera_pixels / 2;
     private static final int place_view_center = (screen_resolution_short_side - camera_width) / 2;
     private static final int[] mTextureId = new int[1];
-    public static int[] imageRGBA = new int[camera_pixels];
     public static final MeteringRectangle[] focus_area = new MeteringRectangle[]{new MeteringRectangle(camera_width >> 1, camera_height >> 1, 100, 100, MeteringRectangle.METERING_WEIGHT_MAX)};
     public static final byte[] pixel_values = new byte[camera_pixels * 3];
     private static final float[] vMatrix = new float[16];
@@ -99,25 +98,7 @@ public class GLRender implements GLSurfaceView.Renderer {
         mSurfaceTexture.getTransformMatrix(vMatrix);
         Draw_Camera_Preview();
         if (!chatting) {
-            imageRGBA = Process_Texture();
-            // Choose CPU normalization over GPU, as GPU float32 buffer access is much slower than int8 buffer access.
-            // Therefore, use a new thread to parallelize the normalization process.
-            executorService.execute(() -> {
-                for (int i = 0; i < camera_pixels_half; i++) {
-                    int rgba = imageRGBA[i];
-                    pixel_values[i] = (byte) ((rgba >> 16) & 0xFF);
-                    pixel_values[i + camera_pixels] = (byte) ((rgba >> 8) & 0xFF);
-                    pixel_values[i + camera_pixels_2] = (byte) (rgba & 0xFF);
-                }
-            });
-            executorService.execute(() -> {
-                for (int i = camera_pixels_half; i < camera_pixels; i++) {
-                    int rgba = imageRGBA[i];
-                    pixel_values[i] = (byte) ((rgba >> 16) & 0xFF);
-                    pixel_values[i + camera_pixels] = (byte) ((rgba >> 8) & 0xFF);
-                    pixel_values[i + camera_pixels_2] = (byte) (rgba & 0xFF);
-                }
-            });
+            Process_Texture(pixel_values);
         }
     }
 
