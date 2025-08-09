@@ -10,13 +10,13 @@
 const char* computeShaderSource = "#version 320 es\n"
                                   "#extension GL_OES_EGL_image_external_essl3 : require\n"
                                   "precision mediump float;\n"
-                                  "layout(binding = 0) uniform samplerExternalOES yuvTex;\n"
                                   "layout(local_size_x = 16, local_size_y = 16) in;\n"  // gpu_num_group=16, Customize it to fit your device's specifications.
                                   "const int camera_width = 960;\n"                     // camera_width, Please set this value to match the exported model.
                                   "const int camera_height = 960;\n"                    // camera_height, Please set this value to match the exported model.
-                                  "const int camera_height_minus = camera_height - 1;\n"
+                                  "const uint pixel_count = uint(camera_width * camera_height);\n"
+                                  "layout(binding = 0) uniform samplerExternalOES yuvTex;\n"
                                   "layout(std430, binding = 1) buffer Output {\n"
-                                  "    int result[camera_height * camera_width];\n"     // pixelCount
+                                  "    uint result[];\n"
                                   "} outputData;\n"
                                   "const vec3 bias = vec3(-0.15, -0.5, -0.2);\n"
                                   "const mat3 YUVtoRGBMatrix = mat3(127.5, 0.0, 1.402 * 127.5, "
@@ -24,9 +24,24 @@ const char* computeShaderSource = "#version 320 es\n"
                                   "                                 127.5, 1.772 * 127.5, 0.0);\n"
                                   "void main() {\n"
                                   "    ivec2 texelPos = ivec2(gl_GlobalInvocationID.xy);\n"
+                                  "    if (texelPos.x >= camera_width || texelPos.y >= camera_height) return;\n"
                                   "    ivec3 rgb = clamp(ivec3(YUVtoRGBMatrix * (texelFetch(yuvTex, texelPos, 0).rgb + bias)), -128, 127) + 128;\n"
-                                  // Use uint8 packing the pixels, it would be 1.6 times faster than using float32 buffer.
-                                  "    outputData.result[texelPos.x * camera_height + (camera_height_minus - texelPos.y)] = (rgb.b << 16) | (rgb.r << 8) | (rgb.g);\n"
+                                  "    uint pixel_idx = uint(texelPos.y * camera_width + texelPos.x);\n"
+                                  // Planar BGR layout: B...BR...RG...G, requires atomic operations to write bytes into uint buffer.\n"
+                                  // B channel\n"
+                                  "    uint b_idx = pixel_idx / 4u;\n"
+                                  "    uint b_shift = (pixel_idx % 4u) * 8u;\n"
+                                  "    atomicOr(outputData.result[b_idx], uint(rgb.b) << b_shift);\n"
+                                  // R channel\n"
+                                  "    uint idx = pixel_idx + pixel_count;\n"
+                                  "    uint r_idx = idx / 4u;\n"
+                                  "    uint r_shift = (idx % 4u) * 8u;\n"
+                                  "    atomicOr(outputData.result[r_idx], uint(rgb.r) << r_shift);\n"
+                                  // G channel\n"
+                                  "    idx = idx + pixel_count;\n"
+                                  "    uint g_idx = idx / 4u;\n"
+                                  "    uint g_shift = (idx % 4u) * 8u;\n"
+                                  "    atomicOr(outputData.result[g_idx], uint(rgb.g) << g_shift);\n"
                                   "}";
 //------------------------------------------------------------------------------
 // OpenGL Configuration
