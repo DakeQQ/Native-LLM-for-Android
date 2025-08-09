@@ -113,7 +113,7 @@ Java_com_example_myapplication_MainActivity_Process_1Init(JNIEnv *env, jclass cl
     glUniform1i(yuvTexLoc, 0);
     glGenBuffers(1, &pbo_A);
     glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo_A);
-    glBufferData(GL_PIXEL_PACK_BUFFER, rgbSize, nullptr, GL_DYNAMIC_COPY);
+    glBufferData(GL_PIXEL_PACK_BUFFER, rgbSize_int, nullptr, GL_STATIC_READ);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbo_A);
     glBindImageTexture(0, static_cast<GLuint> (texture_id), 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
     tokenizer = MNN::Transformer::Tokenizer::createTokenizer(vocab_file);
