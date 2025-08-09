@@ -462,8 +462,9 @@ public class MainActivity extends AppCompatActivity {
             context.runOnUiThread(() -> Toast.makeText(context, content, Toast.LENGTH_SHORT).show());
         }
     }
-    public static native boolean Process_Init(int textureId);
-    public static native int[] Process_Texture();
+
+    public static native void Process_Init(int textureId);
+    public static native void Process_Texture(byte[] pixel_values);
     private native boolean Load_Models_A(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
     private native boolean Load_Models_B(AssetManager assetManager, boolean USE_FLOAT_MODEL, boolean USE_QNN_CPU, boolean USE_QNN_GPU, boolean USE_QNN_NPU, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
     private native boolean Load_Models_C(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
