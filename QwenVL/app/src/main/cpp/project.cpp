@@ -93,48 +93,109 @@ inline static void clear_history(bool use_vision) {
     }
 }
 
+GLuint createComputeProgram(const char* shaderSource) {
+    GLuint shader = glCreateShader(GL_COMPUTE_SHADER);
+    glShaderSource(shader, 1, &shaderSource, nullptr);
+    glCompileShader(shader);
+
+    // In production, add compile log checks
+    GLint status = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+    if (status != GL_TRUE) {
+        GLint logLen = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLen);
+        if (logLen > 1) {
+            std::vector<char> log(logLen);
+            glGetShaderInfoLog(shader, logLen, nullptr, log.data());
+            // Log/print the error as appropriate in your environment
+        }
+    }
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, shader);
+    glLinkProgram(program);
+    glDeleteShader(shader);
+
+    // In production, add link log checks
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    if (status != GL_TRUE) {
+        GLint logLen = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &logLen);
+        if (logLen > 1) {
+            std::vector<char> log(logLen);
+            glGetProgramInfoLog(program, logLen, nullptr, log.data());
+            // Log/print the error as appropriate in your environment
+        }
+    }
+
+    return program;
+}
+
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass clazz, jbyteArray output_buffer) {
-    glUseProgram(computeProgram);
+    const int write_index = current_index;
+    const int read_index  = (current_index + 1) % NUM_BUFFERS;
 
-    // Clear the buffer to zeros before using atomicOr in the shader
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, pbo_A);
-    void* mapped_buffer = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, rgbSize_i8, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
-    memset(mapped_buffer, 0, rgbSize_i8);
-    glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); // Ensure clear and unmap completes before dispatch
+    // Read back last completed buffer (triple-buffered)
+    if (fences[read_index] != 0) {
+        glClientWaitSync(fences[read_index], GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64(1000000000));
+        glDeleteSync(fences[read_index]);
+        fences[read_index] = 0;
 
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, pbos[read_index]);
+        void* mapped_buffer = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, rgbSize_i8, GL_MAP_READ_BIT);
+        if (mapped_buffer) {
+            env->SetByteArrayRegion(output_buffer, 0, rgbSize_i8, static_cast<jbyte*>(mapped_buffer));
+            glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    }
+
+    // Bind the SSBO for writing the next frame (no clear needed; shader fully overwrites)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbos[write_index]);
+
+    // Dispatch the fused processing shader
+    glUseProgram(processProgram);
     glDispatchCompute(workGroupCountX, workGroupCountY, 1);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); // Ensure shader writes complete before mapping
 
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo_A);
-    mapped_buffer = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, rgbSize_i8, GL_MAP_READ_BIT);
-    env->SetByteArrayRegion(output_buffer, 0, rgbSize_i8, static_cast<jbyte*>(mapped_buffer));
-    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    // Ensure SSBO writes are visible before we fence
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+    // Fence this frame's GPU work
+    fences[write_index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+    // Advance ring buffer index
+    current_index = (current_index + 1) % NUM_BUFFERS;
 }
 
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_example_myapplication_MainActivity_Process_1Init(JNIEnv *env, jclass clazz, jint texture_id) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    GLuint computeShader = glCreateShader(GL_COMPUTE_SHADER);
-    glShaderSource(computeShader, 1, &computeShaderSource, nullptr);
-    glCompileShader(computeShader);
-    computeProgram = glCreateProgram();
-    glAttachShader(computeProgram, computeShader);
-    glLinkProgram(computeProgram);
-    glDeleteShader(computeShader);
-    yuvTexLoc = glGetUniformLocation(computeProgram, "yuvTex");
+
+    // Create the processing shader program
+    processProgram = createComputeProgram(computeShaderSource);
+
+    // Setup uniforms for the processing program
+    glUseProgram(processProgram);
+    yuvTexLoc = glGetUniformLocation(processProgram, "yuvTex");
     glUniform1i(yuvTexLoc, 0);
-    glGenBuffers(1, &pbo_A);
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo_A);
-    glBufferData(GL_PIXEL_PACK_BUFFER, rgbSize_i8, nullptr, GL_STATIC_READ); // Use byte buffer size
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbo_A);
-    glBindImageTexture(0, static_cast<GLuint> (texture_id), 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
+
+    // Create triple buffers for SSBO writes and CPU readback
+    glGenBuffers(NUM_BUFFERS, pbos);
+    for (int i = 0; i < NUM_BUFFERS; ++i) {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, pbos[i]);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, rgbSize_i8, nullptr, GL_DYNAMIC_DRAW);
+    }
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    // Bind the external texture to an image unit is not required for samplerExternalOES,
+    // but this line is kept as in original code to preserve behavior.
+    glBindImageTexture(0, static_cast<GLuint>(texture_id), 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
+
     // Tokenizer Init.
     tokenizer = MNN::Transformer::Tokenizer::createTokenizer(vocab_file);
-    return JNI_TRUE;
 }
 
 extern "C"
