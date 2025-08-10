@@ -11,8 +11,8 @@ const char* computeShaderSource = "#version 320 es\n"
                                   "#extension GL_OES_EGL_image_external_essl3 : require\n"
                                   "precision mediump float;\n"
                                   "layout(local_size_x = 16, local_size_y = 16) in;\n"
-                                  "const int camera_width = 960;\n"
-                                  "const int camera_height = 960;\n"
+                                  "const int camera_width = 960;\n"    // Please set this value to match the exported model.
+                                  "const int camera_height = 960;\n"   // Please set this value to match the exported model.
                                   "const uint pixel_count = uint(camera_width * camera_height);\n"
                                   "layout(binding = 0) uniform samplerExternalOES yuvTex;\n"
                                   "layout(std430, binding = 1) buffer Output {\n"
