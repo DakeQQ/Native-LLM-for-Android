@@ -134,8 +134,7 @@ GLuint createComputeProgram(const char* shaderSource) {
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass clazz, jbyteArray output_buffer) {
-    const int write_index = current_index;
-    const int read_index  = (current_index + 1) % NUM_BUFFERS;
+    int read_index  = (current_index + 1) % NUM_BUFFERS;
 
     // Read back last completed buffer (triple-buffered)
     if (fences[read_index] != 0) {
@@ -153,7 +152,7 @@ Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass
     }
 
     // Bind the SSBO for writing the next frame (no clear needed; shader fully overwrites)
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbos[write_index]);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbos[current_index]);
 
     // Dispatch the fused processing shader
     glUseProgram(processProgram);
@@ -163,10 +162,10 @@ Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
     // Fence this frame's GPU work
-    fences[write_index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    fences[current_index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
     // Advance ring buffer index
-    current_index = (current_index + 1) % NUM_BUFFERS;
+    current_index = read_index;
 }
 
 extern "C"
