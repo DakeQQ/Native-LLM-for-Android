@@ -137,10 +137,10 @@ Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass
     int read_index  = (current_index + 1) % NUM_BUFFERS;
 
     // Read back last completed buffer (triple-buffered)
-    if (fences[read_index] != 0) {
+    if (fences[read_index] != nullptr) {
         glClientWaitSync(fences[read_index], GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64(1000000000));
         glDeleteSync(fences[read_index]);
-        fences[read_index] = 0;
+        fences[read_index] = nullptr;
 
         glBindBuffer(GL_PIXEL_PACK_BUFFER, pbos[read_index]);
         void* mapped_buffer = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, rgbSize_i8, GL_MAP_READ_BIT);
@@ -149,21 +149,20 @@ Java_com_example_myapplication_MainActivity_Process_1Texture(JNIEnv *env, jclass
             glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
         }
         glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    } else {
+        // Bind the SSBO for writing the next frame (no clear needed; shader fully overwrites)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbos[current_index]);
+
+        // Dispatch the fused processing shader
+        glUseProgram(processProgram);
+        glDispatchCompute(workGroupCountX, workGroupCountY, 1);
+
+        // Ensure SSBO writes are visible before we fence
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+        // Fence this frame's GPU work
+        fences[current_index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     }
-
-    // Bind the SSBO for writing the next frame (no clear needed; shader fully overwrites)
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pbos[current_index]);
-
-    // Dispatch the fused processing shader
-    glUseProgram(processProgram);
-    glDispatchCompute(workGroupCountX, workGroupCountY, 1);
-
-    // Ensure SSBO writes are visible before we fence
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
-    // Fence this frame's GPU work
-    fences[current_index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-
     // Advance ring buffer index
     current_index = read_index;
 }
@@ -183,8 +182,8 @@ Java_com_example_myapplication_MainActivity_Process_1Init(JNIEnv *env, jclass cl
 
     // Create triple buffers for SSBO writes and CPU readback
     glGenBuffers(NUM_BUFFERS, pbos);
-    for (int i = 0; i < NUM_BUFFERS; ++i) {
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, pbos[i]);
+    for (unsigned int pbo : pbos) {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, pbo);
         glBufferData(GL_SHADER_STORAGE_BUFFER, rgbSize_i8, nullptr, GL_DYNAMIC_DRAW);
     }
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
