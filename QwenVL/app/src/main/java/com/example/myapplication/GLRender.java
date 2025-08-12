@@ -38,8 +38,6 @@ public class GLRender implements GLSurfaceView.Renderer {
     public static final int camera_width = 960;   // Please modify the project.h file simultaneously when editing these values.
     public static final int camera_height = 960;  // Please modify the project.h file simultaneously when editing these values.
     private static final int camera_pixels = camera_height * camera_width;
-    private static final int camera_pixels_2 = camera_pixels * 2;
-    private static final int camera_pixels_half = camera_pixels / 2;
     private static final int place_view_center = (screen_resolution_short_side - camera_width) / 2;
     private static final int[] mTextureId = new int[1];
     public static final MeteringRectangle[] focus_area = new MeteringRectangle[]{new MeteringRectangle(camera_width >> 1, camera_height >> 1, 100, 100, MeteringRectangle.METERING_WEIGHT_MAX)};
