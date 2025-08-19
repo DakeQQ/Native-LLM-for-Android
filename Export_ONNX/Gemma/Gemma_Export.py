@@ -269,7 +269,7 @@ input_feed = {
 for i in range(num_layers):
     input_feed[in_name_A[i]] = past_keys_A
 for i in range(num_layers, num_keys_values):
-    input_feed[in_name_A[i].name] = past_values_A
+    input_feed[in_name_A[i]] = past_values_A
     
 # Start to run LLM
 start_time = time.time()
