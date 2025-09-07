@@ -23,8 +23,7 @@ def get_language(language_input):
     The function is case-insensitive for English names and abbreviations.
 
     Args:
-        language_input (str): The language identifier to look up.
-                               e.g., "中文", "zh", "chinese", "French"
+        language_input (str): The language identifier to look up. e.g., "中文", "zh", "chinese", "French"
 
     Returns:
         tuple[str, str] or tuple[None, None]: A tuple containing the
@@ -361,5 +360,6 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
+
 
 
