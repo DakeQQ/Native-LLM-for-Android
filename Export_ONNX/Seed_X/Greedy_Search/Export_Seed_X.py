@@ -126,8 +126,7 @@ class SEED_X(torch.nn.Module):
         self.embed_data = quantize_to_uint8(data, 1.0 / self.scale, self.zero_point)
 
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
-        theta = self.seed_x.model.rotary_emb.inv_freq
-        idx_theta = position_ids * theta
+        idx_theta = position_ids * self.seed_x.model.rotary_emb.inv_freq
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
         self.cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).unsqueeze(0).half()
@@ -330,3 +329,4 @@ if original_language and target_language:
 else:
 
     print("\nError: The specified translation language is not supported.")
+
