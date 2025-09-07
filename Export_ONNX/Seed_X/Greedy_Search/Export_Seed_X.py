@@ -9,7 +9,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 path = r'D:\LLM\Seed-X-PPO-7B'                                      # Set the folder path where the Seed-X-PRO or Seed-X-Instruct whole project downloaded.
 onnx_model_A = r'D:\LLM\Seed_X_ONNX\Seed_X.onnx'                    # Assign a path where the exported Seed-X model stored.
 STOP_TOKEN = [2]                                                    # The stop_id in Seed-X is "2"
-MAX_SEQ_LEN = 4096                                                  # The max context length.
+MAX_SEQ_LEN = 1024                                                  # The max context length.
 sentence = "May the force be with you"                              # The test sentence after the export process.
 original_language = "English"                                       # Source language of the text to translate. Accepts: English/Chinese (case-insensitive). See get_language() for all supported languages.
 target_language = "Chinese"                                         # Target language for translation. Accepts: English/Chinese (case-insensitive). See get_language() for all supported languages.
@@ -126,7 +126,7 @@ class SEED_X(torch.nn.Module):
         self.embed_data = quantize_to_uint8(data, 1.0 / self.scale, self.zero_point)
 
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
-        theta = self.seed_x.config.rope_theta ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+        theta = self.seed_x.model.rotary_emb.inv_freq
         idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
@@ -190,7 +190,7 @@ with torch.inference_mode():
     # Generate dummies for torch.onnx.export()
     attention_mask = torch.tensor([0], dtype=torch.int8)
     ids_len = torch.tensor([10], dtype=torch.int64)   # "10" is just a dummy value.
-    input_ids = torch.ones((1, ids_len), dtype=torch.int32)  
+    input_ids = torch.ones((1, ids_len), dtype=torch.int32)
     history_len = torch.zeros(1, dtype=torch.int64)
     past_keys = torch.zeros((num_key_value_heads, 1, head_dim, 0), dtype=torch.float32)
     past_values = torch.zeros((num_key_value_heads, 1, 0, head_dim), dtype=torch.float32)
@@ -257,8 +257,8 @@ tokenizer = AutoTokenizer.from_pretrained("./", trust_remote_code=True)  # Use t
 
 # ONNX Runtime settings
 session_opts = onnxruntime.SessionOptions()
-session_opts.log_severity_level = 4                   # fatal level = 4, it an adjustable value.
-session_opts.log_verbosity_level = 4                  # fatal level = 4, it an adjustable value.
+session_opts.log_severity_level = 4                   # Fatal level = 4, it an adjustable value.
+session_opts.log_verbosity_level = 4                  # Fatal level = 4, it an adjustable value.
 session_opts.inter_op_num_threads = 0                 # Run different nodes with num_threads. Set 0 for auto.
 session_opts.intra_op_num_threads = 0                 # Under the node, execute the operators with num_threads. Set 0 for auto.
 session_opts.enable_cpu_mem_arena = True              # True for execute speed; False for less memory usage.
@@ -270,11 +270,10 @@ session_opts.add_session_config_entry("session.inter_op.allow_spinning", "1")
 session_opts.add_session_config_entry("session.enable_quant_qdq_cleanup", "1")
 session_opts.add_session_config_entry("session.qdq_matmulnbits_accuracy_level", "4")
 session_opts.add_session_config_entry("optimization.enable_gelu_approximation", "1")
-session_opts.add_session_config_entry("disable_synchronize_execution_providers", "1")
 session_opts.add_session_config_entry("optimization.minimal_build_optimizations", "")
 session_opts.add_session_config_entry("session.use_device_allocator_for_initializers", "1")
 
-ort_session_A = onnxruntime.InferenceSession(onnx_model_A, sess_options=session_opts, providers=['CPUExecutionProvider'])
+ort_session_A = onnxruntime.InferenceSession(onnx_model_A, sess_options=session_opts, providers=['CPUExecutionProvider'], provider_options=None)
 in_name_A = ort_session_A.get_inputs()
 out_name_A = ort_session_A.get_outputs()
 amount_of_outputs = len(out_name_A)
@@ -291,46 +290,43 @@ if original_language and target_language:
     ids_len = tokens.shape[-1]
     max_single_chat_length -= ids_len
     ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([ids_len], dtype=np.int64), 'cpu', 0)
+    ids_len_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), 'cpu', 0)
-    attention_mask = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
+    attention_mask_0 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
+    attention_mask_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), 'cpu', 0)
     past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, head_dim, 0), dtype=np.float32), 'cpu', 0)
     past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((num_key_value_heads, 1, 0, head_dim), dtype=np.float32), 'cpu', 0)
     num_keys_values = num_layers + num_layers
     num_decode = 0
     print(f'\n\nTest Query: Translate the following {original_language} sentence into {target_language}:\n\n{sentence}\n\nSeed-X Answering:\n')
 
-    output_names = []
-    input_feed = {
+    input_feed_A = {
         in_name_A[-4]: input_ids,
         in_name_A[-3]: history_len,
         in_name_A[-2]: ids_len,
-        in_name_A[-1]: attention_mask
+        in_name_A[-1]: attention_mask_1
     }
 
     for i in range(num_layers):
-        input_feed[in_name_A[i]] = past_keys_A
+        input_feed_A[in_name_A[i]] = past_keys_A
     for i in range(num_layers, num_keys_values):
-        input_feed[in_name_A[i]] = past_values_A
+        input_feed_A[in_name_A[i]] = past_values_A
 
     # Start to run LLM
     start_time = time.time()
     while num_decode < max_single_chat_length:
-        all_outputs = ort_session_A.run_with_ort_values(
-            out_name_A,
-            input_feed
-        )
-        max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs[-2])[0]
+        all_outputs_A = ort_session_A.run_with_ort_values(out_name_A, input_feed_A)
+        max_logit_ids = onnxruntime.OrtValue.numpy(all_outputs_A[-2])[0]
         num_decode += 1
         if max_logit_ids in STOP_TOKEN:
             break
         for i in range(amount_of_outputs):
-            input_feed[in_name_A[i]] = all_outputs[i]
+            input_feed_A[in_name_A[i]] = all_outputs_A[i]
         if num_decode < 2:
-            input_feed[in_name_A[-1]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), 'cpu', 0)
-            input_feed[in_name_A[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
+            input_feed_A[in_name_A[-1]] = attention_mask_0
+            input_feed_A[in_name_A[-2]] = ids_len_1
         print(tokenizer.decode(max_logit_ids), end="", flush=True)
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
 
     print("\nError: The specified translation language is not supported.")
-
