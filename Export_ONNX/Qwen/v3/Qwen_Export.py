@@ -54,7 +54,7 @@ class QWEN(torch.nn.Module):
         self.embed_data = quantize_to_uint8(data, 1.0 / self.scale, self.zero_point)
 
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
-        theta = self.qwen.config.rope_theta ** -(torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+        theta = self.qwen.model.rotary_emb.inv_freq
         idx_theta = position_ids * theta
         cos_rotary_pos_emb = torch.cos(idx_theta)
         sin_rotary_pos_emb = torch.sin(idx_theta)
@@ -254,3 +254,4 @@ while num_decode < max_single_chat_length:
         input_feed[in_name_A[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
