@@ -200,7 +200,9 @@ class HUNYUAN(torch.nn.Module):
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
         hidden_states = self.hunyuan.model.norm.weight * (hidden_states / torch.sqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))
-        return *self.save_key, *self.save_value, torch.argmax(self.hunyuan.lm_head(hidden_states), dim=-1, keepdim=True).int(), kv_seq_len
+        logits = self.hunyuan.lm_head(hidden_states)
+        max_logit_ids = torch.argmax(logits, dim=-1, keepdim=True).int()   # Greedy Search
+        return *self.save_key, *self.save_value, max_logit_ids, kv_seq_len
 
 
 print('Export start ...')
@@ -359,4 +361,5 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
+
 
