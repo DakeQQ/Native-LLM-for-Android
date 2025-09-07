@@ -9,7 +9,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 path = r'D:\LLM\Seed-X-PPO-7B'                                      # Set the folder path where the Seed-X-PRO or Seed-X-Instruct whole project downloaded.
 onnx_model_A = r'D:\LLM\Seed_X_ONNX\Seed_X.onnx'                    # Assign a path where the exported Seed-X model stored.
 STOP_TOKEN = [2]                                                    # The stop_id in Seed-X is "2"
-MAX_SEQ_LEN = 1024                                                  # The max context length.
+MAX_SEQ_LEN = 4096                                                  # The max context length.
 sentence = "May the force be with you"                              # The test sentence after the export process.
 original_language = "English"                                       # Source language of the text to translate. Accepts: English/Chinese (case-insensitive). See get_language() for all supported languages.
 target_language = "Chinese"                                         # Target language for translation. Accepts: English/Chinese (case-insensitive). See get_language() for all supported languages.
@@ -329,4 +329,5 @@ if original_language and target_language:
 else:
 
     print("\nError: The specified translation language is not supported.")
+
 
