@@ -16,6 +16,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Seed-X**: [PRO-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-PPO-7B), [Instruct-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-Instruct-7B)
 - **HunYuan**: [MT-7B](https://github.com/Tencent-Hunyuan/Hunyuan-MT)
 
+## Update
 - 2025/09/07：Update HunYuan-MT.
 - 2025/08/02：Update Seed-X.
 - 2025/04/29：Update Qwen3.
