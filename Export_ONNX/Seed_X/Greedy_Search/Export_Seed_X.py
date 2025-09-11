@@ -283,7 +283,7 @@ out_name_A = [out_name_A[i].name for i in range(amount_of_outputs)]
 _, original_language = get_language(original_language)
 abbr, target_language = get_language(target_language)
 if original_language and target_language:
-    prompt = f"Translate the following {original_language} sentence into {target_language}:\n{sentence} {abbr} <s>"
+    prompt = f"Translate the following {original_language} sentence into {target_language}:\n{sentence} {abbr}"
     tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
     input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
     ids_len = tokens.shape[-1]
@@ -324,10 +324,11 @@ if original_language and target_language:
         if num_decode < 2:
             input_feed_A[in_name_A[-1]] = attention_mask_0
             input_feed_A[in_name_A[-2]] = ids_len_1
-        print(tokenizer.decode(max_logit_ids), end="", flush=True)
+        print(tokenizer.decode(max_logit_ids, skip_special_tokens=True), end="", flush=True)
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
 
     print("\nError: The specified translation language is not supported.")
+
 
 
