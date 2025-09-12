@@ -158,7 +158,7 @@ gc.collect()
 slim(
     model=quanted_model_path,
     output_model=quanted_model_path,
-    no_shape_infer=False,                         # False for more optimize but may get errors.
+    no_shape_infer=True,                         # False for more optimize but may get errors.
     skip_fusion_patterns=False,
     no_constant_folding=False,
     save_as_external_data=is_large_model,
@@ -203,3 +203,4 @@ if not is_large_model:
     # Call subprocess may get permission failed on Windows system.
     subprocess.run([f'python -m onnxruntime.tools.convert_onnx_models_to_ort --output_dir {quanted_folder_path} --optimization_style {optimization_style} --target_platform {target_platform} --enable_type_reduction {quanted_folder_path}'], shell=True)
     
+
