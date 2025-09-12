@@ -7,7 +7,6 @@ import torch
 import subprocess
 import onnx.version_converter
 from pathlib import Path
-from onnxsim import simplify
 from onnxslim import slim
 from onnxruntime.quantization import QuantType, quantize_dynamic, quant_utils
 from onnxruntime.transformers.optimizer import optimize_model
@@ -119,7 +118,7 @@ gc.collect()
 slim(
     model=quanted_model_path,
     output_model=quanted_model_path,
-    no_shape_infer=False,                                     # False for more optimize but may get errors.
+    no_shape_infer=True,                                     # False for more optimize but may get errors.
     skip_fusion_patterns=False,
     no_constant_folding=False,
     save_as_external_data=is_large_model,
@@ -155,4 +154,5 @@ for file_path in files_to_delete:
         
             
 # It is not recommended to convert an FP16 ONNX model to the ORT format because this process adds a Cast operation to convert the FP16 process back to FP32.
+
 
