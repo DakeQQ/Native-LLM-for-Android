@@ -104,7 +104,6 @@ tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 
 # Create OrtValues on specified device (CPU or GPU) for initial inputs
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len_count = tokens.shape[-1]
 ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), device_type, DEVICE_ID)
 ids_len_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, DEVICE_ID)
 history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), device_type, DEVICE_ID)
