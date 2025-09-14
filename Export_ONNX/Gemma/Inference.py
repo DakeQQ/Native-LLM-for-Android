@@ -95,28 +95,25 @@ past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((ort_session_A
 num_keys_values = num_layers + num_layers
 num_decode = 0
 
-input_ids = input_ids._ortvalue
-history_len = history_len._ortvalue
-ids_len = ids_len._ortvalue
-attention_mask_1 = attention_mask_1._ortvalue
-past_keys_A = past_keys_A._ortvalue
-past_values_A = past_values_A._ortvalue
-attention_mask_0 = attention_mask_0._ortvalue
-ids_len_1 = ids_len_1._ortvalue
+# Do not use X = X._ortvalue Must Create a new one, or it will error out.
+attention_mask_0_ort = attention_mask_0._ortvalue
+ids_len_1_ort = ids_len_1._ortvalue
 
 print(f'\n\nTest Question: {test_query}\nGemma Answering:\n')
 
 input_feed_A = {
-    in_name_A[-4]: input_ids,
-    in_name_A[-3]: history_len,
-    in_name_A[-2]: ids_len,
-    in_name_A[-1]: attention_mask_1,
+    in_name_A[-4]: input_ids._ortvalue,
+    in_name_A[-3]: history_len._ortvalue,
+    in_name_A[-2]: ids_len._ortvalue,
+    in_name_A[-1]: attention_mask_1._ortvalue,
 }
 
+past_keys_A_ort = past_keys_A._ortvalue
+past_values_A_ort = past_values_A._ortvalue
 for i in range(num_layers):
-    input_feed_A[in_name_A[i]] = past_keys_A
+    input_feed_A[in_name_A[i]] = past_keys_A_ort
 for i in range(num_layers, num_keys_values):
-    input_feed_A[in_name_A[i]] = past_values_A
+    input_feed_A[in_name_A[i]] = past_values_A_ort
 
 # Start to run LLM
 start_time = time.time()
@@ -131,8 +128,8 @@ while num_decode < max_single_chat_length:
     if max_logit_ids in STOP_TOKEN:
         break
     if num_decode < 2:
-        input_feed_A[in_name_A[-1]] = attention_mask_0
-        input_feed_A[in_name_A[-2]] = ids_len_1
+        input_feed_A[in_name_A[-1]] = attention_mask_0_ort
+        input_feed_A[in_name_A[-2]] = ids_len_1_ort
     input_feed_A.update(zip(in_name_A[:amount_of_outputs_A], all_outputs_A))
     print(tokenizer.decode(max_logit_ids), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
