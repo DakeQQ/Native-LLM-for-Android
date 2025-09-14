@@ -141,15 +141,15 @@ def get_ort_device(device_type, device_id):
 
 
 # Function to bind inputs using IO Binding
-def bind_inputs_to_device(io_binding_A, input_names, ortvalue, num_inputs):
+def bind_inputs_to_device(io_binding, input_names, ortvalue, num_inputs):
     for i in range(num_inputs):
-        io_binding_A.bind_ortvalue_input(input_names[i], ortvalue[i])
+        io_binding.bind_ortvalue_input(input_names[i], ortvalue[i])
 
 
 # Function to bind outputs using IO Binding
-def bind_outputs_to_device(io_binding_A, output_names, device_type, num_outputs):
+def bind_outputs_to_device(io_binding, output_names, bind_device_type, num_outputs):
     for i in range(num_outputs):
-        io_binding_A.bind_output(output_names[i], device_type)
+        io_binding.bind_output(output_names[i], bind_device_type)
 
 
 device_type_A = get_ort_device(device_type, DEVICE_ID)
