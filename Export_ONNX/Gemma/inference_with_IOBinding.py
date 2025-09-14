@@ -84,7 +84,6 @@ print(f'\nUsable Device: {ort_session_A.get_providers()}')
 
 # Get input and output metadata
 in_name_A = ort_session_A.get_inputs()
-input_metas = ort_session_A.get_inputs()
 output_metas = ort_session_A.get_outputs()
 amount_of_inputs = len(in_name_A)
 amount_of_outputs = len(output_metas)
@@ -92,7 +91,6 @@ in_name_A = [in_name_A[i].name for i in range(amount_of_inputs)]
 out_name_A = [output_metas[i].name for i in range(amount_of_outputs)]
 num_layers = (amount_of_outputs - 2) // 2
 num_keys_values = num_layers + num_layers
-num_keys_values_plus_1 = num_keys_values + 1
 model_dtype = output_metas[0].type
 if 'float16' in model_dtype:
     model_dtype = np.float16
