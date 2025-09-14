@@ -129,10 +129,14 @@ ids_len_1 = ids_len_1._ortvalue
 attention_mask_0 = attention_mask_0._ortvalue
 
 # Add past keys and values to inputs
+# Do not use X = X._ortvalue, it will error out. Must create a new one.
+past_keys_A_ort = past_keys_A._ortvalue
+past_values_A_ort = past_values_A._ortvalue
+
 for i in range(num_layers):
-    init_input_feed_A[i] = past_keys_A._ortvalue
+    init_input_feed_A[i] = past_keys_A_ort
 for i in range(num_layers, num_keys_values):
-    init_input_feed_A[i] = past_values_A._ortvalue
+    init_input_feed_A[i] = past_values_A_ort
 
 
 def get_ort_device(device_type, device_id):
