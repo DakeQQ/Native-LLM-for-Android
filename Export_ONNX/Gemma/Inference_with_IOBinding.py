@@ -125,11 +125,10 @@ init_input_feed_A[-3] = history_len._ortvalue
 init_input_feed_A[-2] = ids_len._ortvalue
 init_input_feed_A[-1] = attention_mask_1._ortvalue
 
-ids_len_1 = ids_len_1._ortvalue
-attention_mask_0 = attention_mask_0._ortvalue
+# Do not use X = X._ortvalue. Must create a new one, ot it will error out.
+ids_len_1_ort = ids_len_1._ortvalue
+attention_mask_0_ort = attention_mask_0._ortvalue
 
-# Add past keys and values to inputs
-# Do not use X = X._ortvalue, it will error out. Must create a new one.
 past_keys_A_ort = past_keys_A._ortvalue
 past_values_A_ort = past_values_A._ortvalue
 
@@ -176,8 +175,8 @@ while num_decode < max_single_chat_length:
     if max_logit_ids in STOP_TOKEN:
         break
     if num_decode < 2:
-        io_binding_A.bind_ortvalue_input(in_name_A[-1], attention_mask_0)
-        io_binding_A.bind_ortvalue_input(in_name_A[-2], ids_len_1)
+        io_binding_A.bind_ortvalue_input(in_name_A[-1], attention_mask_0_ort)
+        io_binding_A.bind_ortvalue_input(in_name_A[-2], ids_len_1_ort)
     bind_inputs_to_device(io_binding_A, in_name_A, all_outputs, amount_of_outputs)
     print(tokenizer.decode(max_logit_ids), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
