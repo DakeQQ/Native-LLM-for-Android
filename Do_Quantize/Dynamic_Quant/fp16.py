@@ -108,7 +108,7 @@ else:
     del model
     gc.collect()
 
-pattern = os.path.join(quanted_folder_path, '*.data')
+pattern = os.path.join(quanted_folder_path, '*.onnx.data')
 files_to_delete = glob.glob(pattern)
 for file_path in files_to_delete:
     try:
