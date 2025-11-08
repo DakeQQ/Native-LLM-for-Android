@@ -48,10 +48,9 @@ class PHI(torch.nn.Module):
         self.value_pos = op_size - self.key_pos - self.query_pos
         self.hidden_size = self.phi.model.layers._modules['0'].self_attn.o_proj.in_features
 
-        self.scale_factor = float(math.pow(head_dim, -0.25))
-        scale_range = self.query_pos + self.key_pos
+        self.scale_factor = float(math.pow(head_dim, -0.5))
         for i in range(num_layers):
-            self.phi.model.layers._modules[f'{i}'].self_attn.qkv_proj.weight.data[:scale_range] *= self.scale_factor
+            self.phi.model.layers._modules[f'{i}'].self_attn.qkv_proj.weight.data[:self.query_pos] *= self.scale_factor
 
         data = self.phi.model.embed_tokens.weight.data
         self.zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
