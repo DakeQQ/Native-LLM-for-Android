@@ -145,12 +145,11 @@ class MINICPM(torch.nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.variance_epsilon = float(1e-6)
 
-        scale_factor = float(head_dim ** -0.25)
+        scale_factor = float(head_dim ** -0.5)
         scale_depth_factor = float(self.minicpm.model.layers._modules['0'].scale_depth * (num_layers ** -0.5))
 
         for i in range(num_layers):
             self.minicpm.model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
-            self.minicpm.model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
             self.minicpm.model.layers._modules[f'{i}'].self_attn.o_proj.weight.data *= scale_depth_factor
             self.minicpm.model.layers._modules[f'{i}'].mlp.down_proj.weight.data *= scale_depth_factor
         self.minicpm.model.norm.weight.data *= float(self.minicpm.config.dim_model_base / self.minicpm.config.hidden_size)
