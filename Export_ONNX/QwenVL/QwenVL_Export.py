@@ -85,7 +85,7 @@ class QwenVL_PartB(torch.nn.Module):
         self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1).transpose(0, 1)
         self.rotary_pos_emb_sin = torch.cat([sin, sin], dim=-1).transpose(0, 1)
 
-        scale_factor = float(self.head_dim ** -0.25)
+        scale_factor = float(self.head_dim ** -0.5)
         init_attention_mask = torch.ones([1, self.factor_size, self.factor_size], dtype=torch.int8)
         _, cu_window_seqlens = self.qwenvl.visual.get_window_index(grid_thw)
         cu_window_seqlens = torch.tensor(cu_window_seqlens, dtype=torch.int32)
@@ -93,8 +93,7 @@ class QwenVL_PartB(torch.nn.Module):
         cu_seqlens = torch.tensor([0, self.factor_size], dtype=torch.int32)
         self.attention_mask = []
         for layer_num, blk in enumerate(self.qwenvl.visual.blocks):
-            blk.attn.qkv.weight.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scale_factor
-            blk.attn.qkv.bias.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scale_factor
+            blk.attn.qkv.weight.data[:self.qwenvl.visual.patch_embed.embed_dim] *= scale_factor
             if layer_num in self.qwenvl.visual.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
             else:
@@ -228,12 +227,10 @@ class QwenVL_PartF(torch.nn.Module):
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers
         self.attention_mask = (1 - torch.tril(torch.ones([1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
-        scale_factor = float(head_dim ** -0.25)
+        scale_factor = float(head_dim ** -0.5)
         for i in range(num_layers):
             self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
             self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.q_proj.bias.data *= scale_factor
-            self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
-            self.qwenvl.model.language_model.layers._modules[f'{i}'].self_attn.k_proj.bias.data *= scale_factor
 
     def forward(self, *all_inputs):
         kv_seq_len = all_inputs[-8]
@@ -650,3 +647,4 @@ while num_decode < max_single_chat_length:
     print(tokenizer.decode(max_logit_ids), end="", flush=True)
     
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
