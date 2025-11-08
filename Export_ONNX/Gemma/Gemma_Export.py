@@ -198,7 +198,8 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
 del model
 del input_ids
