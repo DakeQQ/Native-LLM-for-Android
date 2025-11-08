@@ -145,10 +145,9 @@ class HUNYUAN(torch.nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.variance_epsilon = float(1e-6)
 
-        scale_factor = float(head_dim ** -0.25)
+        scale_factor = float(head_dim ** -0.5)
         for i in range(num_layers):
             self.hunyuan.model.layers._modules[f'{i}'].self_attn.query_layernorm.weight.data *= scale_factor
-            self.hunyuan.model.layers._modules[f'{i}'].self_attn.key_layernorm.weight.data *= scale_factor
 
         data = self.hunyuan.model.embed_tokens.weight.data
         self.zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
@@ -360,6 +359,7 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
+
 
 
 
