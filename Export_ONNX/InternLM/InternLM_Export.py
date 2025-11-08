@@ -44,10 +44,9 @@ class INTERNLM(torch.nn.Module):
         self.variance_epsilon = float(1e-6)
         self.hidden_size = self.internlm.model.layers._modules['0'].self_attn.o_proj.in_features
 
-        scale_factor = math.pow(head_dim, -0.25)
+        scale_factor = math.pow(head_dim, -0.5)
         for i in range(num_layers):
             self.internlm.model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
-            self.internlm.model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
 
         data = self.internlm.model.embed_tokens.weight.data
         self.zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
@@ -250,3 +249,4 @@ while num_decode < max_single_chat_length:
         input_feed[in_name_A[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
