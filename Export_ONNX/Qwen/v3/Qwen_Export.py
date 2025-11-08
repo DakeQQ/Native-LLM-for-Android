@@ -159,7 +159,8 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
 del model
 del input_ids
@@ -252,6 +253,7 @@ while num_decode < max_single_chat_length:
         input_feed[in_name_A[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
 
 
 
