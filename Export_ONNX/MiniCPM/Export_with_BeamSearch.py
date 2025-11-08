@@ -261,7 +261,8 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
     del hidden_states
     del ids_len
@@ -286,7 +287,8 @@ with torch.inference_mode():
             'hidden_state': {0: 'batch', 1: 'ids_len'},
         },
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
     del embed
     del input_ids
@@ -313,7 +315,8 @@ with torch.inference_mode():
             'max_logits_idx': {0: 'batch'}
         },
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
     del greedy
 
@@ -378,7 +381,8 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
     del first_beam_search
     
@@ -420,7 +424,8 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
 
     reset_penality = RESET_PENALITY()
@@ -440,7 +445,8 @@ with torch.inference_mode():
             'batch_indices': {0: 'batch'}
         },
         do_constant_folding=True,
-        opset_version=17
+        opset_version=17,
+        dynamo=False
     )
 
     del batch_indices
