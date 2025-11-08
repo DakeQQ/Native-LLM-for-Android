@@ -42,12 +42,11 @@ class MINICPM(torch.nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.variance_epsilon = float(1e-6)
 
-        scale_factor = float(head_dim ** -0.25)
+        scale_factor = float(head_dim ** -0.5)
         scale_depth_factor = float(self.minicpm.model.layers._modules['0'].scale_depth * (num_layers ** -0.5))
 
         for i in range(num_layers):
             self.minicpm.model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
-            self.minicpm.model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
             self.minicpm.model.layers._modules[f'{i}'].self_attn.o_proj.weight.data *= scale_depth_factor
             self.minicpm.model.layers._modules[f'{i}'].mlp.down_proj.weight.data *= scale_depth_factor
         self.minicpm.model.norm.weight.data *= float(self.minicpm.config.dim_model_base / self.minicpm.config.hidden_size)
@@ -250,3 +249,4 @@ while num_decode < max_single_chat_length:
         input_feed[in_name_A[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
