@@ -115,9 +115,10 @@ class SEED_X(torch.nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.variance_epsilon = float(1e-6)
 
-        scale_factor = float(head_dim ** -0.5)
+        scale_factor = float(head_dim ** -0.25)
         for i in range(num_layers):
             self.seed_x.model.layers._modules[f'{i}'].self_attn.q_proj.weight.data *= scale_factor
+            self.seed_x.model.layers._modules[f'{i}'].self_attn.k_proj.weight.data *= scale_factor
 
         data = self.seed_x.model.embed_tokens.weight.data
         self.zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
@@ -329,6 +330,7 @@ if original_language and target_language:
 else:
 
     print("\nError: The specified translation language is not supported.")
+
 
 
 
