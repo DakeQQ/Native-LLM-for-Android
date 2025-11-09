@@ -94,6 +94,7 @@ class QwenVL_PartB(torch.nn.Module):
         self.attention_mask = []
         for layer_num, blk in enumerate(self.qwenvl.visual.blocks):
             blk.attn.qkv.weight.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scale_factor
+            blk.attn.qkv.bias.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scale_factor
             if layer_num in self.qwenvl.visual.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
             else:
@@ -649,5 +650,6 @@ while num_decode < max_single_chat_length:
     print(tokenizer.decode(max_logit_ids), end="", flush=True)
     
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
 
 
