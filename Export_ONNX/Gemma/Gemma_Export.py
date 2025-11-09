@@ -44,12 +44,13 @@ class GEMMA(torch.nn.Module):
         self.variance_epsilon = float(1e-6)
         self.hidden_size = self.gemma.model.layers._modules['0'].self_attn.o_proj.in_features
 
-        scale_factor = math.pow(head_dim, -0.5)
+        scale_factor = math.pow(head_dim, -0.25)
         for i in range(num_layers):
             self.gemma.model.layers._modules[f'{i}'].input_layernorm.weight.data += 1.0
             self.gemma.model.layers._modules[f'{i}'].self_attn.q_norm.weight.data += 1.0
             self.gemma.model.layers._modules[f'{i}'].self_attn.k_norm.weight.data += 1.0
             self.gemma.model.layers._modules[f'{i}'].self_attn.q_norm.weight.data *= scale_factor
+            self.gemma.model.layers._modules[f'{i}'].self_attn.k_norm.weight.data *= scale_factor
             self.gemma.model.layers._modules[f'{i}'].post_attention_layernorm.weight.data += 1.0
             self.gemma.model.layers._modules[f'{i}'].pre_feedforward_layernorm.weight.data += 1.0
             self.gemma.model.layers._modules[f'{i}'].post_feedforward_layernorm.weight.data += 1.0
