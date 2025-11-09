@@ -43,9 +43,10 @@ class QWEN(torch.nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.variance_epsilon = float(1e-6)
 
-        scale_factor = float(head_dim ** -0.5)
+        scale_factor = float(head_dim ** -0.25)
         for i in range(num_layers):
             self.qwen.model.layers._modules[f'{i}'].self_attn.q_norm.weight.data *= scale_factor
+            self.qwen.model.layers._modules[f'{i}'].self_attn.k_norm.weight.data *= scale_factor
 
         data = self.qwen.model.embed_tokens.weight.data
         self.zero_point = (torch.min(data, dim=1)[0]).unsqueeze(1)
@@ -253,6 +254,7 @@ while num_decode < max_single_chat_length:
         input_feed[in_name_A[-2]] = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), 'cpu', 0)
     print(tokenizer.decode(max_logit_ids[0]), end="", flush=True)
 print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
+
 
 
 
