@@ -21,13 +21,12 @@ onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_E.onnx'
 onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX_2/QwenVL_F.onnx'
 
 # For Beam_Search & Greedy_Search
-onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_G.onnx'
-onnx_model_H = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_H.onnx'
-onnx_model_I = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_I.onnx'
-onnx_model_J = r'/home/DakeQQ/Downloads/Qwen_ONNX/QwenVL_J.onnx'
+onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
+onnx_model_H = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
+onnx_model_I = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
+onnx_model_J = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
 
-
-image_path = r"../psyduck.png"  # Test image for the exported onnx model.
+image_path = r"../psyduck.png"                                      # Test image for the exported onnx model.
 query = "Describe this image."                                      # Test query for the exported onnx model.
 
 DYNAMIC_IMAGE_SHAPE = False                                         # Allow for a dynamic number of image inputs.
