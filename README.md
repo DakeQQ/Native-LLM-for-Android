@@ -4,9 +4,9 @@
 Demonstration of running a native Large Language Model (LLM) on Android devices. Currently supported models include:
 
 - **Qwen3**: 0.6B, 1.7B, 4B...
-- **Qwen3VL**: 2B, 4B...
+- **Qwen3-VL**: 2B, 4B...
 - **Qwen2.5-Instruct**: 0.5B, 1.5B, 3B...
-- **Qwen2.5VL**: 3B
+- **Qwen2.5-VL**: 3B
 - **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
 - **Gemma-3-it**: 1B, 4B...
@@ -18,6 +18,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **HunYuan**: [MT-7B](https://github.com/Tencent-Hunyuan/Hunyuan-MT)
 
 ## Update
+- 2025/11/11：Update Qwen3-VL.
 - 2025/09/07：Update HunYuan-MT.
 - 2025/08/02：Update Seed-X.
 - 2025/04/29：Update Qwen3.
@@ -135,9 +136,9 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 展示在 Android 设备上运行原生大型语言模型 (LLM) 的示范。目前支持的模型包括：
 
 - **Qwen3**: 0.6B, 1.7B, 4B...
-- **Qwen3VL**: 2B, 4B...
+- **Qwen3-VL**: 2B, 4B...
 - **Qwen2.5-Instruct**: 0.5B, 1.5B, 3B...
-- **Qwen2.5VL**: 3B
+- **Qwen2.5-VL**: 3B
 - **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
 - **Gemma-3-it**: 1B, 4B...
@@ -149,6 +150,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **HunYuan**: [MT-7B](https://github.com/Tencent-Hunyuan/Hunyuan-MT)
 
 ## 最近更新
+- 2025/11/11：更新 Qwen3-VL。
 - 2025/09/07：更新 HunYuan-MT。
 - 2025/08/02：更新 Seed-X。
 - 2025/04/29：更新 Qwen3。
