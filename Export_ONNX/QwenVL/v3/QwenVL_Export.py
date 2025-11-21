@@ -45,6 +45,8 @@ BEAM_SIZE = 3                                                       # Number of 
 MAX_BEAM_SIZE = 10                                                  # Max beams for exported model.
 MAX_THREADS = 0                                                     # Parllel CPU threads. Set 0 for auto.
 DEVICE_ID = 0                                                       # Default to zero.
+INPUT_IMAGE_DIM = 4                                                 # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
+OPSET = 17                                                          # ONNX Runtime opset version.
 
 
 def is_valid_image_path(image_path):
@@ -189,7 +191,9 @@ class QwenVL_PartB(torch.nn.Module):
             blk.attn.qkv.bias.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scaling
 
     def forward(self, pixel_values):
-        batch_size = pixel_values.shape[0] # [batch, 1, 3, width, height]
+        if INPUT_IMAGE_DIM != 5:
+            pixel_values = pixel_values.unsqueeze(1)
+        batch_size = pixel_values.shape[0]  # [batch, 1, 3, width, height]
         pixel_values = pixel_values.float()
         if DYNAMIC_IMAGE_SHAPE or list(pixel_values.shape[-2:]) != IMAGE_RESIZE:
             pixel_values = pixel_values.squeeze(1)
@@ -402,7 +406,9 @@ with torch.inference_mode():
     vocab_size = model.model.language_model.vocab_size
     deepstack_features_len = len(model.visual.deepstack_visual_indexes)
 
-    pixel_values = torch.randint(low=0, high=255, size=[VISION_BATCH_SIZE, 1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.uint8)
+    pixel_values = torch.randint(low=0, high=255, size=[VISION_BATCH_SIZE, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.uint8)
+    if INPUT_IMAGE_DIM != 4:
+        pixel_values = pixel_values.unsqueeze(1)
     vision_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR * VISION_BATCH_SIZE
     vision_hidden_states = torch.ones((1, vision_embed_size, hidden_size), dtype=torch.float32)
     deepstack_features = torch.ones((1, vision_embed_size, hidden_size), dtype=torch.float32)
@@ -436,7 +442,7 @@ with torch.inference_mode():
             'text_hidden_states': {0: 'batch', 1: 'ids_len'}
         },
         do_constant_folding=True,
-        opset_version=17,
+        opset_version=OPSET,
         dynamo = False
     )
     del model_A
@@ -446,7 +452,7 @@ with torch.inference_mode():
 
     model_B = QwenVL_PartB(model)
     dynamic_axes = {
-        'pixel_values': {0: 'batch_size', 3: 'width', 4: 'height'},
+        'pixel_values': {0: 'batch_size', -2: 'width', -1: 'height'},
         'vision_hidden_states': {1: 'vision_embed_len'}
     }
     output_names = []
@@ -464,7 +470,7 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes if DYNAMIC_IMAGE_SHAPE else None,
         do_constant_folding=True,
-        opset_version=17,
+        opset_version=OPSET,
         dynamo=False
     )
     del model_B
@@ -503,7 +509,7 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
-        opset_version=17,
+        opset_version=OPSET,
         dynamo=False
     )
     del model_C
@@ -525,7 +531,7 @@ with torch.inference_mode():
             'rotary_pos_emb_sin_k': {4: 'hidden_state_len'}
         },
         do_constant_folding=True,
-        opset_version=17,
+        opset_version=OPSET,
         dynamo=False
     )
     del model_D
@@ -545,7 +551,7 @@ with torch.inference_mode():
             'rotary_pos_emb_sin_k': {4: 'hidden_state_len'}
         },
         do_constant_folding=True,
-        opset_version=17,
+        opset_version=OPSET,
         dynamo=False
     )
     del model_E
@@ -614,7 +620,7 @@ with torch.inference_mode():
         output_names=output_names,
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
-        opset_version=17,
+        opset_version=OPSET,
         dynamo=False
     )
     del model_F
@@ -666,7 +672,7 @@ torch.onnx.export(
         'max_logits_idx': {0: 'batch'}
     },
     do_constant_folding=True,
-    opset_version=17,
+    opset_version=OPSET,
     dynamo=False
 )
 del greedy
@@ -733,7 +739,7 @@ torch.onnx.export(
     output_names=output_names,
     dynamic_axes=dynamic_axes,
     do_constant_folding=True,
-    opset_version=17,
+    opset_version=OPSET,
     dynamo=False
 )
 del first_beam_search
@@ -777,7 +783,7 @@ torch.onnx.export(
     output_names=output_names,
     dynamic_axes=dynamic_axes,
     do_constant_folding=True,
-    opset_version=17,
+    opset_version=OPSET,
     dynamo=False
 )
 del second_beam_search
@@ -810,7 +816,7 @@ torch.onnx.export(
         'batch_indices': {0: 'batch'}
     },
     do_constant_folding=True,
-    opset_version=17,
+    opset_version=OPSET,
     dynamo=False
 )
 del reset_penality
@@ -1029,7 +1035,11 @@ if is_valid_image_path(image_path):
     if image.mode != 'RGB':
         image = image.convert('RGB')
     pixel_values = np.transpose(np.array(image).astype(np.uint8), (2, 0, 1))
-    pixel_values = np.expand_dims(pixel_values, axis=(0, 1))
+    if len(ort_session_B._inputs_meta[0].shape) != 4:
+        axis = (0, 1)
+    else:
+        axis = 0
+    pixel_values = np.expand_dims(pixel_values, axis=axis)
     use_vision = True
     print('\nChat with image.')
 else:
