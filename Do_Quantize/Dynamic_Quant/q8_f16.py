@@ -67,9 +67,12 @@ if download_path == "NONE":
 else:
     download_path_lower = download_path.lower()
     if ('vl' in download_path_lower) & ('qwen' in download_path_lower):
-        if ("2.5" in download_path) or ("3b" in download_path_lower):
+        if "2.5" in download_path:
             from transformers import Qwen2_5_VLForConditionalGeneration
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
+        elif "3" in download_path:
+            from transformers import Qwen3VLForConditionalGeneration
+            model = Qwen3VLForConditionalGeneration.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
         else:
             from transformers import Qwen2VLForConditionalGeneration
             model = Qwen2VLForConditionalGeneration.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
@@ -154,5 +157,6 @@ for file_path in files_to_delete:
         
             
 # It is not recommended to convert an FP16 ONNX model to the ORT format because this process adds a Cast operation to convert the FP16 process back to FP32.
+
 
 
