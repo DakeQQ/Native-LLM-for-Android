@@ -54,8 +54,12 @@ else:
         else:
             model = AutoModelForCausalLM.from_pretrained(download_path, torch_dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
     try:
-        num_heads = model.config.num_attention_heads
-        hidden_size = model.config.hidden_size
+        if "QwenVL_B" in model_path:  # Vision Part
+            num_heads = model.config.vision_config.num_heads
+            hidden_size = model.config.vision_config.hidden_size
+        else:
+            num_heads = model.config.num_attention_heads
+            hidden_size = model.config.hidden_size
     except:
         num_heads = model.config.llm_config.num_attention_heads
         hidden_size = model.config.llm_config.hidden_size
