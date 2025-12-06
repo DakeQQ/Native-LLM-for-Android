@@ -299,7 +299,7 @@ with torch.inference_mode():
     repeat_penality = torch.ones((beam_size, vocab_size), dtype=torch.float32)
     penality_reset_count = torch.zeros(beam_size, dtype=torch.int32)
     logits = torch.ones((beam_size, vocab_size), dtype=torch.float32)
-    penality_value = torch.tensor(REPEAT_PENALITY, dtype=torch.float32)
+    penality_value = torch.tensor([REPEAT_PENALITY], dtype=torch.float32)
     batch_indices = torch.arange(BEAM_SIZE, dtype=torch.int64)
 
     torch.onnx.export(
@@ -563,7 +563,7 @@ past_keys_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((batch_size, num
 past_values_A = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((batch_size, num_key_value_heads, 1, 0, head_dim), dtype=np.float32), 'cpu', 0)
 save_id = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), 'cpu', 0)
 repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=np.float32), 'cpu', 0)
-penality_value = onnxruntime.OrtValue.ortvalue_from_numpy(np.array(REPEAT_PENALITY, dtype=np.float32), 'cpu', 0)
+penality_value = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([REPEAT_PENALITY], dtype=np.float32), 'cpu', 0)
 
 if do_repeat_penality:
     penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), 'cpu', 0)
