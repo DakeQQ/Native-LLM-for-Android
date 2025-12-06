@@ -26,11 +26,11 @@ target_platform = "arm"                                                         
 use_gpu = False                                                                  # If true, the transformers.optimizer will remain the FP16 processes.
 provider = 'CPUExecutionProvider'                                                # ['CPUExecutionProvider', 'CUDAExecutionProvider']
 use_low_memory_mode_in_Android = True                                            # If you need to use low memory mode on Android, please set it to True.
-algorithm = "DEFAULT"                                                            # ["DEFAULT", "RTN", "HQQ",], HQQ will very slow both in quant and inference.
+algorithm = "DEFAULT"                                                            # ["DEFAULT", "RTN", "HQQ", "k_quant"]
 bits = 4                                                                         # [4, 8]
 op_types = ["MatMul"]                                                            # ["MatMul", "Gather"]; Adding Gather may get errors.
 quant_axes = [0]                                                                 # Target axes to quant the quant data.
-block_size = 128                                                                 # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
+block_size = 32                                                                  # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
 accuracy_level = 4                                                               # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 quant_symmetric = False                                                          # False may get more accuracy.
 nodes_to_exclude = None                                                          # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
@@ -60,6 +60,11 @@ elif algorithm == "HQQ":
         quant_format=quant_utils.QuantFormat.QOperator,
         op_types_to_quantize=tuple(op_types),
         quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types)))
+    )
+elif algorithm == "k_quant":
+    quant_config = matmul_nbits_quantizer.KQuantWeightOnlyQuantConfig(
+        quant_format=quant_utils.QuantFormat.QOperator,
+        op_types_to_quantize=tuple(op_types)
     )
 else:
     quant_config = matmul_nbits_quantizer.DefaultWeightOnlyQuantConfig(
@@ -206,5 +211,6 @@ if not is_large_model:
     # Call subprocess may get permission failed on Windows system.
     subprocess.run([f'python -m onnxruntime.tools.convert_onnx_models_to_ort --output_dir {quanted_folder_path} --optimization_style {optimization_style} --target_platform {target_platform} --enable_type_reduction {quanted_folder_path}'], shell=True)
     
+
 
 
