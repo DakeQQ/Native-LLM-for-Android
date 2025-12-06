@@ -655,7 +655,7 @@ beam_size = torch.tensor([BEAM_SIZE], dtype=torch.int64)
 repeat_penality = torch.ones((beam_size, vocab_size), dtype=torch.float32)
 penality_reset_count = torch.zeros(beam_size, dtype=torch.int32)
 logits = torch.ones((beam_size, vocab_size), dtype=torch.float32)
-penality_value = torch.tensor(REPEAT_PENALITY, dtype=torch.float32)
+penality_value = torch.tensor([REPEAT_PENALITY], dtype=torch.float32)
 batch_indices = torch.arange(BEAM_SIZE, dtype=torch.int64)
 
 torch.onnx.export(
@@ -933,7 +933,7 @@ deepstack_in_name_F = in_name_F[deepstack_indices[0]:deepstack_indices[deepstack
 vocab_size = ort_session_F._outputs_meta[num_keys_values].shape[1]
 topK = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([TOP_K], dtype=np.int64), device_type, DEVICE_ID)
 beam_size = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([BEAM_SIZE], dtype=np.int64), device_type, DEVICE_ID)
-penality_value = onnxruntime.OrtValue.ortvalue_from_numpy(np.array(REPEAT_PENALITY, dtype=model_dtype), device_type, DEVICE_ID)
+penality_value = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([REPEAT_PENALITY], dtype=model_dtype), device_type, DEVICE_ID)
 prompt = f"<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n<|im_start|>assistant\n"
 prompt_head_len = np.array([4], dtype=np.int64)
 tokenizer = AutoTokenizer.from_pretrained(path)
@@ -1200,3 +1200,4 @@ while num_decode < generate_limit:
             input_feed_F[deepstack_in_name_F[i]] = init_deepstack_features
     num_decode += 1
 print(f"\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
