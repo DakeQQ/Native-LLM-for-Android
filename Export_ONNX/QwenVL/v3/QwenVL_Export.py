@@ -613,8 +613,7 @@ with torch.inference_mode():
     for i in range(deepstack_features_len):
         name = f'deepstack_features_{i}'
         input_names.append(name)
-        if DYNAMIC_IMAGE_SHAPE:
-            dynamic_axes[name] = {1: 'total_len'}
+        dynamic_axes[name] = {1: 'total_len'}
         all_inputs.append(deepstack_features)
     input_names.append('rotary_pos_emb_cos_q')
     all_inputs.append(rotary_pos_emb_cos_q)
@@ -1222,6 +1221,7 @@ while num_decode < generate_limit:
             input_feed_F[deepstack_in_name_F[i]] = init_deepstack_features
     num_decode += 1
 print(f"\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
 
 
 
