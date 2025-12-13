@@ -170,6 +170,7 @@ class QwenVL_PartB(torch.nn.Module):
     def __init__(self, qwenvl):
         super(QwenVL_PartB, self).__init__()
         self.qwenvl = qwenvl
+        self._replace_gelu_with_tanh_approximation(self.qwenvl)
         self.num_heads = self.qwenvl.config.vision_config.num_heads
         self.head_dim = self.qwenvl.config.vision_config.hidden_size // self.num_heads
         self.head_dim_half = self.head_dim // 2
@@ -189,6 +190,20 @@ class QwenVL_PartB(torch.nn.Module):
         for blk in self.qwenvl.visual.blocks:
             blk.attn.qkv.weight.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scaling
             blk.attn.qkv.bias.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scaling
+
+    def _replace_gelu_with_tanh_approximation(self, module):
+        """
+        Recursively replace all GELU(approximate='none' or None)
+        with GELU(approximate='tanh') in the module tree
+        """
+        for name, child in module.named_children():
+            if isinstance(child, torch.nn.GELU):
+                # Replace with tanh approximation version
+                setattr(module, name, torch.nn.GELU(approximate='tanh'))
+                print(f"Replaced GELU at: {name}")
+            else:
+                # Recursively apply to child modules
+                self._replace_gelu_with_tanh_approximation(child)
 
     def forward(self, pixel_values):
         if INPUT_IMAGE_DIM != 5:
@@ -1200,4 +1215,5 @@ while num_decode < generate_limit:
             input_feed_F[deepstack_in_name_F[i]] = init_deepstack_features
     num_decode += 1
 print(f"\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
 
