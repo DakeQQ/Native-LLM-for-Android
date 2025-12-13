@@ -293,6 +293,8 @@ class QwenVL_PartC(torch.nn.Module):
         concate_hidden_states = torch.cat([text_hidden_states[:, :self.prompt_head_len], vision_hidden_states, text_hidden_states[:, self.prompt_head_len:]], dim=1)
         zeros_B = self.zeros_B[:, :text_hidden_states.shape[1] - self.prompt_head_len].float()
         deepstack_features = [torch.cat([self.zeros_A, all_inputs[i], zeros_B], dim=1) for i in range(self.deepstack_features_len)]
+        if text_hidden_states.shape[0] != 1:
+            deepstack_features = deepstack_features.expand(text_hidden_states.shape[0], -1, self.hidden_size)
         return deepstack_features, concate_hidden_states
 
 
@@ -501,16 +503,19 @@ with torch.inference_mode():
     output_names = []
     dynamic_axes = {
         'text_hidden_states': {0: 'batch_size', 1: 'ids_len'},
-        'vision_hidden_states': {1: 'vision_embed_len'},
         'concate_hidden_states': {0: 'batch_size', 1: 'total_len'}
     }
+    if DYNAMIC_IMAGE_SHAPE:
+        dynamic_axes['vision_hidden_states'] = {1: 'vision_embed_len'}
+
     for i in range(deepstack_features_len):
         name = f'in_deepstack_feature_{i}'
         input_names.append(name)
         all_inputs.append(deepstack_features)
-        dynamic_axes[name] = {1: 'vision_embed_len'}
+        if DYNAMIC_IMAGE_SHAPE:
+            dynamic_axes[name] = {1: 'vision_embed_len'}
         name = f'out_deepstack_feature_{i}'
-        dynamic_axes[name] = {1: 'total_len'}
+        dynamic_axes[name] = {0: 'batch_size', 1: 'total_len'}
         output_names.append(name)
     input_names.append("text_hidden_states")
     input_names.append("vision_hidden_states")
@@ -1218,6 +1223,7 @@ while num_decode < generate_limit:
             input_feed_F[deepstack_in_name_F[i]] = init_deepstack_features
     num_decode += 1
 print(f"\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
 
 
 
