@@ -69,6 +69,37 @@ for model_name in model_names:
         print(f"Warning: Model file not found at {model_path}. Skipping.")
         continue
 
+    if 'Reset_Penality' in model_name:
+        model = optimize_model(model_path,
+                               use_gpu=False,
+                               opt_level=2,
+                               num_heads=0,
+                               hidden_size=0,
+                               verbose=False,
+                               model_type='bert',
+                               only_onnxruntime=False)
+        model.save_model_to_file(quanted_model_path, use_external_data_format=False)
+        if upgrade_opset > 0:
+            print(f"Upgrading Opset to {upgrade_opset}...")
+            try:
+                model = onnx.load(quanted_model_path)
+                converted_model = onnx.version_converter.convert_version(model, upgrade_opset)
+                onnx.save(converted_model, quanted_model_path, save_as_external_data=False)
+                del model, converted_model
+                gc.collect()
+            except Exception as e:
+                print(f"Could not upgrade opset due to an error: {e}. Saving model with original opset.")
+                model = onnx.load(quanted_model_path)
+                onnx.save(model, quanted_model_path, save_as_external_data=False)
+                del model
+                gc.collect()
+        else:
+            model = onnx.load(quanted_model_path)
+            onnx.save(model, quanted_model_path, save_as_external_data=False)
+            del model
+            gc.collect()
+        continue
+
     # Model-specific configuration based on model name
     op_types = ["MatMul"]                                                        # ["MatMul", "Gather"]; Adding Gather may get errors.
     quant_axes = [0]                                                             # Target axes to quant the quant data.
@@ -281,3 +312,4 @@ for file_path in files_to_delete:
         print(f"Error deleting {file_path}: {e}")
 
 print("--- All models processed successfully! ---")
+
