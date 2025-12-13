@@ -62,7 +62,7 @@ for model_name in model_names:
         model_path = os.path.join(original_folder_path.replace('Qwen_ONNX', 'Qwen_ONNX_2'), f"{model_name}.onnx")
     else:
         model_path = os.path.join(original_folder_path, f"{model_name}.onnx")
-    quanted_model_path = os.path.join(quanted_folder_path, f"{model_name}_Optimized.onnx")
+    quanted_model_path = os.path.join(quanted_folder_path, f"{model_name}.onnx")
     
     # Check if the original model file exists before processing
     if not os.path.exists(model_path):
@@ -312,4 +312,5 @@ for file_path in files_to_delete:
         print(f"Error deleting {file_path}: {e}")
 
 print("--- All models processed successfully! ---")
+
 
