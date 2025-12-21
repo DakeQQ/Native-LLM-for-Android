@@ -1042,7 +1042,7 @@ else:
 init_deepstack_features = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, 1, ort_session_C._inputs_meta[0].shape[2]), dtype=model_dtype), device_type, DEVICE_ID)
 init_repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=model_dtype), device_type, DEVICE_ID)
 init_batch_size_greedy = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, DEVICE_ID)
-init_beam_size = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
+init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
 
 
 generate_limit -= tokens.shape[-1]
@@ -1122,7 +1122,7 @@ for i in range(rotary_outputs_len):
 
 
 if USE_BEAM_SEARCH:
-    input_feed_H[in_name_H[num_keys_values_plus_1]] = init_beam_size
+    input_feed_H[in_name_H[num_keys_values_plus_1]] = init_save_id_beam
     input_feed_H[in_name_H[num_keys_values_plus_2]] = init_repeat_penality
 else:
     input_feed_G[in_name_G[1]] = init_repeat_penality
@@ -1220,6 +1220,7 @@ while num_decode < generate_limit:
             input_feed_F[deepstack_in_name_F[i]] = init_deepstack_features
     num_decode += 1
 print(f"\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
 
 
 
