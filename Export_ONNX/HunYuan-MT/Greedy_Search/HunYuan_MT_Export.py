@@ -6,13 +6,13 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path = r'D:\LLM\Hunyuan-MT-7B'                                      # Set the folder path where the Hunyuan-MT whole project downloaded.
-onnx_model_A = r'D:\LLM\Hunyuan_ONNX\Hunyuan_MT.onnx'               # Assign a path where the exported Hunyuan-MT model stored.
-STOP_TOKEN = [127960]                                               # The stop_id in Hunyuan-MT is "127960"
-MAX_SEQ_LEN = 4096                                                  # The max context length.
-sentence = "May the force be with you"                              # The test sentence after the export process.
-original_language = "English"                                       # Source language of the text to translate. Accepts: English/Chinese/Abbreviation (case-insensitive). See get_language() for all supported languages.
-target_language = "Chinese"                                         # Target language for translation. Accepts: English/Chinese/Abbreviation (case-insensitive). See get_language() for all supported languages.
+path = r'/home/DakeQQ/Downloads/HY-MT1.5-1.8B'                            # Set the folder path where the Hunyuan-MT-1.5 whole project downloaded.
+onnx_model_A = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Hunyuan_MT.onnx'     # Assign a path where the exported Hunyuan-MT-1.5 model stored.
+STOP_TOKEN = [1, 20, 120020]                                              # The stop_id in Hunyuan-MT-1.5 are "1", "20", "120020"
+MAX_SEQ_LEN = 4096                                                        # The max context length.
+sentence = "May the force be with you"                                    # The test sentence after the export process.
+original_language = "English"                                             # Source language of the text to translate. Accepts: English/Chinese/Abbreviation (case-insensitive). See get_language() for all supported languages.
+target_language = "Chinese"                                               # Target language for translation. Accepts: English/Chinese/Abbreviation (case-insensitive). See get_language() for all supported languages.
 
 
 def get_language(language_input):
@@ -314,9 +314,10 @@ out_name_A = [out_name_A[i].name for i in range(amount_of_outputs)]
 en_target_language, zh_target_language = get_language(target_language)
 if original_language and target_language:
     if (target_language == 'Chinese') or (original_language == 'Chinese') or ('中文' in target_language) or ('中文' in original_language):
-        prompt = f"<|startoftext|>将下面的文本翻译成{zh_target_language}，不要额外解释。\n\n{sentence}<|extra_0|>"
+        prompt = f"<|hy_begin▁of▁sentence|><|hy_User|>将以下文本翻译为{target_language}，注意只需要输出翻译后的结果，不要额外解释：\n\n{sentence}<｜hy_place▁holder▁no▁8｜>"
     else:
-        prompt = f"<|startoftext|>Translate the following segment into {en_target_language}, without additional explanation.\n\n{sentence}<|extra_0|>"
+        prompt = f"<|hy_begin▁of▁sentence|><|hy_User|>>Translate the following segment into {en_target_language}, without additional explanation. \n\n{sentence}<｜hy_place▁holder▁no▁8｜>"
+
     tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
     input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
     ids_len = tokens.shape[-1]
@@ -361,9 +362,4 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
-
-
-
-
-
 
