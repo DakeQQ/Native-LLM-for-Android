@@ -207,7 +207,7 @@ class HUNYUAN(torch.nn.Module):
 print('Export start ...')
 with torch.inference_mode():
     # Load the original model
-    model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(path, dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
     head_dim = model.config.head_dim
     num_layers = model.config.num_hidden_layers
     num_heads = model.config.num_attention_heads
@@ -362,4 +362,5 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
+
 
