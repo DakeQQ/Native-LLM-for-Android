@@ -15,9 +15,10 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **InternVL-Mono**: 2B
 - **InternLM-3**: 8B
 - **Seed-X**: [PRO-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-PPO-7B), [Instruct-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-Instruct-7B)
-- **HunYuan**: [MT-7B](https://github.com/Tencent-Hunyuan/Hunyuan-MT)
+- **HunYuan**: [MT-1.5-2B/7B](https://modelscope.cn/models/Tencent-Hunyuan/HY-MT1.5-7B)
 
 ## Update
+- 2026/01/04：Update HunYuan-MT-1.5
 - 2025/11/11：Update Qwen3-VL.
 - 2025/09/07：Update HunYuan-MT.
 - 2025/08/02：Update Seed-X.
@@ -147,9 +148,10 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **InternVL-Mono**: 2B
 - **InternLM-3**: 8B
 - **Seed-X**: [PRO-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-PPO-7B), [Instruct-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-Instruct-7B)
-- **HunYuan**: [MT-7B](https://github.com/Tencent-Hunyuan/Hunyuan-MT)
+- **HunYuan**: [MT-1.5-2B/7B](https://modelscope.cn/models/Tencent-Hunyuan/HY-MT1.5-7B)
 
 ## 最近更新
+- 2026/01/04：Update HunYuan-MT-1.5
 - 2025/11/11：更新 Qwen3-VL。
 - 2025/09/07：更新 HunYuan-MT。
 - 2025/08/02：更新 Seed-X。
