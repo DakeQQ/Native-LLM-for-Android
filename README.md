@@ -15,7 +15,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **InternVL-Mono**: 2B
 - **InternLM-3**: 8B
 - **Seed-X**: [PRO-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-PPO-7B), [Instruct-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-Instruct-7B)
-- **HunYuan**: [MT-1.5-2B/7B](https://modelscope.cn/models/Tencent-Hunyuan/HY-MT1.5-7B)
+- **HunYuan**: [MT-1.5-1.8B/7B](https://modelscope.cn/models/Tencent-Hunyuan/HY-MT1.5-7B)
 
 ## Update
 - 2026/01/04：Update HunYuan-MT-1.5
@@ -79,7 +79,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | QwenVL-2-2B<br>q8f32 | 9 token/s               |
 | Harmony 4  | P40          | Kirin_990_5G-CPU        | QwenVL-2.5-3B<br>q4f32<br>dynamic | 9 token/s  |
 
-
+惑
 ### DeepSeek-R1
 | OS         | Device       | Backend                 | Model                  | Inference (1024 Context) |
 |:----------:|:------------:|:-----------------------:|:----------------------:|:------------------------:|
@@ -148,7 +148,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **InternVL-Mono**: 2B
 - **InternLM-3**: 8B
 - **Seed-X**: [PRO-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-PPO-7B), [Instruct-7B](https://modelscope.cn/models/ByteDance-Seed/Seed-X-Instruct-7B)
-- **HunYuan**: [MT-1.5-2B/7B](https://modelscope.cn/models/Tencent-Hunyuan/HY-MT1.5-7B)
+- **HunYuan**: [MT-1.5-1.8B/7B](https://modelscope.cn/models/Tencent-Hunyuan/HY-MT1.5-7B)
 
 ## 最近更新
 - 2026/01/04：Update HunYuan-MT-1.5
