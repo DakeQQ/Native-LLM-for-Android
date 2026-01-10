@@ -312,13 +312,18 @@ out_name_A = [out_name_A[i].name for i in range(amount_of_outputs)]
 
 # Pre-process inputs
 en_target_language, zh_target_language = get_language(target_language)
-end_token = "<｜eos｜>" if '7b' in path.lower() else "<｜hy_place▁holder▁no▁8｜>"
+is_7B = '7b' in path.lower()
 if original_language and target_language:
     if (target_language == 'Chinese') or (original_language == 'Chinese') or ('中文' in target_language) or ('中文' in original_language):
-        prompt = f"<|hy_begin▁of▁sentence|><|hy_User|>将以下文本翻译为{target_language}，注意只需要输出翻译后的结果，不要额外解释：\n\n{sentence}{end_token}"
+        if is_7B:
+            prompt = f"<|startoftext|>将下面的文本翻译成{zh_target_language}，不要额外解释。\n\n{sentence}<|extra_0|>"
+        else:
+            prompt = f"<|hy_begin▁of▁sentence|><|hy_User|>将以下文本翻译为{target_language}，注意只需要输出翻译后的结果，不要额外解释：\n\n{sentence}<｜hy_place▁holder▁no▁8｜>"
     else:
-        prompt = f"<|hy_begin▁of▁sentence|><|hy_User|>>Translate the following segment into {en_target_language}, without additional explanation. \n\n{sentence}{end_token}"
-
+        if is_7B:
+            prompt = f"<|startoftext|>Translate the following segment into {en_target_language}, without additional explanation.\n\n{sentence}<|extra_0|>"
+        else:
+            prompt = f"<|hy_begin▁of▁sentence|><|hy_User|>>Translate the following segment into {en_target_language}, without additional explanation. \n\n{sentence}<｜hy_place▁holder▁no▁8｜>"
     tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
     input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
     ids_len = tokens.shape[-1]
@@ -363,6 +368,7 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
+
 
 
 
