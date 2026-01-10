@@ -8,7 +8,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 path = r'/home/DakeQQ/Downloads/HY-MT1.5-1.8B'                            # Set the folder path where the Hunyuan-MT-1.5 whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Hunyuan_MT.onnx'     # Assign a path where the exported Hunyuan-MT-1.5 model stored.
-STOP_TOKEN = [1, 20, 120020]                                              # The stop_id in Hunyuan-MT-1.5 are "1", "20", "120020"
+STOP_TOKEN = [1, 20, 120020]                                              # The stop_id in Hunyuan-MT-1.5-1.8B are "1", "20", "120020"
 MAX_SEQ_LEN = 4096                                                        # The max context length.
 sentence = "May the force be with you"                                    # The test sentence after the export process.
 original_language = "English"                                             # Source language of the text to translate. Accepts: English/Chinese/Abbreviation (case-insensitive). See get_language() for all supported languages.
@@ -362,5 +362,6 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
+
 
 
