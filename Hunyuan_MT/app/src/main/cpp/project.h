@@ -15,10 +15,10 @@ OrtRunOptions *run_options_A;
 
 // Model File Settings
 const std::string file_name_A = "Hunyuan_MT.onnx";
-const std::string file_name_A_external = "3c8091d2-f0e7-11f0-93a4-bc091bee2d5c.data";  // The demo model is Qwen3-1.7B
+const std::string file_name_A_external = "3c8091d2-f0e7-11f0-93a4-bc091bee2d5c.data";  // The demo model is Hunyuan_MT-1.8B
 
 // Model Configuration
-const int num_layers = 32;                                                        // Transformer layers. Refer to config.json for the value. Hunyuan_MT-1.8B = 28
+const int num_layers = 32;                                                        // Transformer layers. Refer to config.json for the value. Hunyuan_MT-1.8B = 32
 const int max_seq_len = 4096;                                                     // Please set this value to match the exported model.
 const int num_keys_values = num_layers + num_layers;
 const int num_keys_values_plus_1 = num_keys_values + 1;
