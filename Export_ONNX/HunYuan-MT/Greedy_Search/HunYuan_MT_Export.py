@@ -323,7 +323,7 @@ if original_language and target_language:
         if is_7B:
             prompt = f"<|startoftext|>Translate the following segment into {en_target_language}, without additional explanation.\n\n{sentence}<|extra_0|>"
         else:
-            prompt = f"<｜hy_begin▁of▁sentence｜><｜hy_User｜>>Translate the following segment into {en_target_language}, without additional explanation. \n\n{sentence}<｜hy_place▁holder▁no▁8｜>"
+            prompt = f"<｜hy_begin▁of▁sentence｜><｜hy_User｜>Translate the following segment into {en_target_language}, without additional explanation. \n\n{sentence}<｜hy_place▁holder▁no▁8｜>"
     tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
     input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, 'cpu', 0)
     ids_len = tokens.shape[-1]
@@ -368,6 +368,7 @@ if original_language and target_language:
     print(f"\n\nDecode: {(num_decode / (time.time() - start_time)):.3f} token/s")
 else:
     print("\nError: The specified translation language is not supported.")
+
 
 
 
