@@ -183,7 +183,7 @@ public class MainActivity extends AppCompatActivity {
         private String LLM_Talk = "";
         private int response_count = 0;
         private final String language = target_language.split("-")[1];
-        private final String input_str = "<｜hy_begin▁of▁sentence｜><｜hy_User｜>Translate the following segment into " + language + ", without additional explanation. \n\n" + usrInputText + "<｜hy_place▁holder▁no▁8｜>";
+        private final String input_str = "<｜hy_begin▁of▁sentence｜><｜hy_User｜>Translate the following segment into " + language + ", without additional explanation. \n\n" + usrInputText + "<｜hy_place▁holder▁no▁8｜>"; // Only for Hunyuan_MT-1.8B
         @SuppressLint("DefaultLocale")
         @Override
         public void run() {
