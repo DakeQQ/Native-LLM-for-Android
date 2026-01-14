@@ -28,7 +28,7 @@ const int next_chat_buffer = max_seq_len - single_chat_limit;
 
 // Token IDs
 int token_id = 0;
-const int end_id_0 = 120020;
+const int end_id_0 = 120020;  // Only for Hunyuan_MT-1.8B
 
 // Storage Paths
 const std::string storage_path = "/storage/emulated/0/Android/data/com.example.myapplication/";
