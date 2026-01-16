@@ -856,7 +856,7 @@ else:
 
 device_type = device_type_copy
 
-generate_limit = MAX_SEQ_LEN - 20                   # 20 = length of basic ids
+generate_limit = MAX_SEQ_LEN - 10                   # 10 = length of basic ids
 num_keys_values_plus_1 = num_keys_values + 1
 num_keys_values_plus_2 = num_keys_values + 2
 num_keys_values_plus_3 = num_keys_values + 3
@@ -1098,3 +1098,4 @@ else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
 
 print(f"\n\nFinal:\n{result}\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
