@@ -6,8 +6,8 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'               # Assign the exported path.
+path         = r'/home/DakeQQ/Downloads/Qwen3-0.6B'                             # Set the folder path where the Qwen whole project downloaded.
+onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
 onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
 onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
@@ -17,7 +17,7 @@ onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # KV cache quantization
 KV_QUANT_DTYPE = "Q8"               # "Q4" | "Q8" | "F16" | "F32"
-KV_BLOCK_SIZE = 1024                # Block size for KV quantization. KV_BLOCK_SIZE <= num_key_value_heads * head_dim. If use Q4, block_size recommended to <= 8.
+KV_BLOCK_SIZE = 1024                # Block size for KV quantization. block_size <= (num_key_value_heads * head_dim). If use Q4, block_size recommended to <= 8.
 USE_FLOAT16_SCALE_BIAS = False      # Set to True for ARM64 devices or GPU that perform better with float16 arithmetic.
 
 # Test input
@@ -27,14 +27,14 @@ TEST_QUERY = "地球最高的山是哪座山？"
 # Decoding strategy
 STOP_TOKEN = (151643, 151645)       # Qwen stop token ids
 USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 1.0                # 1.0 = no penalty
-PENALTY_RANGE = 10                  # Recent-token window
-MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit this after export.
+REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; 1.0 = no penalty
+PENALTY_RANGE = 10                  # Recent-token window to apply penalty
+MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
 TOP_K = 3
 BEAM_SIZE = 3
 
 # Runtime config
-MAX_SEQ_LEN = 4096                  # Max context length. Can not edit this after export.
+MAX_SEQ_LEN = 4096                  # Max context length. Can not edit after export.
 MAX_THREADS = 0                     # 0 = auto
 OPSET = 17
 DEVICE_ID = 0
@@ -1117,4 +1117,3 @@ else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
 
 print(f"\n\nFinal:\n{result}\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
-
