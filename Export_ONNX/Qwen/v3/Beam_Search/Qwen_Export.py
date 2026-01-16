@@ -856,7 +856,7 @@ else:
 
 device_type = device_type_copy
 
-generate_limit = MAX_SEQ_LEN - 10                   # 10 = length of basic ids
+generate_limit = MAX_SEQ_LEN - 20                   # 20 = length of basic ids
 num_keys_values_plus_1 = num_keys_values + 1
 num_keys_values_plus_2 = num_keys_values + 2
 num_keys_values_plus_3 = num_keys_values + 3
@@ -919,8 +919,11 @@ if USE_BEAM_SEARCH:
         in_name_E[num_keys_values_plus_6]: beam_size,
         in_name_E[num_keys_values_plus_7]: topK
     }
+    
+    penality_reset_count_beam_init = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), device_type, DEVICE_ID)
 else:
     BEAM_SIZE = 1
+    save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
     if do_repeat_penality:
         ort_session_C = onnxruntime.InferenceSession(onnx_model_C, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
         in_name_C = ort_session_C.get_inputs()
@@ -942,12 +945,7 @@ else:
         in_name_G = in_name_G[0].name
         out_name_G = [out_name_G[0].name]
         penality_dtype = np.float32
-
-if USE_BEAM_SEARCH:
-    penality_reset_count_beam_init = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), device_type, DEVICE_ID)
-else:
-    save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
-
+        
 init_ids_len_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, DEVICE_ID)
 init_history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), device_type, DEVICE_ID)
 init_attention_mask_0 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, DEVICE_ID)
@@ -959,14 +957,12 @@ init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE
 if USE_BEAM_SEARCH:
     input_feed_D[in_name_D[num_keys_values_plus_1]] = init_save_id_beam
     input_feed_D[in_name_D[num_keys_values_plus_2]] = init_repeat_penality
-
-if do_repeat_penality:
-    if USE_BEAM_SEARCH:
+    if do_repeat_penality:
         input_feed_F = {in_name_F[2]: penality_reset_count_beam_init}
-    else:
-        penality_reset_count_greedy = 0
-        input_feed_C[in_name_C[1]] = init_repeat_penality
-        input_feed_C[in_name_C[3]] = init_batch_size_greedy
+elif do_repeat_penality:
+    penality_reset_count_greedy = 0
+    input_feed_C[in_name_C[1]] = init_repeat_penality
+    input_feed_C[in_name_C[3]] = init_batch_size_greedy
 
 # --- Pre-process Inputs ---
 if TEST_THINK_MODE:
@@ -1098,4 +1094,3 @@ else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
 
 print(f"\n\nFinal:\n{result}\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
-
