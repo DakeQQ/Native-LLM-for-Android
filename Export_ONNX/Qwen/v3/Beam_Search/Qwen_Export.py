@@ -18,16 +18,16 @@ onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 # KV cache quantization
 KV_QUANT_DTYPE = "Q8"               # "Q4" | "Q8" | "F16" | "F32"
 KV_BLOCK_SIZE = 1024                # Block size for KV quantization. KV_BLOCK_SIZE <= num_key_value_heads * head_dim. If use Q4, block_size recommended to <= 8.
-USE_FLOAT16_SCALE_BIAS = True       # Set to True for ARM64 devices or GPU that perform better with float16 arithmetic.
+USE_FLOAT16_SCALE_BIAS = False      # Set to True for ARM64 devices or GPU that perform better with float16 arithmetic.
 
 # Test input
-TEST_THINK_MODE = False
+TEST_THINK_MODE = True
 TEST_QUERY = "地球最高的山是哪座山？"
 
 # Decoding strategy
 STOP_TOKEN = (151643, 151645)       # Qwen stop token ids
 USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 0.9                # 1.0 = no penalty
+REPEAT_PENALTY = 1.0                # 1.0 = no penalty
 PENALTY_RANGE = 10                  # Recent-token window
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit this after export.
 TOP_K = 3
@@ -256,6 +256,30 @@ class LLM_MAIN(torch.nn.Module):
             self.save_v_scale = [None] * num_layers
             self.save_v_bias = [None] * num_layers
 
+        for layer in self.llm.model.layers:
+            q_proj = layer.self_attn.q_proj
+            k_proj = layer.self_attn.k_proj
+            v_proj = layer.self_attn.v_proj
+            in_features = q_proj.in_features
+            out_features = q_proj.out_features + k_proj.out_features + v_proj.out_features
+            has_bias = (q_proj.bias is not None) or (k_proj.bias is not None) or (v_proj.bias is not None)
+            qkv = torch.nn.Linear(in_features, out_features, bias=has_bias)
+            layer.self_attn.q_out_features = int(q_proj.out_features)
+            layer.self_attn.k_out_features = int(k_proj.out_features)
+            layer.self_attn.v_out_features = int(v_proj.out_features)
+            layer.self_attn.qkv_in_features = int(in_features)
+            with torch.no_grad():
+                qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
+                if has_bias:
+                    qb = q_proj.bias if q_proj.bias is not None else torch.zeros(q_proj.out_features, dtype=qkv.weight.dtype)
+                    kb = k_proj.bias if k_proj.bias is not None else torch.zeros(k_proj.out_features, dtype=qkv.weight.dtype)
+                    vb = v_proj.bias if v_proj.bias is not None else torch.zeros(v_proj.out_features, dtype=qkv.weight.dtype)
+                    qkv.bias.copy_(torch.cat([qb, kb, vb], dim=0))
+            layer.self_attn.qkv = qkv
+            del layer.self_attn.q_proj
+            del layer.self_attn.k_proj
+            del layer.self_attn.v_proj
+
     def rotate_half(self, x, head_dim_half, dim):
         x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=dim)
         return torch.cat((-x2, x1), dim=dim)
@@ -279,9 +303,11 @@ class LLM_MAIN(torch.nn.Module):
         batch_size = hidden_states.shape[0].unsqueeze(0)
         for i, layer in enumerate(self.llm.model.layers):
             hidden_states_norm = layer.input_layernorm(hidden_states)
-            q = layer.self_attn.q_proj(hidden_states_norm).view(batch_size, -1, self.num_heads, self.head_dim)
-            k = layer.self_attn.k_proj(hidden_states_norm).view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
-            v = layer.self_attn.v_proj(hidden_states_norm).view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
+            qkv = layer.self_attn.qkv(hidden_states_norm)
+            q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
+            q = q.view(batch_size, -1, self.num_heads, self.head_dim)
+            k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
+            v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
             q = layer.self_attn.q_norm(q).transpose(1, 2)
             k = layer.self_attn.k_norm(k).permute(0, 3, 2, 4, 1)
             q = q * rotary_pos_emb_cos_q + self.rotate_half(q, self.head_dim_half, -1) * rotary_pos_emb_sin_q
@@ -330,17 +356,15 @@ class LLM_MAIN(torch.nn.Module):
 
 
 print('Export start ...')
-# --- Main Export Logic ---
 with torch.inference_mode():
-    # Load the original model
     model = AutoModelForCausalLM.from_pretrained(
-        path, 
-        dtype=torch.float32, 
-        device_map='cpu', 
-        trust_remote_code=True, 
+        path,
+        dtype=torch.float32,
+        device_map='cpu',
+        trust_remote_code=True,
         low_cpu_mem_usage=True
     ).eval()
-    
+
     head_dim = model.config.head_dim
     num_layers = model.config.num_hidden_layers
     num_heads = model.config.num_attention_heads
@@ -379,7 +403,7 @@ with torch.inference_mode():
     input_names = []
     output_names = []
     dynamic_axes = {'hidden_states': {0: 'batch', 1: 'ids_len'}}
-    
+
     if KV_QUANT_DTYPE == "Q4" or KV_QUANT_DTYPE == "Q8":
         total_elements = num_key_value_heads * head_dim * history_len
         num_blocks = total_elements // KV_BLOCK_SIZE
@@ -393,7 +417,7 @@ with torch.inference_mode():
         elif KV_QUANT_DTYPE == "Q8":
             past_keys = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE), dtype=torch.uint8)
             past_values = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE), dtype=torch.uint8)
-            
+
         for i in range(num_layers):
             name = f'in_key_{i}'
             input_names.append(name)
@@ -465,7 +489,7 @@ with torch.inference_mode():
             name = f'out_value_{i}'
             output_names.append(name)
             dynamic_axes[name] = {0: 'batch', 3: 'ks_seq_len'}
-            
+
     input_names.append('hidden_states')
     all_inputs.append(hidden_states)
     input_names.append('history_len')
@@ -617,7 +641,7 @@ with torch.inference_mode():
             name = f'out_value_{i}'
             output_names.append(name)
             dynamic_axes[name] = {0: 'batch', 3: 'kv_seq_len'}
-            
+
     input_names.append('logits')
     all_inputs.append(logits[[0]])
     input_names.append('save_id_in')
@@ -685,7 +709,7 @@ with torch.inference_mode():
             name = f'in_value_bias_{i}'
             input_names.append(name)
             all_inputs.append(v_bias)
-            
+
     input_names.append('logits')
     all_inputs.append(logits)
     input_names.append('save_id_in')
@@ -771,8 +795,7 @@ with torch.inference_mode():
         opset_version=OPSET,
         dynamo=False
     )
-    
-print('\nExport done!\n\nStart running the Qwen by ONNXRuntime.\nNow loading . . . it could cost minutes.')
+print('\nExport done!\n\nStart running the LLM by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
 
 # Run the exported model by ONNX Runtime
@@ -1017,7 +1040,7 @@ if k_scales:
         i += 1
 
 # --- Run Inference ---
-print(f'\n\nTest Question: {TEST_QUERY}\nQwen Answering:')
+print(f'\n\nTest Question: {TEST_QUERY}\nLLM Answering:')
 num_decode = 0
 generate_limit = MAX_SEQ_LEN - tokens.shape[-1]
 start_time = time.time()
