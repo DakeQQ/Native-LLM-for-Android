@@ -449,7 +449,6 @@ with torch.inference_mode():
             'input_ids': {0: 'batch', 1: 'ids_len'},
             'hidden_states': {0: 'batch', 1: 'ids_len'}
         },
-        do_constant_folding=True,
         opset_version=OPSET,
         dynamo=False
     )
@@ -611,7 +610,6 @@ with torch.inference_mode():
             'repeat_penality_out': {0: 'batch'},
             'max_logits_idx': {0: 'batch'}
         },
-        do_constant_folding=True,
         opset_version=OPSET,
         dynamo=False
     )
@@ -733,7 +731,6 @@ with torch.inference_mode():
         input_names=input_names,
         output_names=output_names,
         dynamic_axes=dynamic_axes,
-        do_constant_folding=True,
         opset_version=OPSET,
         dynamo=False
     )
@@ -795,7 +792,6 @@ with torch.inference_mode():
         input_names=input_names,
         output_names=output_names,
         dynamic_axes=dynamic_axes,
-        do_constant_folding=True,
         opset_version=OPSET,
         dynamo=False
     )
@@ -827,7 +823,6 @@ with torch.inference_mode():
             'penality_reset_count_out': {0: 'batch'},
             'batch_indices': {0: 'batch'}
         },
-        do_constant_folding=True,
         opset_version=OPSET,
         dynamo=False
     )
@@ -847,9 +842,8 @@ with torch.inference_mode():
         output_names=['max_logits_idx'],
         dynamic_axes={
             'logits': {0: 'batch'},
-            'max_logits_idx': {0: 'batch'},
+            'max_logits_idx': {0: 'batch'}
         },
-        do_constant_folding=True,
         opset_version=OPSET,
         dynamo=False
     )
@@ -937,7 +931,7 @@ else:
 
 device_type = device_type_copy
 
-generate_limit = MAX_SEQ_LEN - 20                   # 20 = length of basic ids
+generate_limit = MAX_SEQ_LEN - 10                   # 10 = length of basic ids
 num_keys_values_plus_1 = num_keys_values + 1
 num_keys_values_plus_2 = num_keys_values + 2
 num_keys_values_plus_3 = num_keys_values + 3
