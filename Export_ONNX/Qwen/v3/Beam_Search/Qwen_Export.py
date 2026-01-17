@@ -1122,7 +1122,7 @@ while num_decode < generate_limit:
         if do_repeat_penality:
             input_feed_C[in_name_C[0]] = all_outputs_B[num_keys_values]
             all_outputs_C = ort_session_C.run_with_ort_values(out_name_C, input_feed_C)
-            max_logits_idx = all_outputs_C[0].numpy()[0, 0]
+            max_logits_idx = all_outputs_C[0].numpy().reshape(-1)[0]
             if num_decode >= PENALTY_RANGE:
                 reset_ids = save_id_greedy[penality_reset_count_greedy]
                 if reset_ids != max_logits_idx:
@@ -1137,7 +1137,7 @@ while num_decode < generate_limit:
             input_feed_G = {in_name_G: all_outputs_B[num_keys_values]}
             all_outputs_G = ort_session_G.run_with_ort_values(out_name_G, input_feed_G)
             input_feed_A[in_name_A] = all_outputs_G[0]
-            max_logits_idx = all_outputs_G[0].numpy()[0, 0]
+            max_logits_idx = all_outputs_C[0].numpy().reshape(-1)[0]
         if max_logits_idx in STOP_TOKEN:
             break
         input_feed_B.update(zip(in_name_B[:num_keys_values], all_outputs_B))
@@ -1156,3 +1156,4 @@ else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
 
 print(f"\n\nFinal:\n{result}\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
