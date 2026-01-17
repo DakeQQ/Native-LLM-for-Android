@@ -6,14 +6,14 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path         = r'/home/iamj/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = r'/home/iamj/Downloads/Qwen_ONNX/LLM_Embed.onnx'
-onnx_model_B = r'/home/iamj/Downloads/Qwen_ONNX/LLM_Main.onnx'
-onnx_model_C = r'/home/iamj/Downloads/Qwen_ONNX/Greedy_Search.onnx'
-onnx_model_D = r'/home/iamj/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
-onnx_model_E = r'/home/iamj/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
-onnx_model_F = r'/home/iamj/Downloads/Qwen_ONNX/Reset_Penality.onnx'
-onnx_model_G = r'/home/iamj/Downloads/Qwen_ONNX/Argmax.onnx'
+path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
+onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
+onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
+onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
+onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
+onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
+onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
+onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # KV cache quantization
 KV_QUANT_DTYPE = "Q8"               # "Q4" | "Q8" | "F16" | "F32"
@@ -1155,3 +1155,4 @@ if USE_BEAM_SEARCH:
 else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
 print(f"\n\nFinal:\n{result}\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
