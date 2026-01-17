@@ -232,7 +232,6 @@ class LLM_MAIN(torch.nn.Module):
         self.num_layers_3 = self.num_layers * 3
         self.num_layers_4 = self.num_layers * 4
         self.num_layers_5 = self.num_layers * 5
-
         self.num_key_value_heads = int(num_key_value_heads)
         self.head_dim_half = self.head_dim // 2
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
@@ -246,19 +245,16 @@ class LLM_MAIN(torch.nn.Module):
 
         # --- Quantizer / Dequantizer ---
         self.quantizer = KVQuantizer(KV_QUANT_DTYPE, KV_BLOCK_SIZE, scale_dtype).eval()
-        self.dequantizer = KVDequantizer(
-            KV_QUANT_DTYPE, KV_BLOCK_SIZE, self.num_key_value_heads, self.head_dim, scale_dtype
-        ).eval()
+        self.dequantizer = KVDequantizer(KV_QUANT_DTYPE, KV_BLOCK_SIZE, self.num_key_value_heads, self.head_dim, scale_dtype).eval()
 
         # --- RoPE buffers (precompute once) ---
         scale_factor = float(self.head_dim ** -0.25)
-        position_ids = torch.arange(int(max_seq_len), dtype=torch.float32).unsqueeze(-1)            # [S, 1]
-        idx_theta = (position_ids * self.llm.model.rotary_emb.inv_freq).unsqueeze(0).unsqueeze(0)   # [1, 1, S, D/2]
+        position_ids = torch.arange(int(max_seq_len), dtype=torch.float32).unsqueeze(-1)           
+        idx_theta = (position_ids * self.llm.model.rotary_emb.inv_freq).unsqueeze(0).unsqueeze(0)
         cos = torch.cos(idx_theta) * scale_factor
         sin = torch.sin(idx_theta) * scale_factor
-        cos = torch.cat((cos, cos), dim=-1).half()  # [1, 1, S, D]
+        cos = torch.cat((cos, cos), dim=-1).half()
         sin = torch.cat((sin, sin), dim=-1).half()
-
         self.register_buffer("cos_rotary_pos_emb", cos, persistent=False)
         self.register_buffer("sin_rotary_pos_emb", sin, persistent=False)
 
@@ -275,60 +271,50 @@ class LLM_MAIN(torch.nn.Module):
             self.save_v_scale = [None] * self.num_layers
             self.save_v_bias = [None] * self.num_layers
 
-        # --- Fuse / rearrange weights (all surgery under no_grad) ---
+        # --- Fuse / Rearrange weights ---
         with torch.no_grad():
             # 1) Fuse q/k/v into qkv
             for layer in self.llm.model.layers:
                 q_proj = layer.self_attn.q_proj
                 k_proj = layer.self_attn.k_proj
                 v_proj = layer.self_attn.v_proj
-
                 in_features = int(q_proj.in_features)
                 out_features = int(q_proj.out_features + k_proj.out_features + v_proj.out_features)
                 has_bias = (q_proj.bias is not None) or (k_proj.bias is not None) or (v_proj.bias is not None)
-
                 qkv = torch.nn.Linear(in_features, out_features, bias=has_bias)
-
                 layer.self_attn.q_out_features = int(q_proj.out_features)
                 layer.self_attn.k_out_features = int(k_proj.out_features)
                 layer.self_attn.v_out_features = int(v_proj.out_features)
                 layer.self_attn.qkv_in_features = int(in_features)
-
                 qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
                 if has_bias:
-                    device = qkv.weight.device
                     dtype = qkv.weight.dtype
                     qb = q_proj.bias if q_proj.bias is not None else torch.zeros(q_proj.out_features, dtype=dtype)
                     kb = k_proj.bias if k_proj.bias is not None else torch.zeros(k_proj.out_features, dtype=dtype)
                     vb = v_proj.bias if v_proj.bias is not None else torch.zeros(v_proj.out_features, dtype=dtype)
                     qkv.bias.copy_(torch.cat([qb, kb, vb], dim=0))
-
-                layer.self_attn.qkv = qkv
                 del layer.self_attn.q_proj
                 del layer.self_attn.k_proj
                 del layer.self_attn.v_proj
-
+                
             # 2) Fuse input rmsnorm weight into qkv input columns
-            for layer in self.llm.model.layers:
-                w = layer.input_layernorm.weight   # [hidden]
-                qkv = layer.self_attn.qkv          # weight: [out, in]
-                qkv.weight.mul_(w.to(dtype=qkv.weight.dtype).unsqueeze(0))
+                w = layer.input_layernorm.weight.unsqueeze(0)
+                qkv.weight.mul_(w)
+                layer.self_attn.qkv = qkv
                 del layer.input_layernorm
 
             # 3) Fuse post-attention rmsnorm weight into MLP gate/up input columns
-            for layer in self.llm.model.layers:
-                w = layer.post_attention_layernorm.weight  # [hidden]
+                w = layer.post_attention_layernorm.weight.unsqueeze(0)
                 gate = layer.mlp.gate_proj
                 up = layer.mlp.up_proj
-                gate.weight.mul_(w.to(dtype=gate.weight.dtype).unsqueeze(0))
-                up.weight.mul_(w.to(dtype=up.weight.dtype).unsqueeze(0))
+                gate.weight.mul_(w)
+                up.weight.mul_(w)
                 del layer.post_attention_layernorm
 
             # 4) Fuse final norm weight into lm_head
-            norm_w = self.llm.model.norm.weight.to(dtype=self.llm.lm_head.weight.dtype)  # [hidden]
-            self.llm.lm_head.weight.mul_(norm_w.unsqueeze(0))                            # [vocab, hidden] *= [1, hidden]
+            w = self.llm.model.norm.weight.unsqueeze(0)
+            self.llm.lm_head.weight.mul_(w)                            
             del self.llm.model.norm
-
 
     def rotate_half(self, x, head_dim_half, dim):
         x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=dim)
@@ -344,12 +330,13 @@ class LLM_MAIN(torch.nn.Module):
         hidden_states = all_inputs[-4]
         history_len = all_inputs[-3]
         ids_len = all_inputs[-2]
+        mask = all_inputs[-1]
         kv_seq_len = history_len + ids_len
         rotary_pos_emb_cos_q = self.cos_rotary_pos_emb[..., history_len:kv_seq_len, :].float()
         rotary_pos_emb_sin_q = self.sin_rotary_pos_emb[..., history_len:kv_seq_len, :].float()
         rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2).unsqueeze(0)
         rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2).unsqueeze(0)
-        attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * all_inputs[-1]).float()
+        attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * mask).float()
         batch_size = hidden_states.shape[0].unsqueeze(0)
         for i, layer in enumerate(self.llm.model.layers):
             hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.square().mean(-1, keepdim=True) + self.variance_epsilon)
