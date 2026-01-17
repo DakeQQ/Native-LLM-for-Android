@@ -524,7 +524,7 @@ with torch.inference_mode():
             dynamic_axes[name] = {0: 'batch', 4: 'history_len'}
             name = f'out_key_{i}'
             output_names.append(name)
-            dynamic_axes[name] = {0: 'batch', 4: 'ks_seq_len'}
+            dynamic_axes[name] = {0: 'batch', 4: 'kv_seq_len'}
         for i in range(num_layers):
             name = f'in_value_{i}'
             input_names.append(name)
@@ -532,7 +532,7 @@ with torch.inference_mode():
             dynamic_axes[name] = {0: 'batch', 3: 'history_len'}
             name = f'out_value_{i}'
             output_names.append(name)
-            dynamic_axes[name] = {0: 'batch', 3: 'ks_seq_len'}
+            dynamic_axes[name] = {0: 'batch', 3: 'kv_seq_len'}
 
     input_names.append('hidden_states')
     all_inputs.append(hidden_states)
