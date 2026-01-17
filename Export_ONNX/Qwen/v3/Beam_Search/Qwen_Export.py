@@ -983,7 +983,7 @@ if USE_BEAM_SEARCH:
         in_name_E[num_keys_values_plus_7]: topK
     }
     
-    penality_reset_count_beam_init = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), device_type, DEVICE_ID)
+    init_penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), device_type, DEVICE_ID)
 else:
     BEAM_SIZE = 1
     save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
@@ -1021,9 +1021,9 @@ if USE_BEAM_SEARCH:
     input_feed_D[in_name_D[num_keys_values_plus_1]] = init_save_id_beam
     input_feed_D[in_name_D[num_keys_values_plus_2]] = init_repeat_penality
     if do_repeat_penality:
-        input_feed_F = {in_name_F[2]: penality_reset_count_beam_init}
+        input_feed_F = {in_name_F[2]: init_penality_reset_count}
 elif do_repeat_penality:
-    penality_reset_count_greedy = 0
+    init_penality_reset_count = 0
     input_feed_C[in_name_C[1]] = init_repeat_penality
     input_feed_C[in_name_C[3]] = init_batch_size_greedy
 
@@ -1036,21 +1036,16 @@ else:
 tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 num_prefill = tokens.shape[-1]
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, DEVICE_ID)
 ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([num_prefill], dtype=np.int64), device_type, DEVICE_ID)
-history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), device_type, DEVICE_ID)
-attention_mask_0 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, DEVICE_ID)
-attention_mask_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), device_type, DEVICE_ID)
-
 
 input_feed_A = {in_name_A: input_ids}
 all_outputs_A = ort_session_A.run_with_ort_values(out_name_A, input_feed_A)[0]
 
 input_feed_B = {
     in_name_B[num_keys_values]: all_outputs_A,
-    in_name_B[num_keys_values_plus_1]: history_len,
+    in_name_B[num_keys_values_plus_1]: init_history_len,
     in_name_B[num_keys_values_plus_2]: ids_len,
-    in_name_B[num_keys_values_plus_3]: attention_mask_1
+    in_name_B[num_keys_values_plus_3]: init_attention_mask_1
 }
 
 i = 0
@@ -1127,12 +1122,12 @@ while num_decode < generate_limit:
             all_outputs_C = ort_session_C.run_with_ort_values(out_name_C, input_feed_C)
             max_logits_idx = all_outputs_C[0].numpy().reshape(-1)[0]
             if num_decode >= PENALTY_RANGE:
-                reset_ids = save_id_greedy[penality_reset_count_greedy]
+                reset_ids = save_id_greedy[init_penality_reset_count]
                 if reset_ids != max_logits_idx:
                     repeat_penality = all_outputs_C[1].numpy()
                     repeat_penality[:, reset_ids] = 1.0
                     input_feed_C[in_name_C[1]].update_inplace(repeat_penality)
-                penality_reset_count_greedy += 1
+                init_penality_reset_count += 1
             else:
                 input_feed_C[in_name_C[1]] = all_outputs_C[1]
             input_feed_A[in_name_A] = all_outputs_C[0]
