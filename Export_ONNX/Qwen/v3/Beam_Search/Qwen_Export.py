@@ -6,14 +6,14 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
-onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
-onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
-onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
-onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
-onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
-onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
+path         = r'/home/iamj/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
+onnx_model_A = r'/home/iamj/Downloads/Qwen_ONNX/LLM_Embed.onnx'
+onnx_model_B = r'/home/iamj/Downloads/Qwen_ONNX/LLM_Main.onnx'
+onnx_model_C = r'/home/iamj/Downloads/Qwen_ONNX/Greedy_Search.onnx'
+onnx_model_D = r'/home/iamj/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
+onnx_model_E = r'/home/iamj/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
+onnx_model_F = r'/home/iamj/Downloads/Qwen_ONNX/Reset_Penality.onnx'
+onnx_model_G = r'/home/iamj/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # KV cache quantization
 KV_QUANT_DTYPE = "Q8"               # "Q4" | "Q8" | "F16" | "F32"
@@ -401,439 +401,439 @@ class LLM_MAIN(torch.nn.Module):
 
 
 print('Export start ...')
-with torch.inference_mode():
-    model = AutoModelForCausalLM.from_pretrained(
-        path,
-        dtype=torch.float32,
-        device_map='cpu',
-        trust_remote_code=True,
-        low_cpu_mem_usage=True
-    ).eval()
-
-    head_dim = model.config.head_dim
-    num_layers = model.config.num_hidden_layers
-    num_heads = model.config.num_attention_heads
-    num_key_value_heads = model.config.num_key_value_heads
-    vocab_size = model.model.vocab_size
-    hidden_size = model.model.embed_tokens.embedding_dim
-
-    batch_size = 3
-    ids_len = torch.tensor([10], dtype=torch.int64)
-    history_len = torch.tensor([0], dtype=torch.int64)
-    input_ids = torch.ones((1, ids_len), dtype=torch.int32)
-    hidden_states = torch.ones((batch_size, ids_len, hidden_size), dtype=torch.float32)
-    attention_mask = torch.tensor([1], dtype=torch.int8)
-
-    # 1. Export Embedding Model (Model A)
-    model_A = LLM_EMBED(model)
-    torch.onnx.export(
-        model_A,
-        (input_ids,),
-        onnx_model_A,
-        input_names=['input_ids'],
-        output_names=['hidden_states'],
-        dynamic_axes={
-            'input_ids': {0: 'batch', 1: 'ids_len'},
-            'hidden_states': {0: 'batch', 1: 'ids_len'}
-        },
-        opset_version=OPSET,
-        dynamo=False
-    )
-    del model_A
-    del input_ids
-
-    # 2. Prepare Inputs for Main Model (Model B)
-    all_inputs = []
-    input_names = []
-    output_names = []
-    dynamic_axes = {'hidden_states': {0: 'batch', 1: 'ids_len'}}
-
-    if KV_QUANT_DTYPE == "Q4" or KV_QUANT_DTYPE == "Q8":
-        total_elements = num_key_value_heads * head_dim * history_len
-        num_blocks = total_elements // KV_BLOCK_SIZE
-        k_scale = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
-        k_bias = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
-        v_scale = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
-        v_bias = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
-        if KV_QUANT_DTYPE == "Q4":
-            past_keys = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE // 2), dtype=torch.uint8)
-            past_values = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE // 2), dtype=torch.uint8)
-        elif KV_QUANT_DTYPE == "Q8":
-            past_keys = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE), dtype=torch.uint8)
-            past_values = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE), dtype=torch.uint8)
-
-        for i in range(num_layers):
-            name = f'in_key_{i}'
-            input_names.append(name)
-            all_inputs.append(past_keys)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_key_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_value_{i}'
-            input_names.append(name)
-            all_inputs.append(past_values)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_value_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_key_scale_{i}'
-            input_names.append(name)
-            all_inputs.append(k_scale)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_key_scale_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_key_bias_{i}'
-            input_names.append(name)
-            all_inputs.append(k_bias)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_key_bias_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_value_scale_{i}'
-            input_names.append(name)
-            all_inputs.append(v_scale)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_value_scale_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_value_bias_{i}'
-            input_names.append(name)
-            all_inputs.append(v_bias)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_value_bias_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-    else:
-        if KV_QUANT_DTYPE == "F16":
-            kv_dtype = torch.float16
-        else:
-            kv_dtype = torch.float32
-        past_keys = torch.zeros((batch_size, num_key_value_heads, 1, head_dim, history_len), dtype=kv_dtype)
-        past_values = torch.zeros((batch_size, num_key_value_heads, 1, history_len, head_dim), dtype=kv_dtype)
-        for i in range(num_layers):
-            name = f'in_key_{i}'
-            input_names.append(name)
-            all_inputs.append(past_keys)
-            dynamic_axes[name] = {0: 'batch', 4: 'history_len'}
-            name = f'out_key_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch', 4: 'kv_seq_len'}
-        for i in range(num_layers):
-            name = f'in_value_{i}'
-            input_names.append(name)
-            all_inputs.append(past_values)
-            dynamic_axes[name] = {0: 'batch', 3: 'history_len'}
-            name = f'out_value_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch', 3: 'kv_seq_len'}
-
-    input_names.append('hidden_states')
-    all_inputs.append(hidden_states)
-    input_names.append('history_len')
-    all_inputs.append(history_len)
-    input_names.append('ids_len')
-    all_inputs.append(ids_len)
-    input_names.append('attention_mask')
-    all_inputs.append(attention_mask)
-    output_names.append('logits')
-    output_names.append('kv_seq_len')
-    dynamic_axes['logits'] = {0: 'batch'}
-
-    # Export Main Model (Model B)
-    model = LLM_MAIN(model, MAX_SEQ_LEN, num_heads, num_key_value_heads, head_dim, num_layers, scale_dtype)
-    torch.onnx.export(
-        model,
-        tuple(all_inputs),
-        onnx_model_B,
-        input_names=input_names,
-        output_names=output_names,
-        dynamic_axes=dynamic_axes,
-        do_constant_folding=True,
-        opset_version=OPSET,
-        dynamo=False
-    )
-    del model
-    del input_names
-    del output_names
-    del dynamic_axes
-    del all_inputs
-    del num_heads
-    del num_key_value_heads
-    del head_dim
-    del hidden_size
-    del ids_len
-    del history_len
-    del batch_size
-    del hidden_states
-    del attention_mask
-    gc.collect()
-
-    # 3. Export Greedy Search (Model C)
-    greedy = GREEDY_SEARCH()
-    beam_size = torch.tensor([BEAM_SIZE], dtype=torch.int64)
-    repeat_penality = torch.ones((beam_size, vocab_size), dtype=torch.float32)
-    penality_reset_count = torch.zeros(beam_size, dtype=torch.int32)
-    logits = torch.ones((beam_size, vocab_size), dtype=torch.float32)
-    penality_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
-    batch_indices = torch.arange(BEAM_SIZE, dtype=torch.int64)
-
-    torch.onnx.export(
-        greedy,
-        (logits, repeat_penality, penality_value, beam_size),
-        # Reuse the beam_size tensor as batch_size during export process.
-        onnx_model_C,
-        input_names=['logits', 'repeat_penality_in', 'penality_value', 'batch_size'],
-        output_names=['max_logits_idx', 'repeat_penality_out'],
-        dynamic_axes={
-            'logits': {0: 'batch'},
-            'repeat_penality_in': {0: 'batch'},
-            'repeat_penality_out': {0: 'batch'},
-            'max_logits_idx': {0: 'batch'}
-        },
-        opset_version=OPSET,
-        dynamo=False
-    )
-    del greedy
-
-    # 4. Export First Beam Search (Model D)
-    first_beam_search = FIRST_BEAM_SEARCH(num_layers * 2 if (KV_QUANT_DTYPE == "F16" or KV_QUANT_DTYPE == "F32") else num_layers * 6)
-    topK = torch.tensor([TOP_K], dtype=torch.int64)
-    save_id = torch.zeros((beam_size, 10), dtype=torch.int32)
-    previous_prob = torch.zeros((beam_size, 1), dtype=torch.float32)
-    past_keys_greedy = past_keys[[0]]
-    past_values_greedy = past_values[[0]]
-
-    all_inputs = []
-    input_names = []
-    output_names = []
-    dynamic_axes = {}
-    if KV_QUANT_DTYPE == "Q4" or KV_QUANT_DTYPE == "Q8":
-        k_scale_greedy = k_scale[[0]]
-        k_bias_greedy = k_bias[[0]]
-        v_scale_greedy = v_scale[[0]]
-        v_bias_greedy = v_bias[[0]]
-        for i in range(num_layers):
-            name = f'in_key_{i}'
-            input_names.append(name)
-            all_inputs.append(past_keys_greedy)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_key_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_value_{i}'
-            input_names.append(name)
-            all_inputs.append(past_values_greedy)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_value_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_key_scale_{i}'
-            input_names.append(name)
-            all_inputs.append(k_scale_greedy)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_key_scale_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_key_bias_{i}'
-            input_names.append(name)
-            all_inputs.append(k_bias_greedy)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_key_bias_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_value_scale_{i}'
-            input_names.append(name)
-            all_inputs.append(v_scale_greedy)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_value_scale_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-        for i in range(num_layers):
-            name = f'in_value_bias_{i}'
-            input_names.append(name)
-            all_inputs.append(v_bias_greedy)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
-            name = f'out_value_bias_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
-    else:
-        for i in range(num_layers):
-            name = f'in_key_{i}'
-            input_names.append(name)
-            all_inputs.append(past_keys_greedy)
-            dynamic_axes[name] = {0: 'batch', 4: 'history_len'}
-            name = f'out_key_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch', 4: 'kv_seq_len'}
-        for i in range(num_layers):
-            name = f'in_value_{i}'
-            input_names.append(name)
-            all_inputs.append(past_values_greedy)
-            dynamic_axes[name] = {0: 'batch', 3: 'history_len'}
-            name = f'out_value_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {0: 'batch', 3: 'kv_seq_len'}
-
-    input_names.append('logits')
-    all_inputs.append(logits[[0]])
-    input_names.append('save_id_in')
-    all_inputs.append(save_id)
-    input_names.append('repeat_penality_in')
-    all_inputs.append(repeat_penality)
-    input_names.append('penality_value')
-    all_inputs.append(penality_value)
-    input_names.append('beam_size')
-    all_inputs.append(beam_size)
-    output_names.append('top_beam_indices')
-    output_names.append('save_id_out')
-    output_names.append('repeat_penality_out')
-    output_names.append('top_beam_prob')
-    output_names.append('batch_indices')
-    output_names.append('max_logits_idx')
-    dynamic_axes['save_id_in'] = {0: 'batch', 1: 'history_len'}
-    dynamic_axes['save_id_out'] = {0: 'batch', 1: 'history_len'}
-    dynamic_axes['repeat_penality_in'] = {0: 'batch'}
-    dynamic_axes['repeat_penality_out'] = {0: 'batch'}
-    dynamic_axes['logits'] = {0: 'batch'}
-    dynamic_axes['top_beam_prob'] = {0: 'batch'}
-    dynamic_axes['top_beam_indices'] = {0: 'batch'}
-    dynamic_axes['max_logits_idx'] = {0: 'batch'}
-    dynamic_axes['batch_indices'] = {0: 'batch'}
-
-    torch.onnx.export(
-        first_beam_search,
-        tuple(all_inputs),
-        onnx_model_D,
-        input_names=input_names,
-        output_names=output_names,
-        dynamic_axes=dynamic_axes,
-        opset_version=OPSET,
-        dynamo=False
-    )
-    del first_beam_search
-
-    # 5. Export Second Beam Search (Model E)
-    all_inputs = []
-    input_names = []
-    for i in range(num_layers):
-        name = f'in_key_{i}'
-        input_names.append(name)
-        all_inputs.append(past_keys)
-    for i in range(num_layers):
-        name = f'in_value_{i}'
-        input_names.append(name)
-        all_inputs.append(past_values)
-    if KV_QUANT_DTYPE == "Q4" or KV_QUANT_DTYPE == "Q8":
-        for i in range(num_layers):
-            name = f'in_key_scale_{i}'
-            input_names.append(name)
-            all_inputs.append(k_scale)
-        for i in range(num_layers):
-            name = f'in_key_bias_{i}'
-            input_names.append(name)
-            all_inputs.append(k_bias)
-        for i in range(num_layers):
-            name = f'in_value_scale_{i}'
-            input_names.append(name)
-            all_inputs.append(v_scale)
-        for i in range(num_layers):
-            name = f'in_value_bias_{i}'
-            input_names.append(name)
-            all_inputs.append(v_bias)
-
-    input_names.append('logits')
-    all_inputs.append(logits)
-    input_names.append('save_id_in')
-    all_inputs.append(save_id)
-    input_names.append('repeat_penality_in')
-    all_inputs.append(repeat_penality)
-    input_names.append('previous_prob')
-    all_inputs.append(previous_prob)
-    input_names.append('batch_indices')
-    all_inputs.append(batch_indices)
-    input_names.append('penality_value')
-    all_inputs.append(penality_value)
-    input_names.append('beam_size')
-    all_inputs.append(beam_size)
-    input_names.append('topK')
-    all_inputs.append(topK)
-    dynamic_axes['previous_prob'] = {0: 'batch'}
-    output_names.remove("batch_indices")
-
-    second_beam_search = SECOND_BEAM_SEARCH(num_layers * 2 if (KV_QUANT_DTYPE == "F16" or KV_QUANT_DTYPE == "F32") else num_layers * 6)
-    torch.onnx.export(
-        second_beam_search,
-        tuple(all_inputs),
-        onnx_model_E,
-        input_names=input_names,
-        output_names=output_names,
-        dynamic_axes=dynamic_axes,
-        opset_version=OPSET,
-        dynamo=False
-    )
-    del second_beam_search
-    del num_layers
-    del past_keys
-    del past_values
-    del input_names
-    del output_names
-    del dynamic_axes
-    del all_inputs
-    del beam_size
-    del penality_value
-
-    # 6. Export Reset Penalty (Model F)
-    reset_penality = RESET_PENALITY()
-    torch.onnx.export(
-        reset_penality,
-        (save_id, repeat_penality, penality_reset_count, batch_indices),
-        onnx_model_F,
-        input_names=['save_id_in', 'repeat_penality_in', 'penality_reset_count_in', 'batch_indices'],
-        output_names=['save_id_out', 'repeat_penality_out', 'penality_reset_count_out'],
-        dynamic_axes={
-            'save_id_in': {0: 'batch', 1: 'history_len'},
-            'save_id_out': {0: 'batch', 1: 'history_len'},
-            'repeat_penality_in': {0: 'batch'},
-            'repeat_penality_out': {0: 'batch'},
-            'penality_reset_count_in': {0: 'batch'},
-            'penality_reset_count_out': {0: 'batch'},
-            'batch_indices': {0: 'batch'}
-        },
-        opset_version=OPSET,
-        dynamo=False
-    )
-    del reset_penality
-    del save_id
-    del repeat_penality
-    del penality_reset_count
-    del batch_indices
-
-    # 7. Export Argmax (Model G)
-    argmax = ARGMAX()
-    torch.onnx.export(
-        argmax,
-        (logits,),
-        onnx_model_G,
-        input_names=['logits'],
-        output_names=['max_logits_idx'],
-        dynamic_axes={
-            'logits': {0: 'batch'},
-            'max_logits_idx': {0: 'batch'}
-        },
-        opset_version=OPSET,
-        dynamo=False
-    )
+# with torch.inference_mode():
+#     model = AutoModelForCausalLM.from_pretrained(
+#         path,
+#         dtype=torch.float32,
+#         device_map='cpu',
+#         trust_remote_code=True,
+#         low_cpu_mem_usage=True
+#     ).eval()
+#
+#     head_dim = model.config.head_dim
+#     num_layers = model.config.num_hidden_layers
+#     num_heads = model.config.num_attention_heads
+#     num_key_value_heads = model.config.num_key_value_heads
+#     vocab_size = model.model.vocab_size
+#     hidden_size = model.model.embed_tokens.embedding_dim
+#
+#     batch_size = 3
+#     ids_len = torch.tensor([10], dtype=torch.int64)
+#     history_len = torch.tensor([0], dtype=torch.int64)
+#     input_ids = torch.ones((1, ids_len), dtype=torch.int32)
+#     hidden_states = torch.ones((batch_size, ids_len, hidden_size), dtype=torch.float32)
+#     attention_mask = torch.tensor([1], dtype=torch.int8)
+#
+#     # 1. Export Embedding Model (Model A)
+#     model_A = LLM_EMBED(model)
+#     torch.onnx.export(
+#         model_A,
+#         (input_ids,),
+#         onnx_model_A,
+#         input_names=['input_ids'],
+#         output_names=['hidden_states'],
+#         dynamic_axes={
+#             'input_ids': {0: 'batch', 1: 'ids_len'},
+#             'hidden_states': {0: 'batch', 1: 'ids_len'}
+#         },
+#         opset_version=OPSET,
+#         dynamo=False
+#     )
+#     del model_A
+#     del input_ids
+#
+#     # 2. Prepare Inputs for Main Model (Model B)
+#     all_inputs = []
+#     input_names = []
+#     output_names = []
+#     dynamic_axes = {'hidden_states': {0: 'batch', 1: 'ids_len'}}
+#
+#     if KV_QUANT_DTYPE == "Q4" or KV_QUANT_DTYPE == "Q8":
+#         total_elements = num_key_value_heads * head_dim * history_len
+#         num_blocks = total_elements // KV_BLOCK_SIZE
+#         k_scale = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
+#         k_bias = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
+#         v_scale = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
+#         v_bias = torch.ones([batch_size, num_blocks, 1], dtype=scale_dtype)
+#         if KV_QUANT_DTYPE == "Q4":
+#             past_keys = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE // 2), dtype=torch.uint8)
+#             past_values = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE // 2), dtype=torch.uint8)
+#         elif KV_QUANT_DTYPE == "Q8":
+#             past_keys = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE), dtype=torch.uint8)
+#             past_values = torch.randint(0, 256, (batch_size, num_blocks, KV_BLOCK_SIZE), dtype=torch.uint8)
+#
+#         for i in range(num_layers):
+#             name = f'in_key_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_keys)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_key_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_value_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_values)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_value_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_key_scale_{i}'
+#             input_names.append(name)
+#             all_inputs.append(k_scale)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_key_scale_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_key_bias_{i}'
+#             input_names.append(name)
+#             all_inputs.append(k_bias)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_key_bias_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_value_scale_{i}'
+#             input_names.append(name)
+#             all_inputs.append(v_scale)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_value_scale_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_value_bias_{i}'
+#             input_names.append(name)
+#             all_inputs.append(v_bias)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_value_bias_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#     else:
+#         if KV_QUANT_DTYPE == "F16":
+#             kv_dtype = torch.float16
+#         else:
+#             kv_dtype = torch.float32
+#         past_keys = torch.zeros((batch_size, num_key_value_heads, 1, head_dim, history_len), dtype=kv_dtype)
+#         past_values = torch.zeros((batch_size, num_key_value_heads, 1, history_len, head_dim), dtype=kv_dtype)
+#         for i in range(num_layers):
+#             name = f'in_key_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_keys)
+#             dynamic_axes[name] = {0: 'batch', 4: 'history_len'}
+#             name = f'out_key_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch', 4: 'kv_seq_len'}
+#         for i in range(num_layers):
+#             name = f'in_value_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_values)
+#             dynamic_axes[name] = {0: 'batch', 3: 'history_len'}
+#             name = f'out_value_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch', 3: 'kv_seq_len'}
+#
+#     input_names.append('hidden_states')
+#     all_inputs.append(hidden_states)
+#     input_names.append('history_len')
+#     all_inputs.append(history_len)
+#     input_names.append('ids_len')
+#     all_inputs.append(ids_len)
+#     input_names.append('attention_mask')
+#     all_inputs.append(attention_mask)
+#     output_names.append('logits')
+#     output_names.append('kv_seq_len')
+#     dynamic_axes['logits'] = {0: 'batch'}
+#
+#     # Export Main Model (Model B)
+#     model = LLM_MAIN(model, MAX_SEQ_LEN, num_heads, num_key_value_heads, head_dim, num_layers, scale_dtype)
+#     torch.onnx.export(
+#         model,
+#         tuple(all_inputs),
+#         onnx_model_B,
+#         input_names=input_names,
+#         output_names=output_names,
+#         dynamic_axes=dynamic_axes,
+#         do_constant_folding=True,
+#         opset_version=OPSET,
+#         dynamo=False
+#     )
+#     del model
+#     del input_names
+#     del output_names
+#     del dynamic_axes
+#     del all_inputs
+#     del num_heads
+#     del num_key_value_heads
+#     del head_dim
+#     del hidden_size
+#     del ids_len
+#     del history_len
+#     del batch_size
+#     del hidden_states
+#     del attention_mask
+#     gc.collect()
+#
+#     # 3. Export Greedy Search (Model C)
+#     greedy = GREEDY_SEARCH()
+#     beam_size = torch.tensor([BEAM_SIZE], dtype=torch.int64)
+#     repeat_penality = torch.ones((beam_size, vocab_size), dtype=torch.float32)
+#     penality_reset_count = torch.zeros(beam_size, dtype=torch.int32)
+#     logits = torch.ones((beam_size, vocab_size), dtype=torch.float32)
+#     penality_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
+#     batch_indices = torch.arange(BEAM_SIZE, dtype=torch.int64)
+#
+#     torch.onnx.export(
+#         greedy,
+#         (logits, repeat_penality, penality_value, beam_size),
+#         # Reuse the beam_size tensor as batch_size during export process.
+#         onnx_model_C,
+#         input_names=['logits', 'repeat_penality_in', 'penality_value', 'batch_size'],
+#         output_names=['max_logits_idx', 'repeat_penality_out'],
+#         dynamic_axes={
+#             'logits': {0: 'batch'},
+#             'repeat_penality_in': {0: 'batch'},
+#             'repeat_penality_out': {0: 'batch'},
+#             'max_logits_idx': {0: 'batch'}
+#         },
+#         opset_version=OPSET,
+#         dynamo=False
+#     )
+#     del greedy
+#
+#     # 4. Export First Beam Search (Model D)
+#     first_beam_search = FIRST_BEAM_SEARCH(num_layers * 2 if (KV_QUANT_DTYPE == "F16" or KV_QUANT_DTYPE == "F32") else num_layers * 6)
+#     topK = torch.tensor([TOP_K], dtype=torch.int64)
+#     save_id = torch.zeros((beam_size, 10), dtype=torch.int32)
+#     previous_prob = torch.zeros((beam_size, 1), dtype=torch.float32)
+#     past_keys_greedy = past_keys[[0]]
+#     past_values_greedy = past_values[[0]]
+#
+#     all_inputs = []
+#     input_names = []
+#     output_names = []
+#     dynamic_axes = {}
+#     if KV_QUANT_DTYPE == "Q4" or KV_QUANT_DTYPE == "Q8":
+#         k_scale_greedy = k_scale[[0]]
+#         k_bias_greedy = k_bias[[0]]
+#         v_scale_greedy = v_scale[[0]]
+#         v_bias_greedy = v_bias[[0]]
+#         for i in range(num_layers):
+#             name = f'in_key_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_keys_greedy)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_key_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_value_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_values_greedy)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_value_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_key_scale_{i}'
+#             input_names.append(name)
+#             all_inputs.append(k_scale_greedy)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_key_scale_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_key_bias_{i}'
+#             input_names.append(name)
+#             all_inputs.append(k_bias_greedy)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_key_bias_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_value_scale_{i}'
+#             input_names.append(name)
+#             all_inputs.append(v_scale_greedy)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_value_scale_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#         for i in range(num_layers):
+#             name = f'in_value_bias_{i}'
+#             input_names.append(name)
+#             all_inputs.append(v_bias_greedy)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks'}
+#             name = f'out_value_bias_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch_size', 1: 'num_blocks_plus'}
+#     else:
+#         for i in range(num_layers):
+#             name = f'in_key_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_keys_greedy)
+#             dynamic_axes[name] = {0: 'batch', 4: 'history_len'}
+#             name = f'out_key_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch', 4: 'kv_seq_len'}
+#         for i in range(num_layers):
+#             name = f'in_value_{i}'
+#             input_names.append(name)
+#             all_inputs.append(past_values_greedy)
+#             dynamic_axes[name] = {0: 'batch', 3: 'history_len'}
+#             name = f'out_value_{i}'
+#             output_names.append(name)
+#             dynamic_axes[name] = {0: 'batch', 3: 'kv_seq_len'}
+#
+#     input_names.append('logits')
+#     all_inputs.append(logits[[0]])
+#     input_names.append('save_id_in')
+#     all_inputs.append(save_id)
+#     input_names.append('repeat_penality_in')
+#     all_inputs.append(repeat_penality)
+#     input_names.append('penality_value')
+#     all_inputs.append(penality_value)
+#     input_names.append('beam_size')
+#     all_inputs.append(beam_size)
+#     output_names.append('top_beam_indices')
+#     output_names.append('save_id_out')
+#     output_names.append('repeat_penality_out')
+#     output_names.append('top_beam_prob')
+#     output_names.append('batch_indices')
+#     output_names.append('max_logits_idx')
+#     dynamic_axes['save_id_in'] = {0: 'batch', 1: 'history_len'}
+#     dynamic_axes['save_id_out'] = {0: 'batch', 1: 'history_len'}
+#     dynamic_axes['repeat_penality_in'] = {0: 'batch'}
+#     dynamic_axes['repeat_penality_out'] = {0: 'batch'}
+#     dynamic_axes['logits'] = {0: 'batch'}
+#     dynamic_axes['top_beam_prob'] = {0: 'batch'}
+#     dynamic_axes['top_beam_indices'] = {0: 'batch'}
+#     dynamic_axes['max_logits_idx'] = {0: 'batch'}
+#     dynamic_axes['batch_indices'] = {0: 'batch'}
+#
+#     torch.onnx.export(
+#         first_beam_search,
+#         tuple(all_inputs),
+#         onnx_model_D,
+#         input_names=input_names,
+#         output_names=output_names,
+#         dynamic_axes=dynamic_axes,
+#         opset_version=OPSET,
+#         dynamo=False
+#     )
+#     del first_beam_search
+#
+#     # 5. Export Second Beam Search (Model E)
+#     all_inputs = []
+#     input_names = []
+#     for i in range(num_layers):
+#         name = f'in_key_{i}'
+#         input_names.append(name)
+#         all_inputs.append(past_keys)
+#     for i in range(num_layers):
+#         name = f'in_value_{i}'
+#         input_names.append(name)
+#         all_inputs.append(past_values)
+#     if KV_QUANT_DTYPE == "Q4" or KV_QUANT_DTYPE == "Q8":
+#         for i in range(num_layers):
+#             name = f'in_key_scale_{i}'
+#             input_names.append(name)
+#             all_inputs.append(k_scale)
+#         for i in range(num_layers):
+#             name = f'in_key_bias_{i}'
+#             input_names.append(name)
+#             all_inputs.append(k_bias)
+#         for i in range(num_layers):
+#             name = f'in_value_scale_{i}'
+#             input_names.append(name)
+#             all_inputs.append(v_scale)
+#         for i in range(num_layers):
+#             name = f'in_value_bias_{i}'
+#             input_names.append(name)
+#             all_inputs.append(v_bias)
+#
+#     input_names.append('logits')
+#     all_inputs.append(logits)
+#     input_names.append('save_id_in')
+#     all_inputs.append(save_id)
+#     input_names.append('repeat_penality_in')
+#     all_inputs.append(repeat_penality)
+#     input_names.append('previous_prob')
+#     all_inputs.append(previous_prob)
+#     input_names.append('batch_indices')
+#     all_inputs.append(batch_indices)
+#     input_names.append('penality_value')
+#     all_inputs.append(penality_value)
+#     input_names.append('beam_size')
+#     all_inputs.append(beam_size)
+#     input_names.append('topK')
+#     all_inputs.append(topK)
+#     dynamic_axes['previous_prob'] = {0: 'batch'}
+#     output_names.remove("batch_indices")
+#
+#     second_beam_search = SECOND_BEAM_SEARCH(num_layers * 2 if (KV_QUANT_DTYPE == "F16" or KV_QUANT_DTYPE == "F32") else num_layers * 6)
+#     torch.onnx.export(
+#         second_beam_search,
+#         tuple(all_inputs),
+#         onnx_model_E,
+#         input_names=input_names,
+#         output_names=output_names,
+#         dynamic_axes=dynamic_axes,
+#         opset_version=OPSET,
+#         dynamo=False
+#     )
+#     del second_beam_search
+#     del num_layers
+#     del past_keys
+#     del past_values
+#     del input_names
+#     del output_names
+#     del dynamic_axes
+#     del all_inputs
+#     del beam_size
+#     del penality_value
+#
+#     # 6. Export Reset Penalty (Model F)
+#     reset_penality = RESET_PENALITY()
+#     torch.onnx.export(
+#         reset_penality,
+#         (save_id, repeat_penality, penality_reset_count, batch_indices),
+#         onnx_model_F,
+#         input_names=['save_id_in', 'repeat_penality_in', 'penality_reset_count_in', 'batch_indices'],
+#         output_names=['save_id_out', 'repeat_penality_out', 'penality_reset_count_out'],
+#         dynamic_axes={
+#             'save_id_in': {0: 'batch', 1: 'history_len'},
+#             'save_id_out': {0: 'batch', 1: 'history_len'},
+#             'repeat_penality_in': {0: 'batch'},
+#             'repeat_penality_out': {0: 'batch'},
+#             'penality_reset_count_in': {0: 'batch'},
+#             'penality_reset_count_out': {0: 'batch'},
+#             'batch_indices': {0: 'batch'}
+#         },
+#         opset_version=OPSET,
+#         dynamo=False
+#     )
+#     del reset_penality
+#     del save_id
+#     del repeat_penality
+#     del penality_reset_count
+#     del batch_indices
+#
+#     # 7. Export Argmax (Model G)
+#     argmax = ARGMAX()
+#     torch.onnx.export(
+#         argmax,
+#         (logits,),
+#         onnx_model_G,
+#         input_names=['logits'],
+#         output_names=['max_logits_idx'],
+#         dynamic_axes={
+#             'logits': {0: 'batch'},
+#             'max_logits_idx': {0: 'batch'}
+#         },
+#         opset_version=OPSET,
+#         dynamo=False
+#     )
 print('\nExport done!\n\nStart running the LLM by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
 
@@ -917,8 +917,6 @@ else:
     k_scales = None
 
 device_type = device_type_copy
-
-generate_limit = MAX_SEQ_LEN - 10                   # 10 = length of basic ids
 num_keys_values_plus_1 = num_keys_values + 1
 num_keys_values_plus_2 = num_keys_values + 2
 num_keys_values_plus_3 = num_keys_values + 3
@@ -1031,10 +1029,12 @@ if TEST_THINK_MODE:
     prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
 else:
     prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+    
 tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+num_prefill = tokens.shape[-1]
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
 ids_len_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int64), device_type, DEVICE_ID)
-ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([tokens.shape[-1]], dtype=np.int64), device_type, DEVICE_ID)
+ids_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([num_prefill], dtype=np.int64), device_type, DEVICE_ID)
 history_len = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int64), device_type, DEVICE_ID)
 attention_mask_0 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([0], dtype=np.int8), device_type, DEVICE_ID)
 attention_mask_1 = onnxruntime.OrtValue.ortvalue_from_numpy(np.array([1], dtype=np.int8), device_type, DEVICE_ID)
@@ -1081,7 +1081,7 @@ if k_scales:
 # --- Run Inference ---
 print(f'\n\nTest Question: {TEST_QUERY}\nLLM Answering:')
 num_decode = 0
-generate_limit = MAX_SEQ_LEN - tokens.shape[-1]
+generate_limit = MAX_SEQ_LEN - num_prefill
 start_time = time.time()
 while num_decode < generate_limit:
     all_outputs_B = ort_session_B.run_with_ort_values(out_name_B, input_feed_B)
@@ -1137,7 +1137,7 @@ while num_decode < generate_limit:
             input_feed_G = {in_name_G: all_outputs_B[num_keys_values]}
             all_outputs_G = ort_session_G.run_with_ort_values(out_name_G, input_feed_G)
             input_feed_A[in_name_A] = all_outputs_G[0]
-            max_logits_idx = all_outputs_C[0].numpy().reshape(-1)[0]
+            max_logits_idx = all_outputs_G[0].numpy().reshape(-1)[0]
         if max_logits_idx in STOP_TOKEN:
             break
         input_feed_B.update(zip(in_name_B[:num_keys_values], all_outputs_B))
@@ -1154,6 +1154,4 @@ if USE_BEAM_SEARCH:
     result = tokenizer.decode(all_outputs_E[num_keys_values_plus_1].numpy()[0, :num_decode], skip_special_tokens=True)  # 0 is the Top_1
 else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
-
 print(f"\n\nFinal:\n{result}\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
-
