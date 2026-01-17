@@ -6,7 +6,7 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path         = r'/home/DakeQQ/Downloads/Qwen3-0.6B'                             # Set the folder path where the Qwen whole project downloaded.
+path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
 onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
@@ -21,14 +21,14 @@ KV_BLOCK_SIZE = 1024                # Block size for KV quantization. block_size
 USE_FLOAT16_SCALE_BIAS = False      # Set to True for ARM64 devices or GPU that perform better with float16 arithmetic.
 
 # Test input
-TEST_THINK_MODE = True
+TEST_THINK_MODE = False
 TEST_QUERY = "地球最高的山是哪座山？"
 
 # Decoding strategy
 STOP_TOKEN = (151643, 151645)       # Qwen stop token ids
 USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; 1.0 = no penalty
-PENALTY_RANGE = 10                  # Recent-token window to apply penalty
+REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
+PENALTY_RANGE = 20                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
 TOP_K = 3
 BEAM_SIZE = 3
@@ -222,63 +222,113 @@ class LLM_EMBED(torch.nn.Module):
 class LLM_MAIN(torch.nn.Module):
     def __init__(self, llm, max_seq_len, num_heads, num_key_value_heads, head_dim, num_layers, scale_dtype):
         super(LLM_MAIN, self).__init__()
+
+        # --- Core config ---
         self.llm = llm
-        self.head_dim = head_dim
-        self.num_heads = num_heads
-        self.num_layers = num_layers
-        self.num_layers_2 = num_layers * 2
-        self.num_layers_3 = num_layers * 3
-        self.num_layers_4 = num_layers * 4
-        self.num_layers_5 = num_layers * 5
-        self.num_key_value_heads = num_key_value_heads
-        self.head_dim_half = head_dim // 2
+        self.head_dim = int(head_dim)
+        self.num_heads = int(num_heads)
+        self.num_layers = int(num_layers)
+        self.num_layers_2 = self.num_layers * 2
+        self.num_layers_3 = self.num_layers * 3
+        self.num_layers_4 = self.num_layers * 4
+        self.num_layers_5 = self.num_layers * 5
+
+        self.num_key_value_heads = int(num_key_value_heads)
+        self.head_dim_half = self.head_dim // 2
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
-        self.variance_epsilon = float(1e-6)
-        self.quantizer = KVQuantizer(KV_QUANT_DTYPE, KV_BLOCK_SIZE, scale_dtype).eval()
-        self.dequantizer = KVDequantizer(KV_QUANT_DTYPE, KV_BLOCK_SIZE, num_key_value_heads, head_dim, scale_dtype).eval()
-        self.scale_factor = float(head_dim ** -0.25)
-        position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
-        idx_theta = (position_ids * self.llm.model.rotary_emb.inv_freq).unsqueeze(0).unsqueeze(0)
-        cos_rotary_pos_emb = torch.cos(idx_theta) * self.scale_factor
-        sin_rotary_pos_emb = torch.sin(idx_theta) * self.scale_factor
-        self.cos_rotary_pos_emb = torch.cat((cos_rotary_pos_emb, cos_rotary_pos_emb), dim=-1).half()
-        self.sin_rotary_pos_emb = torch.cat((sin_rotary_pos_emb, sin_rotary_pos_emb), dim=-1).half()
-        self.attention_mask = (1 - torch.tril(torch.ones([1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
+        self.variance_epsilon = torch.tensor([1e-6], dtype=torch.float32)
+
+        # --- KV cache quant flags ---
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_f32 = (KV_QUANT_DTYPE == "F32")
         self.kv_q4 = (KV_QUANT_DTYPE == "Q4")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
-        self.save_key = [None] * num_layers
-        self.save_value = [None] * num_layers
-        if self.kv_q4 or self.kv_q8:
-            self.save_k_scale = [None] * num_layers
-            self.save_k_bias = [None] * num_layers
-            self.save_v_scale = [None] * num_layers
-            self.save_v_bias = [None] * num_layers
 
-        for layer in self.llm.model.layers:
-            q_proj = layer.self_attn.q_proj
-            k_proj = layer.self_attn.k_proj
-            v_proj = layer.self_attn.v_proj
-            in_features = q_proj.in_features
-            out_features = q_proj.out_features + k_proj.out_features + v_proj.out_features
-            has_bias = (q_proj.bias is not None) or (k_proj.bias is not None) or (v_proj.bias is not None)
-            qkv = torch.nn.Linear(in_features, out_features, bias=has_bias)
-            layer.self_attn.q_out_features = int(q_proj.out_features)
-            layer.self_attn.k_out_features = int(k_proj.out_features)
-            layer.self_attn.v_out_features = int(v_proj.out_features)
-            layer.self_attn.qkv_in_features = int(in_features)
-            with torch.no_grad():
+        # --- Quantizer / Dequantizer ---
+        self.quantizer = KVQuantizer(KV_QUANT_DTYPE, KV_BLOCK_SIZE, scale_dtype).eval()
+        self.dequantizer = KVDequantizer(
+            KV_QUANT_DTYPE, KV_BLOCK_SIZE, self.num_key_value_heads, self.head_dim, scale_dtype
+        ).eval()
+
+        # --- RoPE buffers (precompute once) ---
+        scale_factor = float(self.head_dim ** -0.25)
+        position_ids = torch.arange(int(max_seq_len), dtype=torch.float32).unsqueeze(-1)            # [S, 1]
+        idx_theta = (position_ids * self.llm.model.rotary_emb.inv_freq).unsqueeze(0).unsqueeze(0)   # [1, 1, S, D/2]
+        cos = torch.cos(idx_theta) * scale_factor
+        sin = torch.sin(idx_theta) * scale_factor
+        cos = torch.cat((cos, cos), dim=-1).half()  # [1, 1, S, D]
+        sin = torch.cat((sin, sin), dim=-1).half()
+
+        self.register_buffer("cos_rotary_pos_emb", cos, persistent=False)
+        self.register_buffer("sin_rotary_pos_emb", sin, persistent=False)
+
+        # --- Causal mask buffer ---
+        mask = (1 - torch.tril(torch.ones([1, 1, int(max_seq_len), int(max_seq_len)], dtype=torch.int8))) * -128
+        self.register_buffer("attention_mask", mask, persistent=False)
+
+        # --- KV output holders ---
+        self.save_key = [None] * self.num_layers
+        self.save_value = [None] * self.num_layers
+        if self.kv_q4 or self.kv_q8:
+            self.save_k_scale = [None] * self.num_layers
+            self.save_k_bias = [None] * self.num_layers
+            self.save_v_scale = [None] * self.num_layers
+            self.save_v_bias = [None] * self.num_layers
+
+        # --- Fuse / rearrange weights (all surgery under no_grad) ---
+        with torch.no_grad():
+            # 1) Fuse q/k/v into qkv
+            for layer in self.llm.model.layers:
+                q_proj = layer.self_attn.q_proj
+                k_proj = layer.self_attn.k_proj
+                v_proj = layer.self_attn.v_proj
+
+                in_features = int(q_proj.in_features)
+                out_features = int(q_proj.out_features + k_proj.out_features + v_proj.out_features)
+                has_bias = (q_proj.bias is not None) or (k_proj.bias is not None) or (v_proj.bias is not None)
+
+                qkv = torch.nn.Linear(in_features, out_features, bias=has_bias)
+
+                layer.self_attn.q_out_features = int(q_proj.out_features)
+                layer.self_attn.k_out_features = int(k_proj.out_features)
+                layer.self_attn.v_out_features = int(v_proj.out_features)
+                layer.self_attn.qkv_in_features = int(in_features)
+
                 qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
                 if has_bias:
-                    qb = q_proj.bias if q_proj.bias is not None else torch.zeros(q_proj.out_features, dtype=qkv.weight.dtype)
-                    kb = k_proj.bias if k_proj.bias is not None else torch.zeros(k_proj.out_features, dtype=qkv.weight.dtype)
-                    vb = v_proj.bias if v_proj.bias is not None else torch.zeros(v_proj.out_features, dtype=qkv.weight.dtype)
+                    device = qkv.weight.device
+                    dtype = qkv.weight.dtype
+                    qb = q_proj.bias if q_proj.bias is not None else torch.zeros(q_proj.out_features, dtype=dtype)
+                    kb = k_proj.bias if k_proj.bias is not None else torch.zeros(k_proj.out_features, dtype=dtype)
+                    vb = v_proj.bias if v_proj.bias is not None else torch.zeros(v_proj.out_features, dtype=dtype)
                     qkv.bias.copy_(torch.cat([qb, kb, vb], dim=0))
-            layer.self_attn.qkv = qkv
-            del layer.self_attn.q_proj
-            del layer.self_attn.k_proj
-            del layer.self_attn.v_proj
+
+                layer.self_attn.qkv = qkv
+                del layer.self_attn.q_proj
+                del layer.self_attn.k_proj
+                del layer.self_attn.v_proj
+
+            # 2) Fuse input rmsnorm weight into qkv input columns
+            for layer in self.llm.model.layers:
+                w = layer.input_layernorm.weight   # [hidden]
+                qkv = layer.self_attn.qkv          # weight: [out, in]
+                qkv.weight.mul_(w.to(dtype=qkv.weight.dtype).unsqueeze(0))
+                del layer.input_layernorm
+
+            # 3) Fuse post-attention rmsnorm weight into MLP gate/up input columns
+            for layer in self.llm.model.layers:
+                w = layer.post_attention_layernorm.weight  # [hidden]
+                gate = layer.mlp.gate_proj
+                up = layer.mlp.up_proj
+                gate.weight.mul_(w.to(dtype=gate.weight.dtype).unsqueeze(0))
+                up.weight.mul_(w.to(dtype=up.weight.dtype).unsqueeze(0))
+                del layer.post_attention_layernorm
+
+            # 4) Fuse final norm weight into lm_head
+            norm_w = self.llm.model.norm.weight.to(dtype=self.llm.lm_head.weight.dtype)  # [hidden]
+            self.llm.lm_head.weight.mul_(norm_w.unsqueeze(0))                            # [vocab, hidden] *= [1, hidden]
+            del self.llm.model.norm
+
 
     def rotate_half(self, x, head_dim_half, dim):
         x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=dim)
@@ -302,9 +352,9 @@ class LLM_MAIN(torch.nn.Module):
         attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * all_inputs[-1]).float()
         batch_size = hidden_states.shape[0].unsqueeze(0)
         for i, layer in enumerate(self.llm.model.layers):
-            hidden_states_norm = layer.input_layernorm(hidden_states)
+            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.square().mean(-1, keepdim=True) + self.variance_epsilon)
             qkv = layer.self_attn.qkv(hidden_states_norm)
-            q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
+            q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1,)
             q = q.view(batch_size, -1, self.num_heads, self.head_dim)
             k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
@@ -327,7 +377,15 @@ class LLM_MAIN(torch.nn.Module):
                 k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size).float()
                 v = self.repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size).float()
             elif self.kv_q4 or self.kv_q8:
-                unpacked_k, unpacked_v = self.dequantizer(all_inputs[i], all_inputs[i + self.num_layers_2], all_inputs[i + self.num_layers_3], all_inputs[i + self.num_layers], all_inputs[i + self.num_layers_4], all_inputs[i + self.num_layers_5], batch_size)
+                unpacked_k, unpacked_v = self.dequantizer(
+                    all_inputs[i],
+                    all_inputs[i + self.num_layers_2],
+                    all_inputs[i + self.num_layers_3],
+                    all_inputs[i + self.num_layers],
+                    all_inputs[i + self.num_layers_4],
+                    all_inputs[i + self.num_layers_5],
+                    batch_size,
+                )
                 if USE_FLOAT16_SCALE_BIAS:
                     k = k.half()
                     v = v.half()
@@ -344,11 +402,11 @@ class LLM_MAIN(torch.nn.Module):
             attn_out = layer.self_attn.o_proj(attn)
             hidden_states += attn_out
             residual = hidden_states
-            hidden_states = layer.post_attention_layernorm(hidden_states)
+            hidden_states = hidden_states * torch.rsqrt(hidden_states.square().mean(-1, keepdim=True) + self.variance_epsilon)
             hidden_states = layer.mlp(hidden_states)
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
-        hidden_states = self.llm.base_model.norm(hidden_states)
+        hidden_states = hidden_states * torch.rsqrt(hidden_states.square().mean(-1, keepdim=True) + self.variance_epsilon)
         logits = self.llm.lm_head(hidden_states)
         if self.kv_q4 or self.kv_q8:
             return *self.save_key, *self.save_value, self.save_k_scale, self.save_k_bias, self.save_v_scale, self.save_v_bias, logits, kv_seq_len
