@@ -354,15 +354,13 @@ class LLM_MAIN(torch.nn.Module):
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
-                k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                v = self.repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
             elif self.kv_f16:
                 k = torch.cat((all_inputs[i], k.half()), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v.half()), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
-                k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size).float()
-                v = self.repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size).float()
+                k = k.float()
+                v = v.float()
             elif self.kv_q4 or self.kv_q8:
                 unpacked_k, unpacked_v = self.dequantizer(
                     all_inputs[i],
@@ -379,11 +377,11 @@ class LLM_MAIN(torch.nn.Module):
                 k = torch.cat((unpacked_k, k), dim=-1)
                 v = torch.cat((unpacked_v, v), dim=-2)
                 self.save_key[i], self.save_k_scale[i], self.save_k_bias[i], self.save_value[i], self.save_v_scale[i], self.save_v_bias[i] = self.quantizer(k, v, batch_size)
-                k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                v = self.repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
                 if USE_FLOAT16_SCALE_BIAS:
                     k = k.float()
                     v = v.float()
+            k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
+            v = self.repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
             attn = torch.nn.functional.softmax(torch.matmul(q, k) + attention_mask, dim=-1, dtype=torch.float32)
             attn = torch.matmul(attn, v).transpose(1, 2).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
             attn_out = layer.self_attn.o_proj(attn)
