@@ -163,7 +163,7 @@ class KVQuantizer(torch.nn.Module):
         scale = (block_max - block_min) * self.inv_qmax
 
         x_normalized = (x_blocks - block_min) / (scale + self.eps)
-        x_packed = torch.clamp(torch.round(x_normalized), max=self.qmax).to(torch.uint8)
+        x_packed = torch.round(x_normalized).to(torch.uint8)
 
         if self.dtype == "Q4":
             x_pairs = x_packed.view(batch_size, -1, self.block_size_half, 2)
@@ -1053,3 +1053,4 @@ if USE_BEAM_SEARCH:
 else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
 print(f"\n\nFinal:\n{result}\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
+
