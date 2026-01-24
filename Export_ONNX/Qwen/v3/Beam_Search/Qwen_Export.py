@@ -421,6 +421,7 @@ if DO_EXPORT:
         output_names = kv_out_names + ['logits', 'kv_seq_len']
         dynamic_axes = {**kv_axes, 'hidden_states': {0: 'batch', 1: 'ids_len'}, 'logits': {0: 'batch'}}
         model_main = LLM_MAIN(model, MAX_SEQ_LEN, num_heads, num_kv_heads, head_dim, num_layers, scale_dtype)
+        del model
         torch.onnx.export(
             model_main,
             tuple(all_inputs),
@@ -926,3 +927,4 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
