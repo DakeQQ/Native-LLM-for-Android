@@ -29,8 +29,8 @@ USE_FLOAT16_SCALE_BIAS = False      # Set to True for ARM64 devices or GPU that 
 
 # Decoding strategy
 USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
-PENALTY_RANGE = 20                  # Recent-token window to apply penalty
+REPEAT_PENALTY = 0.9                # 0.0 ~ 1.0; No penalty = 1.0
+PENALTY_RANGE = 50                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
 TOP_K = 3                           # Top-K for beam search
 BEAM_SIZE = 3                       # Beam size for beam search. Must be <= MAX_BEAM_SIZE
@@ -140,13 +140,13 @@ class KVQuantizer(torch.nn.Module):
         super().__init__()
         self.qmax = 255.0
         self.register_buffer('inv_qmax', torch.tensor([1.0 / self.qmax], dtype=scale_dtype).view(1, 1, 1, 1, -1))
-        self.register_buffer('eps', torch.tensor([1e-6], dtype=scale_dtype).view(1, 1, 1, 1, -1))
+        self.register_buffer('eps', torch.tensor([1e-7], dtype=scale_dtype).view(1, 1, 1, 1, -1))
 
     def _quantize_block(self, x, dim):
         block_min = x.min(dim=dim, keepdim=True).values
         block_max = x.max(dim=dim, keepdim=True).values
-        scale = (block_max - block_min) * self.inv_qmax
-        x_normalized = (x - block_min) / (scale + self.eps)
+        scale = (block_max - block_min) * self.inv_qmax + self.eps
+        x_normalized = (x - block_min) / scale
         x_packed = torch.round(x_normalized).to(torch.uint8)
         return x_packed, scale, block_min
 
@@ -162,8 +162,7 @@ class KVDequantizer(torch.nn.Module):
         self.scale_dtype = scale_dtype
 
     def _dequantize_block(self, x_packed, scale, bias):
-        x_flat = x_packed.to(self.scale_dtype) * scale + bias
-        return x_flat
+        return x_packed.to(self.scale_dtype) * scale + bias
 
     def forward(
             self,
@@ -252,8 +251,18 @@ class LLM_MAIN(torch.nn.Module):
                 w = layer.post_attention_layernorm.weight.unsqueeze(0)
                 gate = layer.mlp.gate_proj
                 up = layer.mlp.up_proj
-                gate.weight.mul_(w)
-                up.weight.mul_(w)
+                
+                in_feat = gate.in_features
+                out_feat = gate.out_features + up.out_features
+                gate_up = torch.nn.Linear(in_feat, out_feat, bias=False)
+                
+                gate_weight = gate.weight * w
+                up_weight = up.weight * w
+                gate_up.weight.copy_(torch.cat([gate_weight, up_weight], dim=0))
+                
+                layer.mlp.gate_up_proj = gate_up
+                del layer.mlp.gate_proj
+                del layer.mlp.up_proj
                 del layer.post_attention_layernorm
 
             w = self.llm.model.norm.weight.unsqueeze(0)
@@ -335,7 +344,9 @@ class LLM_MAIN(torch.nn.Module):
             hidden_states += attn_out
             residual = hidden_states
             hidden_states = hidden_states * torch.rsqrt(hidden_states.square().mean(-1, keepdim=True) + self.variance_epsilon)
-            hidden_states = layer.mlp(hidden_states)
+            gate_up = layer.mlp.gate_up_proj(hidden_states)
+            gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
+            hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
         hidden_states = hidden_states * torch.rsqrt(hidden_states.square().mean(-1, keepdim=True) + self.variance_epsilon)
@@ -412,7 +423,7 @@ if DO_EXPORT:
                     axes[in_n] = {0: batch_axis, dim: seq_axis}
                     axes[out_n] = {0: batch_axis, dim: out_seq_axis}
             return inputs, in_names, out_names, axes
-        
+
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch', 'history_len', 'kv_seq_len')
         hidden_states = torch.ones((batch_size, ids_len, hidden_size), dtype=torch.float32)
         attention_mask = torch.tensor([1], dtype=torch.int8)
@@ -598,7 +609,7 @@ session_opts.add_session_config_entry('session.graph_optimizations_loop_level', 
 session_opts.add_session_config_entry('optimization.enable_gelu_approximation', '1')
 session_opts.add_session_config_entry('optimization.minimal_build_optimizations', '')
 session_opts.add_session_config_entry('optimization.enable_cast_chain_elimination', '1')
-run_options.add_run_config_entry('disable_synchronize_execution_providers', '1')
+run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
 
 if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [
@@ -788,7 +799,7 @@ ids_len = create_ortvalue([num_prefill], np.int64, device_type, DEVICE_ID)
 
 binding_A.bind_ortvalue_input(in_name_A, input_ids)
 bind_outputs_generic(binding_A, out_name_A, device_type, DEVICE_ID)
-ort_session_A.run_with_iobinding(binding_A)
+ort_session_A.run_with_iobinding(binding_A, run_options=run_options)
 out_A = binding_A.get_outputs()[0]
 
 binding_B.bind_ortvalue_input(in_name_B[num_keys_values], out_A)
@@ -830,13 +841,13 @@ generate_limit = MAX_SEQ_LEN - num_prefill
 start_time = time.time()
 while num_decode < generate_limit:
     bind_outputs_generic(binding_B, out_name_B, device_type, DEVICE_ID)
-    ort_session_B.run_with_iobinding(binding_B)
+    ort_session_B.run_with_iobinding(binding_B, run_options=run_options)
     all_outputs_B = binding_B.get_outputs()
     if USE_BEAM_SEARCH:
         if num_decode < 1:
             bind_ort_values(binding_D, in_name_D_parts, all_outputs_B)
             bind_outputs_generic(binding_D, out_name_D, device_type, DEVICE_ID)
-            ort_session_D.run_with_iobinding(binding_D)
+            ort_session_D.run_with_iobinding(binding_D, run_options=run_options)
             all_outputs_D = binding_D.get_outputs()
             max_logits_idx = all_outputs_D[num_keys_values_plus_5].numpy()
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_4], all_outputs_D[num_keys_values_plus_4])
@@ -845,7 +856,7 @@ while num_decode < generate_limit:
         else:
             bind_ort_values(binding_E, in_name_E_parts, all_outputs_B)
             bind_outputs_generic(binding_E, out_name_E, device_type, DEVICE_ID)
-            ort_session_E.run_with_iobinding(binding_E)
+            ort_session_E.run_with_iobinding(binding_E, run_options=run_options)
             all_outputs_E = binding_E.get_outputs()
             max_logits_idx = all_outputs_E[num_keys_values_plus_4].numpy()
         if max_logits_idx in STOP_TOKEN:
@@ -854,7 +865,7 @@ while num_decode < generate_limit:
             binding_F.bind_ortvalue_input(in_name_F[0], all_outputs_E[num_keys_values_plus_1])
             binding_F.bind_ortvalue_input(in_name_F[1], all_outputs_E[num_keys_values_plus_2])
             bind_outputs_generic(binding_F, out_name_F, device_type, DEVICE_ID)
-            ort_session_F.run_with_iobinding(binding_F)
+            ort_session_F.run_with_iobinding(binding_F, run_options=run_options)
             all_outputs_F = binding_F.get_outputs()
             binding_F.bind_ortvalue_input(in_name_F[2], all_outputs_F[2])
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_1], all_outputs_F[0])
@@ -875,7 +886,7 @@ while num_decode < generate_limit:
         if do_repeat_penality:
             binding_C.bind_ortvalue_input(in_name_C[0], all_outputs_B[num_keys_values])
             binding_C.bind_ortvalue_input(in_name_C[1], current_penalty)
-            ort_session_C.run_with_iobinding(binding_C)
+            ort_session_C.run_with_iobinding(binding_C, run_options=run_options)
             all_outputs_C = binding_C.get_outputs()
             max_logits_idx = all_outputs_C[0].numpy().reshape(-1)[0]
             if num_decode >= PENALTY_RANGE:
@@ -927,4 +938,3 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
