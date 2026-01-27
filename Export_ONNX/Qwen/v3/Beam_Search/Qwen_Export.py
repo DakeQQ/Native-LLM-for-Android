@@ -25,7 +25,7 @@ MAX_SEQ_LEN = 4096                  # Max context length. Can not edit after exp
 
 # KV cache quantization
 KV_QUANT_DTYPE = "F16"              # "Q8" | "F16" | "F32"
-USE_FLOAT16_SCALE_BIAS = False      # Set to True for ARM64 devices or GPU that perform better with float16 arithmetic.
+USE_FLOAT16_SCALE_BIAS = True       # Store scale and bias in float16 for KV quantization.
 
 # Decoding strategy
 USE_BEAM_SEARCH = False             # Use beam search or greedy search
@@ -136,18 +136,21 @@ class RESET_PENALITY(torch.nn.Module):
 
 
 class KVQuantizer(torch.nn.Module):
-    def __init__(self, scale_dtype):
+    def __init__(self):
         super().__init__()
         self.qmax = 255.0
-        self.register_buffer('inv_qmax', torch.tensor([1.0 / self.qmax], dtype=scale_dtype).view(1, 1, 1, 1, -1))
-        self.register_buffer('eps', torch.tensor([1e-7], dtype=scale_dtype).view(1, 1, 1, 1, -1))
+        self.register_buffer('inv_qmax', torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
+        self.register_buffer('eps', torch.tensor([1e-7], dtype=torch.float32).view(1, 1, 1, 1, -1))
 
     def _quantize_block(self, x, dim):
-        block_min = x.min(dim=dim, keepdim=True).values
+        block_min = x.min(dim=dim, keepdim=True).values  # bias
         block_max = x.max(dim=dim, keepdim=True).values
         scale = (block_max - block_min) * self.inv_qmax + self.eps
         x_normalized = (x - block_min) / scale
         x_packed = torch.round(x_normalized).to(torch.uint8)
+        if USE_FLOAT16_SCALE_BIAS:
+            scale = scale.half()
+            block_min = block_min.half()
         return x_packed, scale, block_min
 
     def forward(self, keys, values):
@@ -157,12 +160,15 @@ class KVQuantizer(torch.nn.Module):
 
 
 class KVDequantizer(torch.nn.Module):
-    def __init__(self, scale_dtype):
+    def __init__(self):
         super().__init__()
-        self.scale_dtype = scale_dtype
+        pass
 
     def _dequantize_block(self, x_packed, scale, bias):
-        return x_packed.to(self.scale_dtype) * scale + bias
+        if USE_FLOAT16_SCALE_BIAS:
+            scale = scale.float()
+            bias = bias.float()
+        return x_packed.float() * scale + bias
 
     def forward(
             self,
@@ -184,7 +190,7 @@ class LLM_EMBED(torch.nn.Module):
 
 
 class LLM_MAIN(torch.nn.Module):
-    def __init__(self, llm, max_seq_len, num_heads, num_key_value_heads, head_dim, num_layers, scale_dtype):
+    def __init__(self, llm, max_seq_len, num_heads, num_key_value_heads, head_dim, num_layers):
         super(LLM_MAIN, self).__init__()
         self.llm = llm
         self.head_dim = head_dim
@@ -199,8 +205,8 @@ class LLM_MAIN(torch.nn.Module):
         self.num_layers_5 = self.num_layers * 5
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
-        self.quantizer = KVQuantizer(scale_dtype).eval()
-        self.dequantizer = KVDequantizer(scale_dtype).eval()
+        self.quantizer = KVQuantizer().eval()
+        self.dequantizer = KVDequantizer().eval()
         self.variance_epsilon = torch.tensor([1e-6], dtype=torch.float32)
         scale_factor = float(self.head_dim ** -0.25)
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
@@ -310,9 +316,6 @@ class LLM_MAIN(torch.nn.Module):
                 k = k.float()
                 v = v.float()
             elif self.kv_q8:
-                if USE_FLOAT16_SCALE_BIAS:
-                    k = k.half()
-                    v = v.half()
                 packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v)
                 self.save_key[i] = torch.cat([all_inputs[i], packed_k], dim=-1)
                 self.save_k_scale[i] = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
@@ -320,17 +323,7 @@ class LLM_MAIN(torch.nn.Module):
                 self.save_value[i] = torch.cat([all_inputs[i + self.num_layers], packed_v], dim=-2)
                 self.save_v_scale[i] = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-2)
                 self.save_v_bias[i] = torch.cat([all_inputs[i + self.num_layers_5], bias_v], dim=-2)
-                k, v = self.dequantizer(
-                    self.save_key[i],
-                    self.save_k_scale[i],
-                    self.save_k_bias[i],
-                    self.save_value[i],
-                    self.save_v_scale[i],
-                    self.save_v_bias[i]
-                )
-                if USE_FLOAT16_SCALE_BIAS:
-                    k = k.float()
-                    v = v.float()
+                k, v = self.dequantizer(self.save_key[i], self.save_k_scale[i], self.save_k_bias[i], self.save_value[i], self.save_v_scale[i], self.save_v_bias[i])
             else:
                 k = torch.cat((all_inputs[i], k), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
@@ -431,7 +424,7 @@ if DO_EXPORT:
         input_names = kv_in_names + ['hidden_states', 'history_len', 'ids_len', 'attention_mask']
         output_names = kv_out_names + ['logits', 'kv_seq_len']
         dynamic_axes = {**kv_axes, 'hidden_states': {0: 'batch', 1: 'ids_len'}, 'logits': {0: 'batch'}}
-        model_main = LLM_MAIN(model, MAX_SEQ_LEN, num_heads, num_kv_heads, head_dim, num_layers, scale_dtype)
+        model_main = LLM_MAIN(model, MAX_SEQ_LEN, num_heads, num_kv_heads, head_dim, num_layers)
         del model
         torch.onnx.export(
             model_main,
