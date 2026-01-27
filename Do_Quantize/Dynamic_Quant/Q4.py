@@ -16,7 +16,7 @@ from onnxruntime.quantization import (
 
 # Path Setting
 original_folder_path = r"/home/DakeQQ/Downloads/Qwen_ONNX"           # The original folder.
-quanted_folder_path = r"/home/DakeQQ/Downloads/Qwen_Optimized"        # The optimized folder.
+quanted_folder_path = r"/home/DakeQQ/Downloads/Qwen_Optimized"       # The optimized folder.
 download_path = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                 # Set the folder path where the LLM whole project downloaded, otherwise set "NONE".
 
 # Create the output directory if it doesn't exist
@@ -40,7 +40,7 @@ model_names = [
 ]
 
 # Global Settings
-algorithm = "DEFAULT"                              # ["DEFAULT", "RTN", "HQQ", "k_quant"]
+algorithm = "k_quant"                              # ["DEFAULT", "RTN", "HQQ", "k_quant"]
 bits = 4                                           # [4, 8]
 block_size = 32                                    # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
 accuracy_level = 4                                 # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
@@ -305,5 +305,6 @@ for file_path in files_to_delete:
         print(f"Error deleting {file_path}: {e}")
 
 print("--- All models processed successfully! ---")
+
 
 
