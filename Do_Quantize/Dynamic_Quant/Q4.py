@@ -77,6 +77,16 @@ for model_name in model_names:
                                verbose=False,
                                model_type='bert',
                                only_onnxruntime=False)
+        if use_f16:
+            model.convert_float_to_float16(
+                keep_io_types=False,
+                force_fp16_initializers=True,
+                use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
+                max_finite_val=32767.0,
+                min_positive_val=1e-7,
+                op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'MatMulIntegerToFloat']
+                # Common fp16 overflow operators: 'Pow', 'ReduceMean', 'ReduceSum', 'Softmax', 'Sigmoid', 'Erf'
+            )
         model.save_model_to_file(quanted_model_path, use_external_data_format=False)
         if upgrade_opset > 0:
             print(f"Upgrading Opset to {upgrade_opset}...")
@@ -305,7 +315,3 @@ for file_path in files_to_delete:
         print(f"Error deleting {file_path}: {e}")
 
 print("--- All models processed successfully! ---")
-
-
-
-
