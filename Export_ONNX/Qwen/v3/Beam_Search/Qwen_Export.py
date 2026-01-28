@@ -20,16 +20,18 @@ TEST_THINK_MODE = True
 TEST_QUERY = "地球最高的山是哪座山？"
 
 # Model Config
+DO_EXPORT = True                    # Whether to export the ONNX models
+PREVENT_F16_OVERFLOW = False        # Prevent float16 overflow. Set True for Q4F16 or Q8F16 quantization.
 STOP_TOKEN = [151643, 151645]       # Qwen stop token ids
 MAX_SEQ_LEN = 4096                  # Max context length. Can not edit after export.
 
 # KV cache quantization
 KV_QUANT_DTYPE = "F16"              # "Q8" | "F16" | "F32"
-USE_FLOAT16_SCALE_BIAS = True       # Store scale and bias in float16 for KV quantization.
+USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
 USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 0.9                # 0.0 ~ 1.0; No penalty = 1.0
+REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
 PENALTY_RANGE = 50                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
 TOP_K = 3                           # Top-K for beam search
@@ -40,7 +42,6 @@ ORT_Accelerate_Providers = []       # ORT execution providers; ['CUDAExecutionPr
 MAX_THREADS = 0                     # 0 = auto
 DEVICE_ID = 0                       # Device ID for GPU
 OPSET = 17                          # ONNX opset version
-DO_EXPORT = True                    # Whether to export the ONNX models
 
 
 class ARGMAX(torch.nn.Module):
@@ -190,9 +191,11 @@ class LLM_EMBED(torch.nn.Module):
 
 
 class LLM_MAIN(torch.nn.Module):
-    def __init__(self, llm, max_seq_len, num_heads, num_key_value_heads, head_dim, num_layers):
+    def __init__(self, llm, max_seq_len, num_heads, num_key_value_heads, head_dim, num_layers, hidden_size):
         super(LLM_MAIN, self).__init__()
         self.llm = llm
+        self.norm_factor = hidden_size ** 0.5
+        self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         self.head_dim = head_dim
         self.head_dim_half = self.head_dim // 2
         self.num_heads = num_heads
@@ -249,30 +252,30 @@ class LLM_MAIN(torch.nn.Module):
                 del layer.self_attn.k_proj
                 del layer.self_attn.v_proj
 
-                w = layer.input_layernorm.weight.unsqueeze(0)
+                w = layer.input_layernorm.weight.unsqueeze(0) * self.norm_factor
                 qkv.weight.mul_(w)
                 layer.self_attn.qkv = qkv
                 del layer.input_layernorm
 
-                w = layer.post_attention_layernorm.weight.unsqueeze(0)
+                w = layer.post_attention_layernorm.weight.unsqueeze(0) * self.norm_factor
                 gate = layer.mlp.gate_proj
                 up = layer.mlp.up_proj
-                
+
                 in_feat = gate.in_features
                 out_feat = gate.out_features + up.out_features
                 gate_up = torch.nn.Linear(in_feat, out_feat, bias=False)
-                
+
                 gate_weight = gate.weight * w
                 up_weight = up.weight * w
                 gate_up.weight.copy_(torch.cat([gate_weight, up_weight], dim=0))
-                
+
                 layer.mlp.gate_up_proj = gate_up
                 del layer.mlp.gate_proj
                 del layer.mlp.up_proj
                 del layer.post_attention_layernorm
 
-            w = self.llm.model.norm.weight.unsqueeze(0)
-            self.llm.lm_head.weight.mul_(w)                            
+            w = self.llm.model.norm.weight.unsqueeze(0) * self.norm_factor
+            self.llm.lm_head.weight.mul_(w)
             del self.llm.model.norm
 
     def rotate_half(self, x, head_dim_half, dim):
@@ -298,14 +301,17 @@ class LLM_MAIN(torch.nn.Module):
         attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * mask).float()
         batch_size = hidden_states.shape[0].unsqueeze(0)
         for i, layer in enumerate(self.llm.model.layers):
-            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            residual = hidden_states
+            if PREVENT_F16_OVERFLOW:
+                hidden_states = hidden_states * self.overflow_scale
+            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
             qkv = layer.self_attn.qkv(hidden_states_norm)
             q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
             q = q.view(batch_size, -1, self.num_heads, self.head_dim)
             k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
-            q = layer.self_attn.q_norm(q).transpose(1, 2)
-            k = layer.self_attn.k_norm(k).permute(0, 3, 2, 4, 1)
+            q = (layer.self_attn.q_norm.weight * (q * torch.rsqrt(q.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).transpose(1, 2)
+            k = (layer.self_attn.k_norm.weight * (k * torch.rsqrt(k.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).permute(0, 3, 2, 4, 1)
             q = q * rotary_pos_emb_cos_q + self.rotate_half(q, self.head_dim_half, -1) * rotary_pos_emb_sin_q
             k = k * rotary_pos_emb_cos_k + self.rotate_half(k, self.head_dim_half, -2) * rotary_pos_emb_sin_k
             if self.kv_f16:
@@ -334,15 +340,19 @@ class LLM_MAIN(torch.nn.Module):
             attn = torch.nn.functional.softmax(torch.matmul(q, k) + attention_mask, dim=-1, dtype=torch.float32)
             attn = torch.matmul(attn, v).transpose(1, 2).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
             attn_out = layer.self_attn.o_proj(attn)
-            hidden_states += attn_out
+            hidden_states = residual + attn_out
             residual = hidden_states
-            hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+            if PREVENT_F16_OVERFLOW:
+                hidden_states = hidden_states * self.overflow_scale
+            hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
             gate_up = layer.mlp.gate_up_proj(hidden_states)
             gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
             hidden_states += residual
         hidden_states = hidden_states[:, -1]
-        hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).mean(-1, keepdim=True) + self.variance_epsilon)
+        if PREVENT_F16_OVERFLOW:
+            hidden_states = hidden_states * self.overflow_scale
+        hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
         logits = self.llm.lm_head(hidden_states)
         if self.kv_q8:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits, kv_seq_len
@@ -379,9 +389,9 @@ if DO_EXPORT:
         kv_tensors['value'] = torch.zeros((batch_size, num_kv_heads, 1, history_len, head_dim), dtype=kv_dtype)
         if KV_QUANT_DTYPE == "Q8":
             kv_tensors['key_scale'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
-            kv_tensors['key_bias']  = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
+            kv_tensors['key_bias'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
             kv_tensors['value_scale'] = torch.ones([batch_size, num_kv_heads, 1, history_len, 1], dtype=scale_dtype)
-            kv_tensors['value_bias']  = torch.ones([batch_size, num_kv_heads, 1, history_len, 1], dtype=scale_dtype)
+            kv_tensors['value_bias'] = torch.ones([batch_size, num_kv_heads, 1, history_len, 1], dtype=scale_dtype)
 
         print("Exporting LLM_EMBED...")
         input_ids = torch.ones((1, ids_len), dtype=torch.int32)
@@ -401,9 +411,9 @@ if DO_EXPORT:
         )
         del model_A, input_ids
 
-
         # 5. Export LLM_MAIN
         print("Exporting LLM_MAIN...")
+
         def get_kv_io(tensors_dict, batch_axis='batch', seq_axis='history_len', out_seq_axis='kv_seq_len'):
             inputs, in_names, out_names, axes = [], [], [], {}
             for name, dim in kv_specs:
@@ -411,7 +421,7 @@ if DO_EXPORT:
                 for i in range(num_layers):
                     in_n, out_n = f'in_{name}_{i}', f'out_{name}_{i}'
                     inputs.append(t)
-                    in_names.append(in_n);
+                    in_names.append(in_n)
                     out_names.append(out_n)
                     axes[in_n] = {0: batch_axis, dim: seq_axis}
                     axes[out_n] = {0: batch_axis, dim: out_seq_axis}
@@ -424,7 +434,7 @@ if DO_EXPORT:
         input_names = kv_in_names + ['hidden_states', 'history_len', 'ids_len', 'attention_mask']
         output_names = kv_out_names + ['logits', 'kv_seq_len']
         dynamic_axes = {**kv_axes, 'hidden_states': {0: 'batch', 1: 'ids_len'}, 'logits': {0: 'batch'}}
-        model_main = LLM_MAIN(model, MAX_SEQ_LEN, num_heads, num_kv_heads, head_dim, num_layers)
+        model_main = LLM_MAIN(model, MAX_SEQ_LEN, num_heads, num_kv_heads, head_dim, num_layers, hidden_size)
         del model
         torch.onnx.export(
             model_main,
@@ -442,8 +452,8 @@ if DO_EXPORT:
 
         # 6. Export Helper Models (Greedy, Reset, Argmax)
         print("Exporting Helper Models...")
-        repeat_penality_in = torch.ones((BEAM_SIZE, vocab_size))
-        penality_value = torch.tensor([REPEAT_PENALTY])
+        repeat_penality_in = torch.ones((BEAM_SIZE, vocab_size), dtype=torch.float32)
+        penality_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
         torch.onnx.export(
             GREEDY_SEARCH(),
             (logits_t, repeat_penality_in, penality_value, beam_size_t),
@@ -498,9 +508,8 @@ if DO_EXPORT:
         # 7. Export Beam Search Models
         print("Exporting Beam Search Models...")
         kv_tensors_greedy = {k: v[[0]] for k, v in kv_tensors.items()} # Slice batch dim for first beam
-
-        # First Beam Search
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_greedy, 'batch_size', 'history_len', 'history_len') # Note: out axis same for beam step logic
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_greedy, 'batch_size', 'history_len', 'history_len')
+        kv_axes = {k: v for k, v in kv_axes.items() if k not in kv_out_names}
         other_inputs = [logits_t[[0]], save_id_in, repeat_penality_in, penality_value, beam_size_t]
         other_names = ['logits', 'save_id_in', 'repeat_penality_in', 'penality_value', 'beam_size']
         dynamic_axes = {
@@ -523,7 +532,7 @@ if DO_EXPORT:
             tuple(kv_ins + other_inputs),
             onnx_model_D,
             input_names=kv_ins_names,
-            output_names=['in_' + n[4:] for n in kv_in_names] + ['top_beam_indices', 'save_id_out', 'repeat_penality_out', 'top_beam_prob', 'batch_indices', 'max_logits_idx'], # Outputs mimic inputs for KV
+            output_names=['out_' + n[3:] for n in kv_in_names] + ['top_beam_indices', 'save_id_out', 'repeat_penality_out', 'top_beam_prob', 'batch_indices', 'max_logits_idx'], # Outputs mimic inputs for KV
             dynamic_axes=dynamic_axes,
             opset_version=OPSET,
             dynamo=False
