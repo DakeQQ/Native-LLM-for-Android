@@ -42,9 +42,9 @@ model_names = [
 # Global Settings
 algorithm = "k_quant"                              # ["DEFAULT", "RTN", "HQQ", "k_quant"]
 bits = 4                                           # [4, 8]
-block_size = 32                                    # [32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
+block_size = 32                                    # [16, 32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
 accuracy_level = 4                                 # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
-use_f16 = False                                    # Convert the F32 operators to F16.
+use_f16 = False                                    # Convert the FP32 operators to FP16. If this option is enabled, it is recommended to set the block_size to <=32.
 quant_symmetric = False                            # False may get more accuracy.
 nodes_to_exclude = None                            # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
 two_parts_save = False                             # If you need to use low memory mode on Android, please set it to True.
@@ -252,7 +252,7 @@ for model_name in model_names:
             use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
             max_finite_val=32767.0,
             min_positive_val=1e-7,
-            op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'MatMulIntegerToFloat', 'Pow', 'ReduceMean', 'ReduceSum']
+            op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'MatMulIntegerToFloat']
             # Common fp16 overflow operators: 'Pow', 'ReduceMean', 'ReduceSum', 'Softmax', 'Sigmoid', 'Erf'
         )
     model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
@@ -305,6 +305,7 @@ for file_path in files_to_delete:
         print(f"Error deleting {file_path}: {e}")
 
 print("--- All models processed successfully! ---")
+
 
 
 
