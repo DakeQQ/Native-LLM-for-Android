@@ -21,7 +21,7 @@ TEST_QUERY = "地球最高的山是哪座山？"
 
 # Model Config
 DO_EXPORT = True                    # Whether to export the ONNX models
-PREVENT_F16_OVERFLOW = False        # Prevent float16 overflow. Set True for Q4F16 or Q8F16 quantization.
+PREVENT_F16_OVERFLOW = False        # Prevent float16 overflow. Set True for Q4F16 or Q8F16 or F16 quantization.
 STOP_TOKEN = [151643, 151645]       # Qwen stop token ids
 MAX_SEQ_LEN = 4096                  # Max context length. Can not edit after export.
 
@@ -942,3 +942,4 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
