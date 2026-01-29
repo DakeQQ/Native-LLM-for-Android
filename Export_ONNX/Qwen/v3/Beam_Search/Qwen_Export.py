@@ -31,8 +31,8 @@ USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for s
 
 # Decoding strategy
 USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
-PENALTY_RANGE = 50                  # Recent-token window to apply penalty
+REPEAT_PENALTY = 0.9                # 0.0 ~ 1.0; No penalty = 1.0
+PENALTY_RANGE = 30                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
 TOP_K = 3                           # Top-K for beam search
 BEAM_SIZE = 3                       # Beam size for beam search. Must be <= MAX_BEAM_SIZE
@@ -42,6 +42,9 @@ ORT_Accelerate_Providers = []       # ORT execution providers; ['CUDAExecutionPr
 MAX_THREADS = 0                     # 0 = auto
 DEVICE_ID = 0                       # Device ID for GPU
 OPSET = 17                          # ONNX opset version
+
+
+STOP_TOKEN = set(STOP_TOKEN) if isinstance(STOP_TOKEN, (list, tuple)) else {STOP_TOKEN}
 
 
 class ARGMAX(torch.nn.Module):
@@ -748,12 +751,12 @@ if USE_BEAM_SEARCH:
     binding_F = ort_session_F.io_binding()
     in_name_F = [x.name for x in ort_session_F.get_inputs()]
     out_name_F = [x.name for x in ort_session_F.get_outputs()]
-    
+
     penality_dtype = np.float16 if 'float16' in ort_session_D._inputs_meta[num_keys_values_plus_3].type else np.float32
     penality_value = create_ortvalue([REPEAT_PENALTY], penality_dtype, device_type, DEVICE_ID)
     init_repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
     init_penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), device_type, DEVICE_ID)
-    
+
     binding_F.bind_ortvalue_input(in_name_F[2], init_penality_reset_count)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_1], init_save_id_beam)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_2], init_repeat_penality)
@@ -776,10 +779,9 @@ else:
         next_penalty = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
         binding_C.bind_ortvalue_input(in_name_C[2], penality_value)
         binding_C.bind_ortvalue_input(in_name_C[3], init_batch_size_greedy)
-        output_type_id = 1 if penality_dtype == np.float32 else 10
         penalty_shape = (BEAM_SIZE, vocab_size)
         binding_C.bind_output(out_name_C[0], device_type=device_type, device_id=DEVICE_ID)
-        binding_C.bind_output(name=out_name_C[1],device_type=device_type,device_id=DEVICE_ID,element_type=output_type_id,shape=penalty_shape,buffer_ptr=next_penalty.data_ptr())
+        binding_C.bind_output(name=out_name_C[1], device_type=device_type, device_id=DEVICE_ID, element_type=penality_dtype, shape=penalty_shape, buffer_ptr=next_penalty.data_ptr())
         init_penality_reset_count = 0
     else:
         ort_session_G = onnxruntime.InferenceSession(onnx_model_G, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
@@ -796,7 +798,7 @@ else:
 tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
 tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 num_prefill = tokens.shape[-1]
-input_ids = create_ortvalue(tokens, np.int32, device_type, DEVICE_ID)
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
 ids_len = create_ortvalue([num_prefill], np.int64, device_type, DEVICE_ID)
 
 binding_A.bind_ortvalue_input(in_name_A, input_ids)
@@ -890,7 +892,7 @@ while num_decode < generate_limit:
             binding_C.bind_ortvalue_input(in_name_C[1], current_penalty)
             ort_session_C.run_with_iobinding(binding_C, run_options=run_options)
             all_outputs_C = binding_C.get_outputs()
-            max_logits_idx = all_outputs_C[0].numpy().reshape(-1)[0]
+            max_logits_idx = all_outputs_C[0].numpy().flat[0]
             if num_decode >= PENALTY_RANGE:
                 reset_ids = save_id_greedy[init_penality_reset_count]
                 if reset_ids != max_logits_idx:
@@ -903,7 +905,7 @@ while num_decode < generate_limit:
                 name=out_name_C[1],
                 device_type=device_type,
                 device_id=DEVICE_ID,
-                element_type=output_type_id,
+                element_type=penality_dtype,
                 shape=penalty_shape,
                 buffer_ptr=next_penalty.data_ptr()
             )
@@ -914,7 +916,7 @@ while num_decode < generate_limit:
             ort_session_G.run_with_iobinding(binding_G)
             all_outputs_G = binding_G.get_outputs()
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_G[0])
-            max_logits_idx = all_outputs_G[0].numpy().reshape(-1)[0]
+            max_logits_idx = all_outputs_G[0].numpy().flat[0]
         if max_logits_idx in STOP_TOKEN:
             break
         bind_ort_values(binding_B, in_name_B_parts, all_outputs_B)
@@ -940,4 +942,3 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
