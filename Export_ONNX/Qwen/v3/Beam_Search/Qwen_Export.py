@@ -312,6 +312,8 @@ class LLM_MAIN(torch.nn.Module):
             q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
             q = q.view(batch_size, -1, self.num_heads, self.head_dim)
             k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
+            if self.kv_f16:
+                v = v.half()
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
             q = (layer.self_attn.q_norm.weight * (q * torch.rsqrt(q.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).transpose(1, 2)
             k = (layer.self_attn.k_norm.weight * (k * torch.rsqrt(k.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).permute(0, 3, 2, 4, 1)
@@ -319,7 +321,7 @@ class LLM_MAIN(torch.nn.Module):
             k = k * rotary_pos_emb_cos_k + self.rotate_half(k, self.head_dim_half, -2) * rotary_pos_emb_sin_k
             if self.kv_f16:
                 k = torch.cat((all_inputs[i], k.half()), dim=-1)
-                v = torch.cat((all_inputs[i + self.num_layers], v.half()), dim=-2)
+                v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
                 k = k.float()
@@ -942,4 +944,5 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
 
