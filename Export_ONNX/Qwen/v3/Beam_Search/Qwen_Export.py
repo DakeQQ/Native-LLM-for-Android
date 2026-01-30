@@ -44,9 +44,6 @@ DEVICE_ID = 0                       # Device ID for GPU
 OPSET = 17                          # ONNX opset version
 
 
-STOP_TOKEN = set(STOP_TOKEN) if isinstance(STOP_TOKEN, (list, tuple)) else {STOP_TOKEN}
-
-
 class ARGMAX(torch.nn.Module):
     def __init__(self):
         super(ARGMAX, self).__init__()
@@ -944,5 +941,6 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
 
 
