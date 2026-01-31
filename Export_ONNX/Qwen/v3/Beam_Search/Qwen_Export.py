@@ -279,7 +279,6 @@ class LLM_MAIN(torch.nn.Module):
         rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2).unsqueeze(0)
         attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * mask).float()
         batch_size = hidden_states.shape[0].unsqueeze(0)
-
         for i, layer in enumerate(self.llm.model.layers):
             residual = hidden_states
             if PREVENT_F16_OVERFLOW:
@@ -941,3 +940,4 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
