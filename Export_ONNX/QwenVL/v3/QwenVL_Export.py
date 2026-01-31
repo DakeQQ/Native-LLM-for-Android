@@ -37,9 +37,9 @@ WIDTH_FACTOR = 15                                                   # Adjust thi
 MAX_SEQ_LENGTH = 4096                                               # The max token length. Note, this value include inputs and generated.
 IMAGE_RESIZE = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]              # 32 = self.patch_size * self.merge_size
 STOP_TOKEN = [151643, 151645]                                       # The stop_id in Qwen is "151643" & "151645"
-REPEAT_PENALITY = 0.9                                               # Range from 0.0 to 1.0; "1.0" means no penality.
+REPEAT_PENALITY = 1.0                                               # Range from 0.0 to 1.0; "1.0" means no penality.
 PENALITY_RANGE = 10                                                 # Penalizes the most recent output. "10" means the last 10 tokens.
-USE_BEAM_SEARCH = True                                              # Use beam search or greedy search.
+USE_BEAM_SEARCH = False                                              # Use beam search or greedy search.
 TOP_K = 3                                                           # The top k candidate in decoding.
 BEAM_SIZE = 3                                                       # Number of beams in searching.
 MAX_BEAM_SIZE = 10                                                  # Max beams for exported model.
@@ -174,22 +174,22 @@ class QwenVL_PartB(torch.nn.Module):
         self.num_heads = self.qwenvl.config.vision_config.num_heads
         self.head_dim = self.qwenvl.config.vision_config.hidden_size // self.num_heads
         self.head_dim_half = self.head_dim // 2
-        self.patch_size = self.qwenvl.visual.patch_size
-        self.merge_size = self.qwenvl.visual.spatial_merge_size
+        self.patch_size = self.qwenvl.model.visual.patch_size
+        self.merge_size = self.qwenvl.model.visual.spatial_merge_size
         self.means = torch.full((1, 1, 1, 1, 1), 127.5, dtype=torch.float32)
         self.inv_std = torch.full((1, 1, 1, 1, 1), 1.0 / 127.5, dtype=torch.float32)
         grid_thw = torch.tensor([[1, HEIGHT_FACTOR * 2, WIDTH_FACTOR * 2]], dtype=torch.int32)
-        self.pos_embeds = Qwen3VLVisionModel.fast_pos_embed_interpolate(self.qwenvl.visual, grid_thw).unsqueeze(0)
+        self.pos_embeds = Qwen3VLVisionModel.fast_pos_embed_interpolate(self.qwenvl.model.visual, grid_thw).unsqueeze(0)
         self.image_hidden_len = grid_thw[0, 1] * grid_thw[0, 2]
-        rotary_pos_emb = Qwen3VLVisionModel.rot_pos_emb(self.qwenvl.visual, grid_thw).float().unsqueeze(0).unsqueeze(0)
+        rotary_pos_emb = Qwen3VLVisionModel.rot_pos_emb(self.qwenvl.model.visual, grid_thw).float().unsqueeze(0).unsqueeze(0)
         cos = rotary_pos_emb.cos()
         sin = rotary_pos_emb.sin()
         self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1)
         self.rotary_pos_emb_sin = torch.cat([sin, sin], dim=-1)
         scaling = float(self.head_dim ** -0.25)
-        for blk in self.qwenvl.visual.blocks:
-            blk.attn.qkv.weight.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scaling
-            blk.attn.qkv.bias.data[:-self.qwenvl.visual.patch_embed.embed_dim] *= scaling
+        for blk in self.qwenvl.model.visual.blocks:
+            blk.attn.qkv.weight.data[:-self.qwenvl.model.visual.patch_embed.embed_dim] *= scaling
+            blk.attn.qkv.bias.data[:-self.qwenvl.model.visual.patch_embed.embed_dim] *= scaling
 
     def _replace_gelu_with_tanh_approximation(self, module):
         """
@@ -223,7 +223,7 @@ class QwenVL_PartB(torch.nn.Module):
         pixel_values = pixel_values.reshape(
             batch_size,
             1,
-            self.qwenvl.visual.patch_embed.temporal_patch_size,
+            self.qwenvl.model.visual.patch_embed.temporal_patch_size,
             3,
             HEIGHT_FACTOR,
             self.merge_size,
@@ -236,11 +236,11 @@ class QwenVL_PartB(torch.nn.Module):
         pixel_values = pixel_values.reshape(
             -1,
             3,
-            self.qwenvl.visual.patch_embed.temporal_patch_size,
+            self.qwenvl.model.visual.patch_embed.temporal_patch_size,
             self.patch_size,
             self.patch_size
         )
-        vision_hidden_states = self.qwenvl.visual.patch_embed.proj(pixel_values).view(1, -1, self.qwenvl.visual.patch_embed.embed_dim)
+        vision_hidden_states = self.qwenvl.model.visual.patch_embed.proj(pixel_values).view(1, -1, self.qwenvl.model.visual.patch_embed.embed_dim)
         if batch_size != 1:
             if DYNAMIC_IMAGE_SHAPE:
                 self.pos_embeds = self.pos_embeds.repeat(1, batch_size, 1)                        # For batch size != 1 & dynamic shape inputs
@@ -252,7 +252,7 @@ class QwenVL_PartB(torch.nn.Module):
                 self.rotary_pos_emb_sin = torch.cat([self.rotary_pos_emb_sin for _ in range(batch_size)], dim=2)
         vision_hidden_states += self.pos_embeds
         deepstack_features = []
-        for layer_num, blk in enumerate(self.qwenvl.visual.blocks):
+        for layer_num, blk in enumerate(self.qwenvl.model.visual.blocks):
             hidden_states_norm = blk.norm1(vision_hidden_states)
             q, k, v = blk.attn.qkv(hidden_states_norm).reshape(-1, 3, self.num_heads, self.head_dim).permute(1, 2, 0, 3).split([1, 1, 1], dim=0)
             q = q * self.rotary_pos_emb_cos + rotate_half(q, self.head_dim_half, -1) * self.rotary_pos_emb_sin
@@ -265,14 +265,14 @@ class QwenVL_PartB(torch.nn.Module):
             attn_out = blk.attn.proj(attn.reshape(1, -1, blk.attn.proj.in_features))
             vision_hidden_states += attn_out
             vision_hidden_states = vision_hidden_states + blk.mlp(blk.norm2(vision_hidden_states))
-            if layer_num in self.qwenvl.visual.deepstack_visual_indexes:
-                deepstack_layer = self.qwenvl.visual.deepstack_merger_list[self.qwenvl.visual.deepstack_visual_indexes.index(layer_num)]
+            if layer_num in self.qwenvl.model.visual.deepstack_visual_indexes:
+                deepstack_layer = self.qwenvl.model.visual.deepstack_merger_list[self.qwenvl.model.visual.deepstack_visual_indexes.index(layer_num)]
                 x = vision_hidden_states.view(1, -1, deepstack_layer.hidden_size)
                 x = deepstack_layer.norm(x)
                 x = deepstack_layer.linear_fc2(deepstack_layer.act_fn(deepstack_layer.linear_fc1(x)))
                 deepstack_features.append(x)
-        vision_hidden_states = self.qwenvl.visual.merger.norm(vision_hidden_states)
-        vision_hidden_states = self.qwenvl.visual.merger.linear_fc2(self.qwenvl.visual.merger.act_fn(self.qwenvl.visual.merger.linear_fc1(vision_hidden_states.view(1, -1, self.qwenvl.visual.merger.hidden_size))))
+        vision_hidden_states = self.qwenvl.model.visual.merger.norm(vision_hidden_states)
+        vision_hidden_states = self.qwenvl.model.visual.merger.linear_fc2(self.qwenvl.model.visual.merger.act_fn(self.qwenvl.model.visual.merger.linear_fc1(vision_hidden_states.view(1, -1, self.qwenvl.model.visual.merger.hidden_size))))
         return deepstack_features, vision_hidden_states
 
 
@@ -422,7 +422,7 @@ with torch.inference_mode():
     num_layers = model.config.text_config.num_hidden_layers
     hidden_size = model.config.text_config.hidden_size
     vocab_size = model.model.language_model.vocab_size
-    deepstack_features_len = len(model.visual.deepstack_visual_indexes)
+    deepstack_features_len = len(model.model.visual.deepstack_visual_indexes)
 
     pixel_values = torch.randint(low=0, high=255, size=[VISION_BATCH_SIZE, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.uint8)
     if INPUT_IMAGE_DIM != 4:
@@ -872,7 +872,7 @@ session_opts.add_session_config_entry('session.use_device_allocator_for_initiali
 session_opts.add_session_config_entry('optimization.enable_cast_chain_elimination', '1')
 session_opts.add_session_config_entry('session.graph_optimizations_loop_level', '2')
 
-run_options.add_run_config_entry('disable_synchronize_execution_providers', '1')
+run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
 
 ORT_Accelerate_Providers = ['CPUExecutionProvider']
 provider_options = None
@@ -1220,11 +1220,3 @@ while num_decode < generate_limit:
             input_feed_F[deepstack_in_name_F[i]] = init_deepstack_features
     num_decode += 1
 print(f"\n\nDecode: {((num_decode + 1) / (time.time() - start_time)):.3f} token/s")
-
-
-
-
-
-
-
-
