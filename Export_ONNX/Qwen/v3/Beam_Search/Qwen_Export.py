@@ -6,7 +6,7 @@ import onnxruntime
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path         = r'/home/DakeQQ/Downloads/Qwen3-0.6B'                             # Set the folder path where the Qwen whole project downloaded.
+path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
 onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
@@ -279,6 +279,7 @@ class LLM_MAIN(torch.nn.Module):
         rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2).unsqueeze(0)
         attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * mask).float()
         batch_size = hidden_states.shape[0].unsqueeze(0)
+
         for i, layer in enumerate(self.llm.model.layers):
             residual = hidden_states
             if PREVENT_F16_OVERFLOW:
@@ -288,6 +289,8 @@ class LLM_MAIN(torch.nn.Module):
             q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
             q = q.view(batch_size, -1, self.num_heads, self.head_dim)
             k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
+            if self.kv_f16:
+                v = v.half()
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
             q = (layer.self_attn.q_norm.weight * (q * torch.rsqrt(q.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).transpose(1, 2)
             k = (layer.self_attn.k_norm.weight * (k * torch.rsqrt(k.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).permute(0, 3, 2, 4, 1)
@@ -295,7 +298,7 @@ class LLM_MAIN(torch.nn.Module):
             k = k * rotary_pos_emb_cos_k + self.rotate_half(k, self.head_dim_half, -2) * rotary_pos_emb_sin_k
             if self.kv_f16:
                 k = torch.cat((all_inputs[i], k.half()), dim=-1)
-                v = torch.cat((all_inputs[i + self.num_layers], v.half()), dim=-2)
+                v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
                 k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
@@ -940,4 +943,3 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
