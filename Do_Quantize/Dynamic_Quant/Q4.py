@@ -2,28 +2,35 @@ import os
 import gc
 import sys
 import glob
+import logging
 import onnx
 import torch
 import onnx.version_converter
 from pathlib import Path
 from onnxslim import slim
-from transformers import AutoModelForCausalLM
+from transformers import (
+    AutoModelForCausalLM, 
+    Qwen2_5_VLForConditionalGeneration,
+    Qwen3VLForConditionalGeneration,
+    Qwen2VLForConditionalGeneration,
+    Gemma3ForCausalLM
+)
 from onnxruntime.transformers.optimizer import optimize_model
 from onnxruntime.quantization import (
-    matmul_nbits_quantizer,  # onnxruntime >= 1.22.0
+    matmul_nbits_quantizer,
+    quantize_dynamic,
+    QuantType,
     quant_utils
 )
 
-# Path Setting
-original_folder_path = r"/home/DakeQQ/Downloads/Qwen_ONNX"           # The original folder.
-quanted_folder_path = r"/home/DakeQQ/Downloads/Qwen_Optimized"       # The optimized folder.
-download_path = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                 # Set the folder path where the LLM whole project downloaded, otherwise set "NONE".
+# --- Configuration ---
+# File Paths
+ORIGINAL_FOLDER_PATH = r"/home/DakeQQ/Downloads/Qwen_ONNX"
+QUANTED_FOLDER_PATH = r"/home/DakeQQ/Downloads/Qwen_Optimized"
+DOWNLOAD_PATH = r'/home/DakeQQ/Downloads/Qwen3-VL-2B-Instruct'
 
-# Create the output directory if it doesn't exist
-os.makedirs(quanted_folder_path, exist_ok=True)
-
-# List of models to process
-model_names = [
+# Model List
+MODEL_NAMES = [
     "LLM_Embed",
     "LLM_Main",
     "Greedy_Search",
@@ -31,287 +38,299 @@ model_names = [
     "Second_Beam_Search",
     "Reset_Penality",
     "Argmax",
-    # "QwenVL_A",
-    # "QwenVL_B",
-    # "QwenVL_C",
-    # "QwenVL_D",
-    # "QwenVL_E",
-    # "QwenVL_F"
+
+    # Vision Models
+    "LLM_Vision",
+    "LLM_Concat",
+    "LLM_Rotary_Vision",
+    "LLM_Rotary_Text"
 ]
 
-# Global Settings
-algorithm = "k_quant"                              # ["DEFAULT", "RTN", "HQQ", "k_quant"]
-bits = 4                                           # [4, 8]
-block_size = 32                                    # [16, 32, 64, 128, 256]; A smaller block_size yields greater accuracy but increases quantization time and model size.
-accuracy_level = 4                                 # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
-use_f16 = False                                    # Convert the FP32 operators to FP16. If this option is enabled, it is recommended to set the block_size to <=32.
-quant_symmetric = False                            # False may get more accuracy.
-nodes_to_exclude = None                            # Set the node names here. Such as: ["/layers.0/mlp/down_proj/MatMul"]
-two_parts_save = False                             # If you need to use low memory mode on Android, please set it to True.
-upgrade_opset = 0                                  # Optional process. Set 0 for close.
+# Quantization Settings
+ALGORITHM = "k_quant"           # Strategies: "DEFAULT", "RTN", "HQQ", "k_quant"
+BITS = 4                        # Target bit precision (e.g., 4 or 8)
+BLOCK_SIZE = 32                 # [16, 32, 64, 128, 256]; Smaller block_size => more accuracy, more time and size.
+ACCURACY_LEVEL = 4              # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
+QUANT_SYMMETRIC = False         # False = Asymmetric (includes ZeroPoint), True = Symmetric
+NODES_TO_EXCLUDE = None         # List of specific ONNX node names to exclude from quantization
+USE_Q8_VISION = False           # Enable INT8 dynamic quantization specifically for Vision models.
+USE_F16 = False                 # Convert Q4F32/Q8F32 to Q4F16/Q8F16. The BLOCK_SIZE <= 32 is recommended.
+TWO_PARTS_SAVE = False          # Force saving models with external data (.data) regardless of size
+UPGRADE_OPSET = 0               # Target ONNX Opset version (0 = keep current version)
 
 
-# --- Main Processing Loop ---
-algorithm_copy = algorithm
-for model_name in model_names:
-    print(f"--- Processing model: {model_name} ---")
-
-    # Dynamically set model paths for the current iteration
-    if 'QwenVL_F' in model_name:
-        model_path = os.path.join(original_folder_path.replace('Qwen_ONNX', 'Qwen_ONNX_2'), f"{model_name}.onnx")
+# --- Helper Functions ---
+def get_model_paths(model_name):
+    """Determines source and destination paths for a given model."""
+    # Special handling for LLM_Main path location
+    if 'LLM_Main' in model_name:
+        src_dir = ORIGINAL_FOLDER_PATH.replace('Qwen_ONNX', 'Qwen_ONNX_2')
     else:
-        model_path = os.path.join(original_folder_path, f"{model_name}.onnx")
-    quanted_model_path = os.path.join(quanted_folder_path, f"{model_name}.onnx")
+        src_dir = ORIGINAL_FOLDER_PATH
     
-    # Check if the original model file exists before processing
-    if not os.path.exists(model_path):
-        print(f"Warning: Model file not found at {model_path}. Skipping.")
-        continue
+    src_path = os.path.join(src_dir, f"{model_name}.onnx")
+    dst_path = os.path.join(QUANTED_FOLDER_PATH, f"{model_name}.onnx")
+    return src_path, dst_path
 
-    if 'Reset_Penality' in model_name:
-        model = optimize_model(model_path,
-                               use_gpu=False,
-                               opt_level=2,
-                               num_heads=0,
-                               hidden_size=0,
-                               verbose=False,
-                               model_type='bert',
-                               only_onnxruntime=False)
-        if use_f16:
-            model.convert_float_to_float16(
-                keep_io_types=False,
-                force_fp16_initializers=True,
-                use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
-                max_finite_val=32767.0,
-                min_positive_val=1e-7,
-                op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'MatMulIntegerToFloat']
-                # Common fp16 overflow operators: 'Pow', 'ReduceMean', 'ReduceSum', 'Softmax', 'Sigmoid', 'Erf'
-            )
-        model.save_model_to_file(quanted_model_path, use_external_data_format=False)
-        if upgrade_opset > 0:
-            print(f"Upgrading Opset to {upgrade_opset}...")
-            try:
-                model = onnx.load(quanted_model_path)
-                converted_model = onnx.version_converter.convert_version(model, upgrade_opset)
-                onnx.save(converted_model, quanted_model_path, save_as_external_data=False)
-                del model, converted_model
-                gc.collect()
-            except Exception as e:
-                print(f"Could not upgrade opset due to an error: {e}. Saving model with original opset.")
-                model = onnx.load(quanted_model_path)
-                onnx.save(model, quanted_model_path, save_as_external_data=False)
-                del model
-                gc.collect()
-        else:
-            model = onnx.load(quanted_model_path)
-            onnx.save(model, quanted_model_path, save_as_external_data=False)
-            del model
-            gc.collect()
-        continue
-
-    # Model-specific configuration based on model name
-    op_types = ["MatMul"]                                                        # ["MatMul", "Gather"]; Adding Gather may get errors.
-    quant_axes = [0]                                                             # Target axes to quant the quant data.
-    algorithm = algorithm_copy  # Reset to default
-    
-    # Special handling for specific model types
-    if 'QwenVL_A' in model_name or 'Embed' in model_name:  # Embedding part
-        op_types = ["Gather"]
-        quant_axes = [1]
-        algorithm = "DEFAULT"  # Fallback to DEFAULT for Gather operations
-    
-    if ('QwenVL_C' in model_name) or ('QwenVL_D' in model_name) or ('QwenVL_E' in model_name):
-        _two_parts_save = False
-    else:
-        _two_parts_save = two_parts_save
-
-    # Start Weight-Only Quantize
-    print("Loading model with shape inference...")
-    model = quant_utils.load_model_with_shape_infer(Path(model_path))
-
-    if algorithm == "RTN":
-        quant_config = matmul_nbits_quantizer.RTNWeightOnlyQuantConfig(
-            quant_format=quant_utils.QuantFormat.QOperator,
-            op_types_to_quantize=tuple(op_types)
-        )
-    elif algorithm == "HQQ":
-        quant_config = matmul_nbits_quantizer.HQQWeightOnlyQuantConfig(
-            bits=bits,
-            block_size=block_size,
-            axis=quant_axes[0],
-            quant_format=quant_utils.QuantFormat.QOperator,
-            op_types_to_quantize=tuple(op_types),
-            quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types)))
-        )
-    elif algorithm == "k_quant":
-        quant_config = matmul_nbits_quantizer.KQuantWeightOnlyQuantConfig(
-            quant_format=quant_utils.QuantFormat.QOperator,
-            op_types_to_quantize=tuple(op_types)
-        )
-    else:
-        quant_config = matmul_nbits_quantizer.DefaultWeightOnlyQuantConfig(
-            block_size=block_size,
-            is_symmetric=quant_symmetric,
-            accuracy_level=accuracy_level,
-            quant_format=quant_utils.QuantFormat.QOperator,
-            op_types_to_quantize=tuple(op_types),
-            quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types)))
-        )
-    
-    quant_config.bits = bits
-    print("Starting quantization process...")
-    quant = matmul_nbits_quantizer.MatMulNBitsQuantizer(
-        model,
-        block_size=block_size,
-        is_symmetric=quant_symmetric,
-        accuracy_level=accuracy_level,
-        quant_format=quant_utils.QuantFormat.QOperator,
-        op_types_to_quantize=tuple(op_types),
-        quant_axes=tuple((op_types[i], quant_axes[i]) for i in range(len(op_types))),
-        algo_config=quant_config,
-        nodes_to_exclude=nodes_to_exclude
-    )
-    quant.process()
-    quant.model.save_model_to_file(
-        quanted_model_path,
-        True                                         # save_as_external_data
-    )
-    del model, quant
-    gc.collect()
-
-    # Determine if model is large
-    model_size_bytes = sys.getsizeof(onnx.load(quanted_model_path).SerializeToString())
-    model_size_gb = model_size_bytes * 9.31322575e-10  # 1 / (1024 * 1024 * 1024)
-    if model_size_gb > 2.0:
-        is_large_model = True
-    else:
-        is_large_model = True if _two_parts_save else False
-
-    # ONNX Model Optimizer (onnxslim 1st pass)
-    print("Applying first onnxslim pass...")
-    slim(
-        model=quanted_model_path,
-        output_model=quanted_model_path,
-        no_shape_infer=True,                          # False for more optimize but may get errors.
-        skip_fusion_patterns=False,
-        no_constant_folding=False,
-        save_as_external_data=is_large_model,
-        verbose=False
+def optimize_onnx_model(model_path, num_heads=0, hidden_size=0, use_f16=False, save_external=False):
+    """wrapper for onnxruntime.transformers.optimizer"""
+    model = optimize_model(
+        model_path,
+        use_gpu=False,
+        opt_level=2,
+        num_heads=num_heads,
+        hidden_size=hidden_size,
+        verbose=False,
+        model_type='bert',
+        only_onnxruntime=False
     )
 
-    # Get model configuration for transformers.optimizer
-    if download_path.upper() == "NONE" or download_path is None:
-        num_heads = 0    # default
-        hidden_size = 0  # default
-    else:
-        download_path_lower = download_path.lower()
-        try:
-            if ('vl' in download_path_lower) & ('qwen' in download_path_lower):
-                if "2.5" in download_path:
-                    from transformers import Qwen2_5_VLForConditionalGeneration
-                    model_config = Qwen2_5_VLForConditionalGeneration.from_pretrained(download_path, dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-                elif "3" in download_path:
-                    from transformers import Qwen3VLForConditionalGeneration
-                    model_config = Qwen3VLForConditionalGeneration.from_pretrained(download_path, dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-                else:
-                    from transformers import Qwen2VLForConditionalGeneration
-                    model_config = Qwen2VLForConditionalGeneration.from_pretrained(download_path, dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-            else:
-                if ("gemma3" in download_path_lower) or ("gemma 3" in download_path_lower) or ("gemma-3" in download_path_lower):
-                    from transformers import Gemma3ForCausalLM
-                    model_config = Gemma3ForCausalLM.from_pretrained(download_path, dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-                else:
-                    model_config = AutoModelForCausalLM.from_pretrained(download_path, dtype=torch.float16, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
-            
-            try:
-                if "QwenVL_B" in model_name:  # Vision Part
-                    num_heads = model_config.config.vision_config.num_heads
-                    hidden_size = model_config.config.vision_config.hidden_size
-                else:
-                    num_heads = model_config.config.num_attention_heads
-                    hidden_size = model_config.config.hidden_size
-            except:
-                try:
-                    num_heads = model_config.config.llm_config.num_attention_heads
-                    hidden_size = model_config.config.llm_config.hidden_size
-                except:
-                    num_heads = 0
-                    hidden_size = 0
-            
-            del model_config
-            gc.collect()
-        except Exception as e:
-            print(f"Warning: Could not load model config: {e}. Using default values.")
-            num_heads = 0
-            hidden_size = 0
-
-    # transformers.optimizer
-    print("Applying transformers.optimizer...")
-    model = optimize_model(quanted_model_path,
-                           use_gpu=False,
-                           opt_level=2,
-                           num_heads=num_heads,
-                           hidden_size=hidden_size,
-                           verbose=False,
-                           model_type='bert',
-                           only_onnxruntime=False)
     if use_f16:
         model.convert_float_to_float16(
             keep_io_types=False,
             force_fp16_initializers=True,
-            use_symbolic_shape_infer=True,  # True for more optimize but may get errors.
+            use_symbolic_shape_infer=True,
             max_finite_val=32767.0,
             min_positive_val=1e-7,
             op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'MatMulIntegerToFloat']
-            # Common fp16 overflow operators: 'Pow', 'ReduceMean', 'ReduceSum', 'Softmax', 'Sigmoid', 'Erf'
         )
-    model.save_model_to_file(quanted_model_path, use_external_data_format=is_large_model)
+    
+    model.save_model_to_file(model_path, use_external_data_format=save_external)
     del model
     gc.collect()
 
-    # onnxslim 2nd pass
-    print("Applying second onnxslim pass...")
+def run_onnxslim(model_path, save_external):
+    """Wrapper for onnxslim optimization."""
     slim(
-        model=quanted_model_path,
-        output_model=quanted_model_path,
-        no_shape_infer=True,                         # False for more optimize but may get errors.
+        model=model_path,
+        output_model=model_path,
+        no_shape_infer=True,
         skip_fusion_patterns=False,
         no_constant_folding=False,
-        save_as_external_data=is_large_model,
+        save_as_external_data=save_external,
         verbose=False
     )
 
-    # Upgrade the Opset version. (optional process)
-    if upgrade_opset > 0:
-        print(f"Upgrading Opset to {upgrade_opset}...")
-        try:
-            model = onnx.load(quanted_model_path)
-            converted_model = onnx.version_converter.convert_version(model, upgrade_opset)
-            onnx.save(converted_model, quanted_model_path, save_as_external_data=is_large_model)
-            del model, converted_model
-            gc.collect()
-        except Exception as e:
-            print(f"Could not upgrade opset due to an error: {e}. Saving model with original opset.")
-            model = onnx.load(quanted_model_path)
-            onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
-            del model
-            gc.collect()
-    else:
-        model = onnx.load(quanted_model_path)
-        onnx.save(model, quanted_model_path, save_as_external_data=is_large_model)
-        del model
-        gc.collect()
-
-
-# Clean up external data files at the very end
-print("Cleaning up temporary *.onnx.data files...")
-pattern = os.path.join(quanted_folder_path, '*.onnx.data')
-files_to_delete = glob.glob(pattern)
-for file_path in files_to_delete:
+def upgrade_opset_version(model_path, version, save_external):
+    """Upgrades ONNX model opset version."""
+    print(f"Upgrading Opset to {version}...")
     try:
-        os.remove(file_path)
-        print(f"Deleted {file_path}")
+        model = onnx.load(model_path)
+        converted = onnx.version_converter.convert_version(model, version)
+        onnx.save(converted, model_path, save_as_external_data=save_external)
+        del model, converted
     except Exception as e:
-        print(f"Error deleting {file_path}: {e}")
+        print(f"Error upgrading opset: {e}. Saving originally.")
+        model = onnx.load(model_path)
+        onnx.save(model, model_path, save_as_external_data=save_external)
+        del model
+    gc.collect()
 
-print("--- All models processed successfully! ---")
+def fetch_transformer_config(download_path, model_name):
+    """Loads model configuration to retrieve Attention Heads and Hidden Size."""
+    if not download_path or download_path.upper() == "NONE":
+        return 0, 0
+
+    path_lower = download_path.lower()
+    try:
+        # Determine model class
+        if 'vl' in path_lower and 'qwen' in path_lower:
+            if "2.5" in path_lower:
+                cls = Qwen2_5_VLForConditionalGeneration
+            elif "3" in path_lower:
+                cls = Qwen3VLForConditionalGeneration
+            else:
+                cls = Qwen2VLForConditionalGeneration
+        elif any(x in path_lower for x in ["gemma3", "gemma 3", "gemma-3"]):
+            cls = Gemma3ForCausalLM
+        else:
+            cls = AutoModelForCausalLM
+
+        config_obj = cls.from_pretrained(
+            download_path, 
+            dtype=torch.float16, 
+            device_map='cpu', 
+            trust_remote_code=True, 
+            low_cpu_mem_usage=True
+        ).eval()
+
+        # Extract parameters
+        try:
+            if "LLM_Vision" in model_name:
+                return config_obj.config.vision_config.num_heads, config_obj.config.vision_config.hidden_size
+            
+            # Check standard config or nested llm_config
+            cfg = getattr(config_obj.config, 'llm_config', config_obj.config)
+            return cfg.num_attention_heads, cfg.hidden_size
+        except AttributeError:
+            return 0, 0
+        finally:
+            del config_obj
+            gc.collect()
+
+    except Exception as e:
+        print(f"Warning: Could not load config: {e}. Using defaults.")
+        return 0, 0
+
+def check_is_large_model(model_path, use_two_parts):
+    """Determines if the model is large (>2GB) or forced to split."""
+    try:
+        size_bytes = sys.getsizeof(onnx.load(model_path).SerializeToString())
+        size_gb = size_bytes * 9.31322575e-10
+        return size_gb > 2.0 or use_two_parts
+    except:
+        return use_two_parts
+
+def process_vision_quantization(src_path, dst_path):
+    """Handles dynamic quantization for Vision models."""
+    print(f"Applying Dynamic Quantization for Vision model...")
+    quantize_dynamic(
+        model_input=quant_utils.load_model_with_shape_infer(Path(src_path)),
+        model_output=dst_path,
+        per_channel=True,
+        reduce_range=False,
+        weight_type=QuantType.QUInt8,
+        extra_options={
+            'ActivationSymmetric': False,
+            'WeightSymmetric': False,
+            'EnableSubgraph': True,
+            'ForceQuantizeNoInputCheck': False,
+            'MatMulConstBOnly': True
+        },
+        nodes_to_exclude=None,
+        use_external_data_format=TWO_PARTS_SAVE
+    )
+
+def process_weight_quantization(src_path, dst_path, algo, op_types, axes):
+    """Handles weight-only quantization for standard models."""
+    print("Loading model with shape inference...")
+    model = quant_utils.load_model_with_shape_infer(Path(src_path))
+    
+    # Configure Algorithm
+    common_args = {
+        'quant_format': quant_utils.QuantFormat.QOperator,
+        'op_types_to_quantize': tuple(op_types)
+    }
+    
+    if algo == "RTN":
+        q_config = matmul_nbits_quantizer.RTNWeightOnlyQuantConfig(**common_args)
+    elif algo == "HQQ":
+        q_config = matmul_nbits_quantizer.HQQWeightOnlyQuantConfig(
+            bits=BITS, block_size=BLOCK_SIZE, axis=axes[0],
+            quant_axes=tuple((op_types[i], axes[i]) for i in range(len(op_types))),
+            **common_args
+        )
+    elif algo == "k_quant":
+        q_config = matmul_nbits_quantizer.KQuantWeightOnlyQuantConfig(**common_args)
+    else: # DEFAULT
+        q_config = matmul_nbits_quantizer.DefaultWeightOnlyQuantConfig(
+            block_size=BLOCK_SIZE, is_symmetric=QUANT_SYMMETRIC, 
+            accuracy_level=ACCURACY_LEVEL,
+            quant_axes=tuple((op_types[i], axes[i]) for i in range(len(op_types))),
+            **common_args
+        )
+    
+    q_config.bits = BITS
+
+    print(f"Starting quantization process ({algo})...")
+    quant = matmul_nbits_quantizer.MatMulNBitsQuantizer(
+        model,
+        block_size=BLOCK_SIZE,
+        is_symmetric=QUANT_SYMMETRIC,
+        accuracy_level=ACCURACY_LEVEL,
+        quant_format=quant_utils.QuantFormat.QOperator,
+        op_types_to_quantize=tuple(op_types),
+        quant_axes=tuple((op_types[i], axes[i]) for i in range(len(op_types))),
+        algo_config=q_config,
+        nodes_to_exclude=NODES_TO_EXCLUDE
+    )
+    quant.process()
+    quant.model.save_model_to_file(dst_path, True)
+    del model, quant
+    gc.collect()
+
+# --- Main Logic ---
+
+def main():
+    os.makedirs(QUANTED_FOLDER_PATH, exist_ok=True)
+
+    for model_name in MODEL_NAMES:
+        print(f"--- Processing model: {model_name} ---")
+        
+        src_path, dst_path = get_model_paths(model_name)
+        if not os.path.exists(src_path):
+            print(f"Warning: Model file not found at {src_path}. Skipping.")
+            continue
+
+        # Validating two_parts setting for this specific model
+        is_split_disabled = ('Concat' in model_name) or ('Rotary' in model_name)
+        current_two_parts = False if is_split_disabled else TWO_PARTS_SAVE
+
+        # --- Case 1: Reset_Penality (Optimization only) ---
+        if 'Reset_Penality' in model_name:
+            print("Optimizing Reset_Penality...")
+            optimize_onnx_model(src_path, use_f16=USE_F16, save_external=False)
+            if UPGRADE_OPSET > 0:
+                upgrade_opset_version(src_path, UPGRADE_OPSET, False)
+            continue
+
+        # --- Case 2: Quantization ---
+        # Determine algorithm and types
+        current_algo = "DEFAULT" if 'Embed' in model_name else ALGORITHM
+        op_types = ["Gather"] if 'Embed' in model_name else ["MatMul"]
+        quant_axes = [1] if 'Embed' in model_name else [0]
+
+        if "LLM_Vision" in model_name and USE_Q8_VISION:
+            process_vision_quantization(src_path, dst_path)
+        else:
+            process_weight_quantization(src_path, dst_path, current_algo, op_types, quant_axes)
+
+        # --- Case 3: Post-Quantization Optimization Pipeline ---
+        
+        # Check size to determine storage format
+        is_large = check_is_large_model(dst_path, current_two_parts)
+        
+        # 1. First onnxslim pass
+        print("Applying first onnxslim pass...")
+        # Note: Vision model uses src_path as input in original logic for slim, others use dst
+        slim_input = src_path if ("LLM_Vision" in model_name and not USE_Q8_VISION) else dst_path
+        slim(
+            model=slim_input,
+            output_model=dst_path,
+            no_shape_infer=True,
+            save_as_external_data=is_large,
+            verbose=False
+        )
+        
+        # 2. Transformers Optimization
+        print("Applying transformers.optimizer...")
+        num_heads, hidden_size = fetch_transformer_config(DOWNLOAD_PATH, model_name)
+        optimize_onnx_model(dst_path, num_heads, hidden_size, USE_F16, save_external=is_large)
+
+        # 3. Second onnxslim pass
+        print("Applying second onnxslim pass...")
+        run_onnxslim(dst_path, save_external=is_large)
+
+        # 4. Opset Upgrade
+        if UPGRADE_OPSET > 0:
+            upgrade_opset_version(dst_path, UPGRADE_OPSET, save_external=is_large)
+        else:
+            # Re-save to ensure consistency if no upgrade requested (as per original logic)
+            m = onnx.load(dst_path)
+            onnx.save(m, dst_path, save_as_external_data=is_large)
+            del m; gc.collect()
+
+    # --- Cleanup ---
+    print("Cleaning up temporary *.onnx.data files...")
+    pattern = os.path.join(QUANTED_FOLDER_PATH, '*.onnx.data')
+    for file_path in glob.glob(pattern):
+        try:
+            os.remove(file_path)
+            print(f"Deleted {file_path}")
+        except Exception as e:
+            print(f"Error deleting {file_path}: {e}")
+    
+    print("--- All models processed successfully! ---")
+
+if __name__ == "__main__":
+    main()
