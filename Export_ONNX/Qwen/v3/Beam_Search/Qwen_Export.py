@@ -173,39 +173,39 @@ class LLM_MAIN(torch.nn.Module):
     def __init__(self, llm, max_seq_len, num_heads, num_key_value_heads, head_dim, num_layers, hidden_size):
         super(LLM_MAIN, self).__init__()
         self.llm = llm
-        self.norm_factor = hidden_size ** 0.5
-        self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
+        self._replace_gelu_with_tanh_approximation(self.llm)
         self.head_dim = head_dim
-        self.head_dim_half = self.head_dim // 2
+        self.head_dim_half = [head_dim // 2, head_dim // 2]
         self.num_heads = num_heads
         self.num_key_value_heads = num_key_value_heads
-        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        self.num_key_value_groups = num_heads // num_key_value_heads
         self.num_layers = num_layers
-        self.num_layers_2 = self.num_layers * 2
-        self.num_layers_3 = self.num_layers * 3
-        self.num_layers_4 = self.num_layers * 4
-        self.num_layers_5 = self.num_layers * 5
+        self.num_layers_2 = num_layers * 2
+        self.num_layers_3 = num_layers * 3
+        self.num_layers_4 = num_layers * 4
+        self.num_layers_5 = num_layers * 5
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
         self.quantizer = KVQuantizer().eval()
         self.variance_epsilon = torch.tensor([1e-6], dtype=torch.float32)
-        scale_factor = float(self.head_dim ** -0.25)
+        self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
+        scale_factor = head_dim ** -0.25
+        norm_factor = hidden_size ** 0.5
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         inv_freq = self.llm.model.rotary_emb.inv_freq
         idx_theta = (position_ids * inv_freq).unsqueeze(0).unsqueeze(0)
-        cos = torch.cos(idx_theta) * scale_factor
-        sin = torch.sin(idx_theta) * scale_factor
-        mask = (1 - torch.tril(torch.ones([1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
-        self.register_buffer("attention_mask", mask, persistent=False)
+        cos = torch.cos(idx_theta)
+        sin = torch.sin(idx_theta)
+        self.attention_mask = (1 - torch.tril(torch.ones([1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
         self.register_buffer("cos_rotary_pos_emb", torch.cat((cos, cos), dim=-1).half(), persistent=False)
         self.register_buffer("sin_rotary_pos_emb", torch.cat((sin, sin), dim=-1).half(), persistent=False)
-        self.save_key = [None] * self.num_layers
-        self.save_value = [None] * self.num_layers
+        self.save_key = [None] * num_layers
+        self.save_value = [None] * num_layers
         if self.kv_q8:
-            self.save_k_scale = [None] * self.num_layers
-            self.save_k_bias = [None] * self.num_layers
-            self.save_v_scale = [None] * self.num_layers
-            self.save_v_bias = [None] * self.num_layers
+            self.save_k_scale = [None] * num_layers
+            self.save_k_bias = [None] * num_layers
+            self.save_v_scale = [None] * num_layers
+            self.save_v_bias = [None] * num_layers
 
         with torch.no_grad():
             for layer in self.llm.model.layers:
@@ -231,12 +231,15 @@ class LLM_MAIN(torch.nn.Module):
                 del layer.self_attn.k_proj
                 del layer.self_attn.v_proj
 
-                w = layer.input_layernorm.weight.unsqueeze(0) * self.norm_factor
+                layer.self_attn.q_norm.weight.mul_(scale_factor)
+                layer.self_attn.k_norm.weight.mul_(scale_factor)
+
+                w = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
                 qkv.weight.mul_(w)
                 layer.self_attn.qkv = qkv
                 del layer.input_layernorm
 
-                w = layer.post_attention_layernorm.weight.unsqueeze(0) * self.norm_factor
+                w = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
                 gate = layer.mlp.gate_proj
                 up = layer.mlp.up_proj
 
@@ -253,12 +256,20 @@ class LLM_MAIN(torch.nn.Module):
                 del layer.mlp.up_proj
                 del layer.post_attention_layernorm
 
-            w = self.llm.model.norm.weight.unsqueeze(0) * self.norm_factor
+            w = self.llm.model.norm.weight.unsqueeze(0) * norm_factor
             self.llm.lm_head.weight.mul_(w)
             del self.llm.model.norm
 
-    def rotate_half(self, x, head_dim_half, dim):
-        x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=dim)
+    def _replace_gelu_with_tanh_approximation(self, module):
+        for name, child in module.named_children():
+            if isinstance(child, torch.nn.GELU):
+                setattr(module, name, torch.nn.GELU(approximate='tanh'))
+                print(f"Replaced GELU at: {name}")
+            else:
+                self._replace_gelu_with_tanh_approximation(child)
+
+    def rotate_half(self, x, dim):
+        x1, x2 = torch.split(x, self.head_dim_half, dim=dim)
         return torch.cat((-x2, x1), dim=dim)
 
     def repeat_k(self, kv_states, num_key_value_groups, head_dim, num_heads, batch_size):
@@ -291,10 +302,10 @@ class LLM_MAIN(torch.nn.Module):
             if self.kv_f16:
                 v = v.half()
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
-            q = (layer.self_attn.q_norm.weight * (q * torch.rsqrt(q.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).transpose(1, 2)
-            k = (layer.self_attn.k_norm.weight * (k * torch.rsqrt(k.pow(2).mean(-1, keepdim=True) + self.variance_epsilon))).permute(0, 3, 2, 4, 1)
-            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, self.head_dim_half, -1) * rotary_pos_emb_sin_q
-            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, self.head_dim_half, -2) * rotary_pos_emb_sin_k
+            q = (layer.self_attn.q_norm(q)).transpose(1, 2)
+            k = (layer.self_attn.k_norm(k)).permute(0, 3, 2, 4, 1)
+            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, -1) * rotary_pos_emb_sin_q
+            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, -2) * rotary_pos_emb_sin_k
             if self.kv_f16:
                 k = torch.cat((all_inputs[i], k.half()), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
@@ -579,9 +590,13 @@ if DO_EXPORT:
 
 # Inference with ONNXRuntime
 # =======================================================#
-def bind_ort_values(binding, names, values):
-    for name, val in zip(names, values):
-        binding.bind_ortvalue_input(name, val)
+def bind_ort_values(binding, names, values, num=0):
+    if num != 0:
+        for i in range(num):
+            binding.bind_ortvalue_input(names[i], values[i])
+    else:
+        for name, val in zip(names, values):
+            binding.bind_ortvalue_input(name, val)
 
 
 def bind_outputs_generic(binding, output_names, device_type, device_id):
@@ -854,6 +869,8 @@ while num_decode < generate_limit:
             ort_session_D.run_with_iobinding(binding_D, run_options=run_options)
             all_outputs_D = binding_D.get_outputs()
             max_logits_idx = all_outputs_D[num_keys_values_plus_5].numpy()
+            if max_logits_idx in STOP_TOKEN:
+                break
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_4], all_outputs_D[num_keys_values_plus_4])
             if do_repeat_penalty:
                 binding_F.bind_ortvalue_input(in_name_F[3], all_outputs_D[num_keys_values_plus_4])
@@ -863,8 +880,8 @@ while num_decode < generate_limit:
             ort_session_E.run_with_iobinding(binding_E, run_options=run_options)
             all_outputs_E = binding_E.get_outputs()
             max_logits_idx = all_outputs_E[num_keys_values_plus_4].numpy()
-        if max_logits_idx in STOP_TOKEN:
-            break
+            if max_logits_idx in STOP_TOKEN:
+                break
         if do_repeat_penalty and (num_decode >= PENALTY_RANGE):
             binding_F.bind_ortvalue_input(in_name_F[0], all_outputs_E[num_keys_values_plus_1])
             binding_F.bind_ortvalue_input(in_name_F[1], all_outputs_E[num_keys_values_plus_2])
@@ -893,6 +910,8 @@ while num_decode < generate_limit:
             ort_session_C.run_with_iobinding(binding_C, run_options=run_options)
             all_outputs_C = binding_C.get_outputs()
             max_logits_idx = all_outputs_C[0].numpy().flat[0]
+            if max_logits_idx in STOP_TOKEN:
+                break
             if num_decode >= PENALTY_RANGE:
                 reset_ids = save_id_greedy[init_penality_reset_count]
                 if reset_ids != max_logits_idx:
@@ -917,8 +936,8 @@ while num_decode < generate_limit:
             all_outputs_G = binding_G.get_outputs()
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_G[0])
             max_logits_idx = all_outputs_G[0].numpy().flat[0]
-        if max_logits_idx in STOP_TOKEN:
-            break
+            if max_logits_idx in STOP_TOKEN:
+                break
         bind_ort_values(binding_B, in_name_B_parts, all_outputs_B)
         save_id_greedy[num_decode] = max_logits_idx
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
@@ -942,4 +961,3 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
