@@ -448,13 +448,13 @@ class LLM_MAIN(torch.nn.Module):
         max_seq_len += height_factor * width_factor
         self.attention_mask = (1 - torch.tril(torch.ones([1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
         self.deepstack_features_len = deepstack_features_len
-        norm_factor = hidden_size ** 0.5
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
         self.quantizer = KVQuantizer().eval()
         self.variance_epsilon = torch.tensor([1e-6], dtype=torch.float32)
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         self.register_buffer("dummy", torch.zeros([1, 1], dtype=torch.int64), persistent=True)
+        norm_factor = hidden_size ** 0.5
         scale_factor = float(head_dim ** -0.25)
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers
