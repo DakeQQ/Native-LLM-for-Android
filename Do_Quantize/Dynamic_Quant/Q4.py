@@ -280,8 +280,9 @@ def main():
         op_types = ["Gather"] if 'Embed' in model_name else ["MatMul"]
         quant_axes = [1] if 'Embed' in model_name else [0]
 
-        if "LLM_Vision" in model_name and USE_Q8_VISION:
-            process_vision_quantization(src_path, dst_path)
+        if "LLM_Vision" in model_name:
+            if USE_Q8_VISION:
+                process_vision_quantization(src_path, dst_path)
         else:
             process_weight_quantization(src_path, dst_path, current_algo, op_types, quant_axes)
 
@@ -334,3 +335,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
