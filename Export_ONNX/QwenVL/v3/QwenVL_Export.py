@@ -9,21 +9,21 @@ from transformers import Qwen3VLForConditionalGeneration, Qwen3VLVisionModel, Au
 from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLTextRotaryEmbedding
 
 
-path = r'/home/DakeQQ/Downloads/Qwen3-VL-2B-Instruct'                       # Set the folder path where the Qwen3-VL whole project downloaded.
-onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Embed.onnx'      # Assign a path where the exported QwenVL model stored.
-onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Vision.onnx'
-onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Concat.onnx'
-onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Rotary_Vision.onnx'
-onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Rotary_Text.onnx'
+path = r'/home/DakeQQ/Downloads/Qwen3-VL-2B-Instruct'                  # Set the folder path where the Qwen3-VL whole project downloaded.
+onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'      # Assign a path where the exported QwenVL model stored.
+onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Vision.onnx'
+onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat.onnx'
+onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Rotary_Vision.onnx'
+onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Rotary_Text.onnx'
 
 # Note: Assign a different folder for 'LLM_Main' to avoid duplicate weight file names causing loading failures.
-onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Main.onnx'
+onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX_2/LLM_Main.onnx'
 
-onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_Optimized/Greedy_Search.onnx'
-onnx_model_H = r'/home/DakeQQ/Downloads/Qwen_Optimized/First_Beam_Search.onnx'
-onnx_model_I = r'/home/DakeQQ/Downloads/Qwen_Optimized/Second_Beam_Search.onnx'
-onnx_model_J = r'/home/DakeQQ/Downloads/Qwen_Optimized/Reset_Penality.onnx'
-onnx_model_K = r'/home/DakeQQ/Downloads/Qwen_Optimized/Argmax.onnx'
+onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
+onnx_model_H = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
+onnx_model_I = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
+onnx_model_J = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
+onnx_model_K = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # Test Input
 image_path = r"../psyduck.png"                                      # Test image for the exported onnx model.
@@ -45,7 +45,7 @@ INPUT_IMAGE_SIZE = [960, 960]                                       # Input imag
 
 VISION_BATCH_SIZE = 1                                               # Set the number of images for the vision LLM, whether DYNAMIC_IMAGE_SHAPE is True or False.
 DYNAMIC_IMAGE_SHAPE = False                                         # Allow for a dynamic number of image inputs.
-INPUT_IMAGE_DIM = 4                                                 # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
+INPUT_IMAGE_DIM = 5                                                 # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
 
 USE_BEAM_SEARCH = False                                             # Use beam search or greedy search.
 TOP_K = 3                                                           # The top k candidate in decoding.
@@ -1533,3 +1533,4 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
