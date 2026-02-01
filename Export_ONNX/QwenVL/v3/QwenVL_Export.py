@@ -1236,10 +1236,8 @@ deepstack_in_name_F = in_name_F[deepstack_indices[0]:deepstack_indices[deepstack
 in_name_F_parts = in_name_F[:num_keys_values]
 vocab_size = ort_session_F._outputs_meta[num_keys_values].shape[1]
 
-topK_dtype = np.int64
-beam_dtype = np.int64
-topK = create_ortvalue([TOP_K], topK_dtype, device_type, DEVICE_ID)
-beam_size = create_ortvalue([BEAM_SIZE], beam_dtype, device_type, DEVICE_ID)
+topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
+beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
 
 prompt = f"<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n<|im_start|>assistant\n"
 prompt_head_len = np.array([4], dtype=np.int64)
@@ -1426,7 +1424,6 @@ while num_decode < generate_limit:
     bind_outputs_generic(binding_F, out_name_F, device_type, DEVICE_ID)
     ort_session_F.run_with_iobinding(binding_F, run_options=run_options)
     all_outputs_F = binding_F.get_outputs()
-    
     if USE_BEAM_SEARCH:
         if num_decode < 1:
             bind_ort_values(binding_H, in_name_H_parts, all_outputs_F)
@@ -1533,4 +1530,5 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
 
