@@ -2,7 +2,6 @@ import os
 import gc
 import sys
 import glob
-import logging
 import onnx
 import torch
 import onnx.version_converter
@@ -72,6 +71,7 @@ def get_model_paths(model_name):
     dst_path = os.path.join(QUANTED_FOLDER_PATH, f"{model_name}.onnx")
     return src_path, dst_path
 
+
 def optimize_onnx_model(model_path, num_heads=0, hidden_size=0, use_f16=False, save_external=False):
     """wrapper for onnxruntime.transformers.optimizer"""
     model = optimize_model(
@@ -99,6 +99,7 @@ def optimize_onnx_model(model_path, num_heads=0, hidden_size=0, use_f16=False, s
     del model
     gc.collect()
 
+
 def run_onnxslim(model_path, save_external):
     """Wrapper for onnxslim optimization."""
     slim(
@@ -110,6 +111,7 @@ def run_onnxslim(model_path, save_external):
         save_as_external_data=save_external,
         verbose=False
     )
+
 
 def upgrade_opset_version(model_path, version, save_external):
     """Upgrades ONNX model opset version."""
@@ -125,6 +127,7 @@ def upgrade_opset_version(model_path, version, save_external):
         onnx.save(model, model_path, save_as_external_data=save_external)
         del model
     gc.collect()
+
 
 def fetch_transformer_config(download_path, model_name):
     """Loads model configuration to retrieve Attention Heads and Hidden Size."""
@@ -172,6 +175,7 @@ def fetch_transformer_config(download_path, model_name):
         print(f"Warning: Could not load config: {e}. Using defaults.")
         return 0, 0
 
+
 def check_is_large_model(model_path, use_two_parts):
     """Determines if the model is large (>2GB) or forced to split."""
     try:
@@ -180,6 +184,7 @@ def check_is_large_model(model_path, use_two_parts):
         return size_gb > 2.0 or use_two_parts
     except:
         return use_two_parts
+
 
 def process_vision_quantization(src_path, dst_path):
     """Handles dynamic quantization for Vision models."""
@@ -200,6 +205,7 @@ def process_vision_quantization(src_path, dst_path):
         nodes_to_exclude=None,
         use_external_data_format=TWO_PARTS_SAVE
     )
+
 
 def process_weight_quantization(src_path, dst_path, algo, op_types, axes):
     """Handles weight-only quantization for standard models."""
@@ -249,8 +255,8 @@ def process_weight_quantization(src_path, dst_path, algo, op_types, axes):
     del model, quant
     gc.collect()
 
-# --- Main Logic ---
 
+# --- Main Logic ---
 def main():
     os.makedirs(QUANTED_FOLDER_PATH, exist_ok=True)
 
@@ -333,6 +339,6 @@ def main():
     
     print("--- All models processed successfully! ---")
 
+
 if __name__ == "__main__":
     main()
-
