@@ -203,75 +203,48 @@ class LLM_VISION(torch.nn.Module):
         self.llm = llm
         visual_model = self.llm.model.visual
         vision_config = self.llm.config.vision_config
-
-        # 1. Model Structure Modifications
         self._replace_gelu_with_tanh_approximation(self.llm)
-
-        # 2. Extract Configuration & Constants
         self.num_heads = vision_config.num_heads
         self.head_dim = vision_config.hidden_size // self.num_heads
-        self.head_dim_half = self.head_dim // 2
+        self.head_dim_half = [self.head_dim // 2, self.head_dim // 2]
         self.patch_size = visual_model.patch_size
         self.merge_size = visual_model.spatial_merge_size
-
         self.means = torch.full((1, 1, 1, 1, 1), 127.5, dtype=torch.float32)
         self.inv_std = torch.full((1, 1, 1, 1, 1), 1.0 / 127.5, dtype=torch.float32)
-
-        # 3. Precompute Positional Embeddings
         grid_thw = torch.tensor([[1, HEIGHT_FACTOR * 2, WIDTH_FACTOR * 2]], dtype=torch.int32)
         self.image_hidden_len = grid_thw[0, 1] * grid_thw[0, 2]
-
         self.pos_embeds = Qwen3VLVisionModel.fast_pos_embed_interpolate(visual_model, grid_thw).unsqueeze(0)
-
         rotary_pos_emb = Qwen3VLVisionModel.rot_pos_emb(visual_model, grid_thw).float().unsqueeze(0).unsqueeze(0)
-        
         cos = rotary_pos_emb.cos()
         sin = rotary_pos_emb.sin()
         self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1)
         self.rotary_pos_emb_sin = torch.cat([sin, sin], dim=-1)
-
-        # 4. Weight Optimization Helper
-        def fuse_norm(norm, linear):
-            norm_bias = norm.bias.data
-            norm_weight = norm.weight.data
-            
-            # Handle dimension mismatch (e.g., spatial merge layers)
-            if linear.weight.shape[1] != norm_bias.shape[0]:
-                repeat_factor = linear.weight.shape[1] // norm_bias.shape[0]
-                norm_bias = norm_bias.repeat(repeat_factor)
-                norm_weight = norm_weight.repeat(repeat_factor)
-
-            linear.bias.data.add_(torch.matmul(linear.weight.data, norm_bias))
-            linear.weight.data.mul_(norm_weight.unsqueeze(0))
-            
-            # Disable the original norm layer
-            norm.elementwise_affine = False
-            norm.weight = None
-            norm.bias = None
-
-        # 5. Apply Optimizations: Visual Blocks
-        scaling = float(self.head_dim ** -0.25)
+        scaling = self.head_dim ** -0.25
         embed_dim_patch = visual_model.patch_embed.embed_dim
-
         for blk in visual_model.blocks:
-            # Scale QKV weights
             blk.attn.qkv.weight.data[:-embed_dim_patch] *= scaling
             blk.attn.qkv.bias.data[:-embed_dim_patch] *= scaling
-
-            # Fuse norms
-            fuse_norm(blk.norm1, blk.attn.qkv)
-            fuse_norm(blk.norm2, blk.mlp.linear_fc1)
-
-        # 6. Apply Optimizations: Deepstack Layers
+            self.fuse_norm(blk.norm1, blk.attn.qkv)
+            self.fuse_norm(blk.norm2, blk.mlp.linear_fc1)
         for deepstack_layer in visual_model.deepstack_merger_list:
-            fuse_norm(deepstack_layer.norm, deepstack_layer.linear_fc1)
+            self.fuse_norm(deepstack_layer.norm, deepstack_layer.linear_fc1)
+        self.fuse_norm(visual_model.merger.norm, visual_model.merger.linear_fc1)
 
-        # 7. Apply Optimizations: Merger Layer
-        fuse_norm(visual_model.merger.norm, visual_model.merger.linear_fc1)
+    def fuse_norm(self, norm, linear):
+        norm_bias = norm.bias.data
+        norm_weight = norm.weight.data
+        if linear.weight.shape[1] != norm_bias.shape[0]:
+            repeat_factor = linear.weight.shape[1] // norm_bias.shape[0]
+            norm_bias = norm_bias.repeat(repeat_factor)
+            norm_weight = norm_weight.repeat(repeat_factor)
+        linear.bias.data.add_(torch.matmul(linear.weight.data, norm_bias))
+        linear.weight.data.mul_(norm_weight.unsqueeze(0))
+        norm.elementwise_affine = False
+        norm.weight = None
+        norm.bias = None
 
-
-    def rotate_half(self, x, head_dim_half, dim):
-        x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=dim)
+    def rotate_half(self, x, dim):
+        x1, x2 = torch.split(x, self.head_dim_half, dim=dim)
         return torch.cat((-x2, x1), dim=dim)
 
     def _replace_gelu_with_tanh_approximation(self, module):
@@ -332,8 +305,8 @@ class LLM_VISION(torch.nn.Module):
         for layer_num, blk in enumerate(self.llm.model.visual.blocks):
             hidden_states_norm = blk.norm1(vision_hidden_states)
             q, k, v = blk.attn.qkv(hidden_states_norm).reshape(-1, 3, self.num_heads, self.head_dim).permute(1, 2, 0, 3).split([1, 1, 1], dim=0)
-            q = q * self.rotary_pos_emb_cos + self.rotate_half(q, self.head_dim_half, -1) * self.rotary_pos_emb_sin
-            k = k * self.rotary_pos_emb_cos + self.rotate_half(k, self.head_dim_half, -1) * self.rotary_pos_emb_sin
+            q = q * self.rotary_pos_emb_cos + self.rotate_half(q, -1) * self.rotary_pos_emb_sin
+            k = k * self.rotary_pos_emb_cos + self.rotate_half(k, -1) * self.rotary_pos_emb_sin
             q = torch.cat(q.split(self.image_hidden_len, dim=2), dim=0)
             k = torch.cat(k.split(self.image_hidden_len, dim=2), dim=0)
             v = torch.cat(v.split(self.image_hidden_len, dim=2), dim=0)
@@ -341,8 +314,7 @@ class LLM_VISION(torch.nn.Module):
             attn = torch.matmul(attn, v).transpose(1, 2)
             attn_out = blk.attn.proj(attn.reshape(1, -1, blk.attn.proj.in_features))
             vision_hidden_states += attn_out
-            vision_hidden_states_norm = blk.norm2(vision_hidden_states)
-            vision_hidden_states = vision_hidden_states + blk.mlp.linear_fc2(blk.mlp.act_fn(blk.mlp.linear_fc1(vision_hidden_states_norm)))
+            vision_hidden_states = vision_hidden_states + blk.mlp.linear_fc2(blk.mlp.act_fn(blk.mlp.linear_fc1(blk.norm2(vision_hidden_states))))
             if layer_num in self.llm.model.visual.deepstack_visual_indexes:
                 deepstack_layer = self.llm.model.visual.deepstack_merger_list[self.llm.model.visual.deepstack_visual_indexes.index(layer_num)]
                 x = vision_hidden_states.view(1, -1, deepstack_layer.hidden_size)
@@ -443,7 +415,7 @@ class LLM_MAIN(torch.nn.Module):
         self.num_layers_4 = num_layers * 4
         self.num_layers_5 = num_layers * 5
         self.num_key_value_heads = num_key_value_heads
-        self.head_dim_half = head_dim // 2
+        self.head_dim_half = [head_dim // 2, head_dim // 2]
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         max_seq_len += height_factor * width_factor
         self.attention_mask = (1 - torch.tril(torch.ones([1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
@@ -466,56 +438,40 @@ class LLM_MAIN(torch.nn.Module):
         
         with torch.no_grad():
             for layer in self.llm.model.language_model.layers:
-                # 0. Pre-scale constants (Original QwenVL logic)
                 layer.self_attn.q_norm.weight.data *= scale_factor
                 layer.self_attn.k_norm.weight.data *= scale_factor
-
-                # 1. Fuse QKV Projection + Input LayerNorm
                 q_proj = layer.self_attn.q_proj
                 k_proj = layer.self_attn.k_proj
                 v_proj = layer.self_attn.v_proj
-                
-                # Store dimensions for splitting in forward pass
                 layer.self_attn.q_out_features = int(q_proj.out_features)
                 layer.self_attn.k_out_features = int(k_proj.out_features)
                 layer.self_attn.v_out_features = int(v_proj.out_features)
-                
                 out_features = q_proj.out_features + k_proj.out_features + v_proj.out_features
                 has_bias = (q_proj.bias is not None)
-                
                 qkv = torch.nn.Linear(q_proj.in_features, out_features, bias=has_bias)
                 qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
                 if has_bias:
                     qkv.bias.copy_(torch.cat([q_proj.bias, k_proj.bias, v_proj.bias], dim=0))
-                
-                # Merge Input LayerNorm weights into QKV
                 ln_weight = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
                 qkv.weight.mul_(ln_weight)
                 layer.self_attn.qkv = qkv
-                
                 del layer.self_attn.q_proj
                 del layer.self_attn.k_proj
                 del layer.self_attn.v_proj
                 del layer.input_layernorm
-                
-                # 2. Fuse MLP Gate/Up Projections + Post Attention LayerNorm
+
                 gate = layer.mlp.gate_proj
                 up = layer.mlp.up_proj
-                
                 gate_up = torch.nn.Linear(gate.in_features, gate.out_features + up.out_features, bias=False)
-                
                 ln_post_weight = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
                 gate_weight = gate.weight * ln_post_weight
                 up_weight = up.weight * ln_post_weight
-                
                 gate_up.weight.copy_(torch.cat([gate_weight, up_weight], dim=0))
                 layer.mlp.gate_up_proj = gate_up
-                
                 del layer.mlp.gate_proj
                 del layer.mlp.up_proj
                 del layer.post_attention_layernorm
-            
-            # 3. Fuse Final Norm + LM Head
+
             final_norm_w = self.llm.model.language_model.norm.weight.unsqueeze(0) * norm_factor
             self.llm.lm_head.weight.mul_(final_norm_w)
             del self.llm.model.language_model.norm
@@ -528,8 +484,8 @@ class LLM_MAIN(torch.nn.Module):
             else:
                 self._replace_gelu_with_tanh_approximation(child)
 
-    def rotate_half(self, x, head_dim_half, dim):
-        x1, x2 = torch.split(x, [head_dim_half, head_dim_half], dim=dim)
+    def rotate_half(self, x, dim):
+        x1, x2 = torch.split(x, self.head_dim_half, dim=dim)
         return torch.cat((-x2, x1), dim=dim)
 
     def repeat_k(self, kv_states, num_key_value_groups, head_dim, num_heads, batch_size):
@@ -563,8 +519,8 @@ class LLM_MAIN(torch.nn.Module):
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
             q = (layer.self_attn.q_norm(q)).transpose(1, 2)
             k = (layer.self_attn.k_norm(k)).permute(0, 3, 2, 4, 1)
-            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, self.head_dim_half, -1) * rotary_pos_emb_sin_q
-            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, self.head_dim_half, -2) * rotary_pos_emb_sin_k
+            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, -1) * rotary_pos_emb_sin_q
+            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, -2) * rotary_pos_emb_sin_k
             if self.kv_f16:
                 k = torch.cat((all_inputs[i], k.half()), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
@@ -691,10 +647,8 @@ if DO_EXPORT:
 
         kv_seq_len = history_len + ids_len
 
-        print('\nExport Part_A Start...')
-        model_A = LLM_EMBED(model)
         torch.onnx.export(
-            model_A,
+            LLM_EMBED(model),
             (input_ids,),
             onnx_model_A,
             input_names=['input_ids'],
@@ -706,10 +660,8 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo = False
         )
-        del model_A
         gc.collect()
 
-        model_B = LLM_VISION(model)
         dynamic_axes = {
             'pixel_values': {0: 'batch_size', -2: 'width', -1: 'height'},
             'vision_hidden_states': {1: 'vision_embed_len'}
@@ -722,7 +674,7 @@ if DO_EXPORT:
         output_names.append('vision_hidden_states')
 
         torch.onnx.export(
-            model_B,
+            LLM_VISION(model),
             (pixel_values,),
             onnx_model_B,
             input_names=['pixel_values'],
@@ -731,7 +683,6 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False
         )
-        del model_B
         del pixel_values
         gc.collect()
 
@@ -759,9 +710,8 @@ if DO_EXPORT:
         all_inputs.append(vision_hidden_states)
         output_names.append("concate_hidden_states")
 
-        model_C = LLM_CONCAT(MAX_SEQ_LEN, prompt_head_len, hidden_size, deepstack_features_len)
         torch.onnx.export(
-            model_C,
+            LLM_CONCAT(MAX_SEQ_LEN, prompt_head_len, hidden_size, deepstack_features_len),
             tuple(all_inputs),
             onnx_model_C,
             input_names=input_names,
@@ -770,13 +720,11 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False
         )
-        del model_C
         del text_hidden_states
         del vision_hidden_states
 
-        model_D = LLM_ROTARY_VISION(model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, MAX_SEQ_LEN)
         torch.onnx.export(
-            model_D,
+            LLM_ROTARY_VISION(model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, MAX_SEQ_LEN),
             (ids_len, history_len),
             onnx_model_D,
             input_names=['ids_len', 'history_len'],
@@ -790,11 +738,9 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False
         )
-        del model_D
 
-        model_E = LLM_ROTARY_TEXT(model, MAX_SEQ_LEN)
         torch.onnx.export(
-            model_E,
+            LLM_ROTARY_TEXT(model, MAX_SEQ_LEN),
             (ids_len, history_len),
             onnx_model_E,
             input_names=['ids_len', 'history_len'],
@@ -808,9 +754,8 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False
         )
-        del model_E
 
-        print("Exporting LLM_MAIN...")
+
         def get_kv_io(tensors_dict, batch_axis='batch', seq_axis='history_len', out_seq_axis='kv_seq_len'):
             inputs, in_names, out_names, axes = [], [], [], {}
             for name, dim in kv_specs:
@@ -901,7 +846,6 @@ if DO_EXPORT:
         del kv_seq_len
         gc.collect()
 
-        print("Exporting Helper Models...")
         beam_size = torch.tensor([BEAM_SIZE], dtype=torch.int64)
         repeat_penality = torch.ones((beam_size, vocab_size), dtype=torch.float32)
         penality_reset_count = torch.zeros(beam_size, dtype=torch.int32)
@@ -924,7 +868,6 @@ if DO_EXPORT:
             dynamo=False
         )
 
-        print("Exporting First Beam Search...")
         num_layers_beam = num_layers * len(kv_specs)
         kv_tensors_greedy = {k: v[[0]] for k, v in kv_tensors.items()}
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_greedy, 'batch_size', 'history_len', 'history_len')
@@ -968,7 +911,6 @@ if DO_EXPORT:
         del other_output_names
         del dynamic_axes
 
-        print("Exporting Second Beam Search...")
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch', 'history_len', 'kv_seq_len')
         other_inputs = [logits, save_id, repeat_penality, previous_prob, batch_indices, penality_value, beam_size, topK]
         other_input_names = ['logits', 'save_id_in', 'repeat_penality_in', 'previous_prob', 'batch_indices', 'penality_value', 'beam_size', 'topK']
@@ -1073,6 +1015,8 @@ def bind_outputs_generic(binding, output_names, device_type, device_id):
 def create_ortvalue(data, dtype, device_type, device_id):
     return onnxruntime.OrtValue.ortvalue_from_numpy(np.array(data, dtype=dtype), device_type, device_id)
 
+
+tokenizer = AutoTokenizer.from_pretrained(path)
 
 session_opts = onnxruntime.SessionOptions()
 run_options = onnxruntime.RunOptions()
@@ -1192,9 +1136,10 @@ amount_of_outputs_F = len(out_name_F_objs)
 in_name_F = [x.name for x in in_name_F_objs]
 out_name_F = [x.name for x in out_name_F_objs]
 
-device_type_copy = device_type
 if 'dml' in device_type:
-    device_type = 'cpu'
+    kv_device = 'cpu'
+else:
+    kv_device = device_type
 
 if 'uint8' in model_dtype_F_str:
     kv_dtype = np.uint8
@@ -1202,22 +1147,16 @@ if 'uint8' in model_dtype_F_str:
     num_layers = num_keys_values_temp // 2
     num_keys_values = amount_of_outputs_F - 2
     kv_scale_dtype = np.float16 if 'float16' in ort_session_F._inputs_meta[num_keys_values_temp].type else np.float32
-    k_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), device_type, DEVICE_ID)
-    k_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), device_type, DEVICE_ID)
-    v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), device_type, DEVICE_ID)
-    v_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), device_type, DEVICE_ID)
+    k_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
+    k_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
+    v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
+    v_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
 else:
     kv_dtype = np.float16 if 'float16' in model_dtype_F_str else np.float32
     num_keys_values = amount_of_outputs_F - 2
     num_layers = num_keys_values // 2
     k_scales = None
 
-device_type = device_type_copy
-
-init_past_keys_F = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[0].shape[1], 1, ort_session_F._inputs_meta[0].shape[3], 0), dtype=kv_dtype), device_type, DEVICE_ID)
-init_past_values_F = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[num_layers].shape[1], 1, 0, ort_session_F._inputs_meta[num_layers].shape[4]), dtype=kv_dtype), device_type, DEVICE_ID)
-
-generate_limit = MAX_SEQ_LEN - 10
 vision_embed_size = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
 num_keys_values_plus_1 = num_keys_values + 1
 num_keys_values_plus_2 = num_keys_values + 2
@@ -1235,13 +1174,25 @@ rotary_in_name_F = in_name_F[rotary_indices[0]:rotary_indices[rotary_outputs_len
 deepstack_in_name_F = in_name_F[deepstack_indices[0]:deepstack_indices[deepstack_features_len-1]+1]
 in_name_F_parts = in_name_F[:num_keys_values]
 vocab_size = ort_session_F._outputs_meta[num_keys_values].shape[1]
-
 topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
 beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
 
 prompt = f"<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n<|im_start|>assistant\n"
 prompt_head_len = np.array([4], dtype=np.int64)
-tokenizer = AutoTokenizer.from_pretrained(path)
+tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
+ids_len_val = tokens.shape[-1]
+ids_len = create_ortvalue([ids_len_val], np.int64, device_type, DEVICE_ID)
+init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
+init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
+init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
+init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
+init_deepstack_features = [onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, 1, ort_session_C._inputs_meta[0].shape[2]), dtype=vision_dtype), device_type, DEVICE_ID)] * deepstack_features_len
+init_past_keys_F = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[0].shape[1], 1, ort_session_F._inputs_meta[0].shape[3], 0), dtype=kv_dtype), kv_device, DEVICE_ID)
+init_past_values_F = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_F._inputs_meta[num_layers].shape[1], 1, 0, ort_session_F._inputs_meta[num_layers].shape[4]), dtype=kv_dtype), kv_device, DEVICE_ID)
+generate_limit = MAX_SEQ_LEN - tokens.shape[-1]
+
+USE_PENALTY = (REPEAT_PENALITY != 1.0)
 
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
     print("\nBeam Search does not display immediate decoding results...")
@@ -1250,8 +1201,6 @@ if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
 if (TOP_K < 2) or (BEAM_SIZE < 2):
     USE_BEAM_SEARCH = False
     print("\nInappropriate Beam Search setting. Falling back to Greedy Search.")
-
-do_repeat_penalty = (REPEAT_PENALITY != 1.0)
 
 if USE_BEAM_SEARCH:
     ort_session_H = onnxruntime.InferenceSession(onnx_model_H, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
@@ -1288,7 +1237,7 @@ if USE_BEAM_SEARCH:
 else:
     BEAM_SIZE = 1
     save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
-    if do_repeat_penalty:
+    if USE_PENALTY:
         ort_session_G = onnxruntime.InferenceSession(onnx_model_G, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
         binding_G = ort_session_G.io_binding()
         in_name_G = [x.name for x in ort_session_G.get_inputs()]
@@ -1309,19 +1258,6 @@ else:
         binding_K = ort_session_K.io_binding()
         in_name_K = ort_session_K.get_inputs()[0].name
         out_name_K = [x.name for x in ort_session_K.get_outputs()]
-
-num_decode = 0
-tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len_val = tokens.shape[-1]
-ids_len = create_ortvalue([ids_len_val], np.int64, device_type, DEVICE_ID)
-init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
-init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
-init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
-init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
-init_deepstack_features = [onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, 1, ort_session_C._inputs_meta[0].shape[2]), dtype=vision_dtype), device_type, DEVICE_ID)] * deepstack_features_len
-
-generate_limit -= tokens.shape[-1]
 
 if is_valid_image_path(image_path):
     image = Image.open(image_path)
@@ -1432,9 +1368,10 @@ while num_decode < generate_limit:
             all_outputs_H = binding_H.get_outputs()
             max_logits_idx = all_outputs_H[num_keys_values_plus_5].numpy()
             if max_logits_idx in STOP_TOKEN:
+                print("\n\nBad Generation. Please Retry.")
                 break
             binding_I.bind_ortvalue_input(in_name_I[num_keys_values_plus_4], all_outputs_H[num_keys_values_plus_4])
-            if do_repeat_penalty:
+            if USE_PENALTY:
                 binding_J.bind_ortvalue_input(in_name_J[3], all_outputs_H[num_keys_values_plus_4])
         else:
             bind_ort_values(binding_I, in_name_I_parts, all_outputs_F)
@@ -1444,7 +1381,7 @@ while num_decode < generate_limit:
             max_logits_idx = all_outputs_I[num_keys_values_plus_4].numpy()
             if max_logits_idx in STOP_TOKEN:
                 break
-        if do_repeat_penalty and (num_decode >= PENALITY_RANGE):
+        if USE_PENALTY and (num_decode >= PENALITY_RANGE):
             binding_J.bind_ortvalue_input(in_name_J[0], all_outputs_I[num_keys_values_plus_1])
             binding_J.bind_ortvalue_input(in_name_J[1], all_outputs_I[num_keys_values_plus_2])
             bind_outputs_generic(binding_J, out_name_J, device_type, DEVICE_ID)
@@ -1466,7 +1403,7 @@ while num_decode < generate_limit:
             binding_I.bind_ortvalue_input(in_name_I[num_keys_values_plus_2], all_outputs_I[num_keys_values_plus_2])
             binding_I.bind_ortvalue_input(in_name_I[num_keys_values_plus_3], all_outputs_I[num_keys_values_plus_3])
     else:
-        if do_repeat_penalty:
+        if USE_PENALTY:
             binding_G.bind_ortvalue_input(in_name_G[0], all_outputs_F[num_keys_values])
             binding_G.bind_ortvalue_input(in_name_G[1], current_penalty)
             ort_session_G.run_with_iobinding(binding_G, run_options=run_options)
@@ -1530,5 +1467,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
-
