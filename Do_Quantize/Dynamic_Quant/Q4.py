@@ -62,7 +62,7 @@ UPGRADE_OPSET = 0               # Target ONNX Opset version (0 = keep current ve
 def get_model_paths(model_name):
     """Determines source and destination paths for a given model."""
     # Special handling for LLM_Main path location
-    if 'LLM_Main' in model_name:
+    if ('LLM_Main' in model_name) and ('vl' in DOWNLOAD_PATH.lower()):
         src_dir = ORIGINAL_FOLDER_PATH.replace('Qwen_ONNX', 'Qwen_ONNX_2')
     else:
         src_dir = ORIGINAL_FOLDER_PATH
@@ -342,3 +342,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
