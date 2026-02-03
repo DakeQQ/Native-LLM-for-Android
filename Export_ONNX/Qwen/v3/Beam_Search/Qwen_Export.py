@@ -187,7 +187,6 @@ class LLM_MAIN(torch.nn.Module):
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
         self.quantizer = KVQuantizer().eval()
-        self.variance_epsilon = torch.tensor([1e-6], dtype=torch.float32)
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         scale_factor = head_dim ** -0.25
         norm_factor = hidden_size ** 0.5
@@ -294,7 +293,7 @@ class LLM_MAIN(torch.nn.Module):
             residual = hidden_states
             if PREVENT_F16_OVERFLOW:
                 hidden_states = hidden_states * self.overflow_scale
-            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             qkv = layer.self_attn.qkv(hidden_states_norm)
             q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
             q = q.view(batch_size, -1, self.num_heads, self.head_dim)
@@ -358,7 +357,7 @@ class LLM_MAIN(torch.nn.Module):
             residual = hidden_states
             if PREVENT_F16_OVERFLOW:
                 hidden_states = hidden_states * self.overflow_scale
-            hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             gate_up = layer.mlp.gate_up_proj(hidden_states)
             gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
@@ -366,7 +365,7 @@ class LLM_MAIN(torch.nn.Module):
         hidden_states = hidden_states[:, -1]
         if PREVENT_F16_OVERFLOW:
             hidden_states = hidden_states * self.overflow_scale
-        hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
+        hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
         logits = self.llm.lm_head(hidden_states)
         if self.kv_q8:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits, kv_seq_len
