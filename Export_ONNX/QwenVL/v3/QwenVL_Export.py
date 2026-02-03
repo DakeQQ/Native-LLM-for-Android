@@ -373,6 +373,7 @@ class LLM_ROTARY_VISION(torch.nn.Module):
         self.rotary_pos_emb_sin = emb.sin().half()
         
     def forward(self, ids_len, history_len):
+        history_len = history_len.long()
         kv_seq_len = ids_len + history_len
         rotary_pos_emb_cos_q = self.rotary_pos_emb_cos[..., history_len:kv_seq_len, :].float()
         rotary_pos_emb_sin_q = self.rotary_pos_emb_sin[..., history_len:kv_seq_len, :].float()
@@ -394,6 +395,7 @@ class LLM_ROTARY_TEXT(torch.nn.Module):
         self.rotary_pos_emb_sin = emb.sin().half()
         
     def forward(self, ids_len, history_len):
+        history_len = history_len.long()
         kv_seq_len = ids_len + history_len
         rotary_pos_emb_cos_q = self.rotary_pos_emb_cos[..., history_len:kv_seq_len, :].float()
         rotary_pos_emb_sin_q = self.rotary_pos_emb_sin[..., history_len:kv_seq_len, :].float()
@@ -403,7 +405,7 @@ class LLM_ROTARY_TEXT(torch.nn.Module):
 
 
 class LLM_MAIN(torch.nn.Module):
-    def __init__(self, llm, head_dim, num_heads, num_layers, num_key_value_heads, hidden_size, max_seq_len, prompt_head_len, deepstack_features_len, height_factor, width_factor):
+    def __init__(self, llm, head_dim, num_heads, num_layers, num_key_value_heads, hidden_size, max_seq_len, deepstack_features_len, height_factor, width_factor):
         super(LLM_MAIN, self).__init__()
         self.llm = llm
         self._replace_gelu_with_tanh_approximation(self.llm)
@@ -423,7 +425,6 @@ class LLM_MAIN(torch.nn.Module):
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
         self.quantizer = KVQuantizer().eval()
-        self.variance_epsilon = torch.tensor([1e-6], dtype=torch.float32)
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         self.register_buffer("dummy", torch.zeros([1, 1], dtype=torch.int64), persistent=True)
         norm_factor = hidden_size ** 0.5
@@ -509,7 +510,7 @@ class LLM_MAIN(torch.nn.Module):
             residual = hidden_states
             if PREVENT_F16_OVERFLOW:
                 hidden_states = hidden_states * self.overflow_scale
-            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             qkv = layer.self_attn.qkv(hidden_states_norm)
             q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
             q = q.view(batch_size, -1, self.num_heads, self.head_dim)
@@ -573,7 +574,7 @@ class LLM_MAIN(torch.nn.Module):
             residual = hidden_states
             if PREVENT_F16_OVERFLOW:
                 hidden_states = hidden_states * self.overflow_scale
-            hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
+            hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             gate_up = layer.mlp.gate_up_proj(hidden_states)
             gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
@@ -583,11 +584,11 @@ class LLM_MAIN(torch.nn.Module):
         hidden_states = hidden_states[:, -1]
         if PREVENT_F16_OVERFLOW:
             hidden_states = hidden_states * self.overflow_scale
-        hidden_states = hidden_states * torch.rsqrt(hidden_states.pow(2).sum(-1, keepdim=True) + self.variance_epsilon)
+        hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
         logits = self.llm.lm_head(hidden_states)
         if self.kv_q8:
-            return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits, (kv_seq_len.unsqueeze(0) + self.dummy).squeeze(0)
-        return *self.save_key, *self.save_value, logits, (kv_seq_len.unsqueeze(0) + self.dummy).squeeze(0)  # Dummy process to force kv_seq_len to be an output after the optimizer.
+            return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits, kv_seq_len.int()
+        return *self.save_key, *self.save_value, logits, kv_seq_len.int()  # Dummy process to force kv_seq_len to be an output after the optimizer.
 
 
 if DO_EXPORT:
@@ -614,7 +615,7 @@ if DO_EXPORT:
         deepstack_features = torch.ones((1, vision_embed_size, hidden_size), dtype=torch.float32)
         prompt_head_len = 4                                      # <|im_start|>user\n<|vision_start|>
         ids_len = torch.tensor([10], dtype=torch.long)      # "10" is just a dummy value.
-        history_len = torch.tensor([0], dtype=torch.long)
+        history_len = torch.tensor([0], dtype=torch.int32)
         input_ids = torch.ones((1, ids_len), dtype=torch.int32)
         text_hidden_states = torch.ones((1, ids_len, hidden_size), dtype=torch.float32)
         batch_size = 3
@@ -645,7 +646,7 @@ if DO_EXPORT:
             kv_tensors['value_scale'] = torch.ones([batch_size, num_key_value_heads, 1, 0, 1], dtype=scale_dtype)
             kv_tensors['value_bias'] = torch.ones([batch_size, num_key_value_heads, 1, 0, 1], dtype=scale_dtype)
 
-        kv_seq_len = history_len + ids_len
+        kv_seq_len = history_len.long() + ids_len
 
         torch.onnx.export(
             LLM_EMBED(model),
@@ -769,7 +770,7 @@ if DO_EXPORT:
                     axes[out_n] = {0: batch_axis, dim: out_seq_axis}
             return inputs, in_names, out_names, axes
 
-        model_F = LLM_MAIN(model, head_dim, num_heads, num_layers, num_key_value_heads, hidden_size, MAX_SEQ_LEN, prompt_head_len, deepstack_features_len, HEIGHT_FACTOR, WIDTH_FACTOR)
+        model_F = LLM_MAIN(model, head_dim, num_heads, num_layers, num_key_value_heads, hidden_size, MAX_SEQ_LEN, deepstack_features_len, HEIGHT_FACTOR, WIDTH_FACTOR)
         del model
         gc.collect()
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch', 'history_len', 'kv_seq_len')
@@ -1184,7 +1185,7 @@ input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE
 ids_len_val = tokens.shape[-1]
 ids_len = create_ortvalue([ids_len_val], np.int64, device_type, DEVICE_ID)
 init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
-init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
+init_history_len = create_ortvalue([0], np.int32, device_type, DEVICE_ID)  # Use int32
 init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
 init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
 init_deepstack_features = [onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, 1, ort_session_C._inputs_meta[0].shape[2]), dtype=vision_dtype), device_type, DEVICE_ID)] * deepstack_features_len
