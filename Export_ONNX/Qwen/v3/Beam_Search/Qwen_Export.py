@@ -141,12 +141,11 @@ class KVQuantizer(torch.nn.Module):
         super().__init__()
         self.qmax = 255.0
         self.register_buffer('inv_qmax', torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
-        self.register_buffer('eps', torch.tensor([1e-7], dtype=torch.float32).view(1, 1, 1, 1, -1))
 
     def _quantize_block(self, x, dim):
         block_min = x.min(dim=dim, keepdim=True).values  # bias
         block_max = x.max(dim=dim, keepdim=True).values
-        scale = (block_max - block_min) * self.inv_qmax + self.eps
+        scale = (block_max - block_min) * self.inv_qmax
         x_normalized = (x - block_min) / scale
         x_packed = torch.round(x_normalized).to(torch.uint8)
         if USE_FLOAT16_SCALE_BIAS:
@@ -157,7 +156,7 @@ class KVQuantizer(torch.nn.Module):
     def forward(self, keys, values):
         k_packed, k_scale, k_bias = self._quantize_block(keys, 3)
         v_packed, v_scale, v_bias = self._quantize_block(values, 4)
-        return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
+        return k_packed, k_scale, k_bias, v_packed, v_scale.transpose(-1, -2), v_bias
 
 
 class LLM_EMBED(torch.nn.Module):
@@ -192,12 +191,12 @@ class LLM_MAIN(torch.nn.Module):
         norm_factor = hidden_size ** 0.5
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         inv_freq = self.llm.model.rotary_emb.inv_freq
-        idx_theta = (position_ids * inv_freq).unsqueeze(0).unsqueeze(0)
+        idx_theta = (position_ids * inv_freq).unsqueeze(0).unsqueeze(0).unsqueeze(0)
         cos = torch.cos(idx_theta)
         sin = torch.sin(idx_theta)
-        self.attention_mask = (1 - torch.tril(torch.ones([1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
+        self.attention_mask = (1 - torch.tril(torch.ones([1, 1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
         self.register_buffer("cos_rotary_pos_emb", torch.cat((cos, cos), dim=-1).half(), persistent=False)
-        self.register_buffer("sin_rotary_pos_emb", torch.cat((sin, sin), dim=-1).half(), persistent=False)
+        self.register_buffer("sin_rotary_pos_emb", torch.cat((-sin, sin), dim=-1).half(), persistent=False)
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers
         if self.kv_q8:
@@ -269,13 +268,7 @@ class LLM_MAIN(torch.nn.Module):
 
     def rotate_half(self, x, dim):
         x1, x2 = torch.split(x, self.head_dim_half, dim=dim)
-        return torch.cat((-x2, x1), dim=dim)
-
-    def repeat_k(self, kv_states, num_key_value_groups, head_dim, num_heads, batch_size):
-        return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=2).view(batch_size, num_heads, head_dim, -1)
-
-    def repeat_v(self, kv_states, num_key_value_groups, head_dim, num_heads, batch_size):
-        return torch.cat([kv_states for _ in range(num_key_value_groups)], dim=2).view(batch_size, num_heads, -1, head_dim)
+        return torch.cat((x2, x1), dim=dim)
 
     def forward(self, *all_inputs):
         hidden_states = all_inputs[-4]
@@ -285,34 +278,33 @@ class LLM_MAIN(torch.nn.Module):
         kv_seq_len = history_len + ids_len
         rotary_pos_emb_cos_q = self.cos_rotary_pos_emb[..., history_len:kv_seq_len, :].float()
         rotary_pos_emb_sin_q = self.sin_rotary_pos_emb[..., history_len:kv_seq_len, :].float()
-        rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2).unsqueeze(0)
-        rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2).unsqueeze(0)
+        rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2)
+        rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2)
         attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * mask).float()
         batch_size = hidden_states.shape[0].unsqueeze(0)
         for i, layer in enumerate(self.llm.model.layers):
             residual = hidden_states
             if PREVENT_F16_OVERFLOW:
                 hidden_states = hidden_states * self.overflow_scale
-            hidden_states_norm = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
-            qkv = layer.self_attn.qkv(hidden_states_norm)
+            hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
+            qkv = layer.self_attn.qkv(hidden_states)
             q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
-            q = q.view(batch_size, -1, self.num_heads, self.head_dim)
+            q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
+            q = layer.self_attn.q_norm(q).permute(0, 2, 3, 1, 4)
+            k = layer.self_attn.k_norm(k).permute(0, 3, 2, 4, 1)
+            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, -1) * rotary_pos_emb_sin_q
+            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, -2) * rotary_pos_emb_sin_k
             if self.kv_f16:
                 v = v.half()
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
-            q = (layer.self_attn.q_norm(q)).transpose(1, 2)
-            k = (layer.self_attn.k_norm(k)).permute(0, 3, 2, 4, 1)
-            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, -1) * rotary_pos_emb_sin_q
-            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, -2) * rotary_pos_emb_sin_k
             if self.kv_f16:
                 k = torch.cat((all_inputs[i], k.half()), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
-                k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                v = self.repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                attn = torch.nn.functional.softmax(torch.matmul(q, k.float()) + attention_mask, dim=-1, dtype=torch.float32)
+                attn = torch.matmul(q, k.float())
+                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
                 attn = torch.matmul(attn, v.float())
             elif self.kv_q8:
                 packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v)
@@ -320,26 +312,25 @@ class LLM_MAIN(torch.nn.Module):
                 self.save_k_scale[i] = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
                 self.save_k_bias[i] = torch.cat([all_inputs[i + self.num_layers_3], bias_k], dim=-1)
                 self.save_value[i] = torch.cat([all_inputs[i + self.num_layers], packed_v], dim=-2)
-                self.save_v_scale[i] = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-2)
+                self.save_v_scale[i] = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-1)
                 self.save_v_bias[i] = torch.cat([all_inputs[i + self.num_layers_5], bias_v], dim=-2)
-                k_p = self.repeat_k(self.save_key[i], self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                k_s = self.repeat_k(self.save_k_scale[i], self.num_key_value_groups, 1, self.num_heads, batch_size)
-                k_b = self.repeat_k(self.save_k_bias[i], self.num_key_value_groups, 1, self.num_heads, batch_size)
-                v_p = self.repeat_v(self.save_value[i], self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                v_s = self.repeat_v(self.save_v_scale[i], self.num_key_value_groups, 1, self.num_heads, batch_size)
-                v_b = self.repeat_v(self.save_v_bias[i], self.num_key_value_groups, 1, self.num_heads, batch_size)
                 if USE_FLOAT16_SCALE_BIAS:
-                    k_s = k_s.float()
-                    k_b = k_b.float()
-                    v_s = v_s.float()
-                    v_b = v_b.float()
-                attn_main = torch.matmul(q, k_p.float())
+                    k_s = self.save_k_scale[i].float()
+                    k_b = self.save_k_bias[i].float()
+                    v_s = self.save_v_scale[i].float()
+                    v_b = self.save_v_bias[i].float()
+                else:
+                    k_s = self.save_k_scale[i]
+                    k_b = self.save_k_bias[i]
+                    v_s = self.save_v_scale[i]
+                    v_b = self.save_v_bias[i]
+                attn_main = torch.matmul(q, self.save_key[i].float())
                 q_sum = q.sum(dim=-1, keepdim=True)
                 attn_bias = torch.matmul(q_sum, k_b)
                 attn = attn_main * k_s + attn_bias
                 attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
-                attn_scaled = attn * v_s.transpose(-2, -1)
-                out_main = torch.matmul(attn_scaled, v_p.float())
+                attn_scaled = attn * v_s
+                out_main = torch.matmul(attn_scaled, self.save_value[i].float())
                 out_bias = torch.matmul(attn, v_b)
                 attn = out_main + out_bias
             else:
@@ -347,11 +338,10 @@ class LLM_MAIN(torch.nn.Module):
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
-                k = self.repeat_k(k, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                v = self.repeat_v(v, self.num_key_value_groups, self.head_dim, self.num_heads, batch_size)
-                attn = torch.nn.functional.softmax(torch.matmul(q, k) + attention_mask, dim=-1, dtype=torch.float32)
+                attn = torch.matmul(q, k)
+                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
                 attn = torch.matmul(attn, v)
-            attn = attn.transpose(1, 2).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
+            attn = attn.permute(0, 3, 1, 2, 4).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
             attn_out = layer.self_attn.o_proj(attn)
             hidden_states = residual + attn_out
             residual = hidden_states
@@ -394,7 +384,7 @@ if DO_EXPORT:
         if KV_QUANT_DTYPE == "F16":
             kv_dtype = torch.float16
         elif KV_QUANT_DTYPE == "Q8":
-            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 3), ('value_bias', 3)])
+            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 4), ('value_bias', 3)])
             kv_dtype = torch.uint8
         else:
             kv_dtype = torch.float32
@@ -403,7 +393,7 @@ if DO_EXPORT:
         if KV_QUANT_DTYPE == "Q8":
             kv_tensors['key_scale'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
             kv_tensors['key_bias'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
-            kv_tensors['value_scale'] = torch.ones([batch_size, num_kv_heads, 1, history_len, 1], dtype=scale_dtype)
+            kv_tensors['value_scale'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
             kv_tensors['value_bias'] = torch.ones([batch_size, num_kv_heads, 1, history_len, 1], dtype=scale_dtype)
 
         print("Exporting LLM_EMBED...")
@@ -709,7 +699,7 @@ if 'uint8' in model_dtype_B_str:
     scale_dtype_B = np.float16 if 'float16' in ort_session_B._inputs_meta[num_keys_values].type else np.float32
     k_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[0].shape[1], 1, 1, 0), dtype=scale_dtype_B), device_type, DEVICE_ID)
     k_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[0].shape[1], 1, 1, 0), dtype=scale_dtype_B), device_type, DEVICE_ID)
-    v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=scale_dtype_B), device_type, DEVICE_ID)
+    v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[num_layers].shape[1], 1, 1, 0), dtype=scale_dtype_B), device_type, DEVICE_ID)
     v_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=scale_dtype_B), device_type, DEVICE_ID)
     num_keys_values = amount_of_outputs_B - 2  # Revert to original for later use
 else:
