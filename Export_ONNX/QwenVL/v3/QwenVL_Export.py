@@ -3,6 +3,7 @@ import gc
 import time
 import torch
 import onnxruntime
+from onnxruntime.capi import _pybind_state as C
 import numpy as np
 from PIL import Image
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLVisionModel, AutoTokenizer
@@ -997,9 +998,9 @@ def bind_ort_values(binding, names, values, num=0):
             binding.bind_ortvalue_input(name, val)
 
 
-def bind_outputs_generic(binding, output_names, device_type, device_id):
+def bind_outputs_generic(binding, output_names, device_type):
     for name in output_names:
-        binding.bind_output(name, device_type=device_type, device_id=device_id)
+        binding._iobinding.bind_output(name, device_type)
 
 
 def create_ortvalue(data, dtype, device_type, device_id):
@@ -1044,6 +1045,7 @@ if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
         }
     ]
     device_type = 'cpu'
+    _ort_device_type = C.OrtDevice.cpu()
 elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [
         {
@@ -1067,6 +1069,7 @@ elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
         }
     ]
     device_type = 'cuda'
+    _ort_device_type = C.OrtDevice.cuda()
 elif "DmlExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [
         {
@@ -1076,10 +1079,14 @@ elif "DmlExecutionProvider" in ORT_Accelerate_Providers:
         }
     ]
     device_type = 'dml'
+    _ort_device_type = C.OrtDevice.dml()
 else:
     # Please config by yourself for others providers.
     device_type = 'cpu'
+    _ort_device_type = C.OrtDevice.cpu()
     provider_options = None
+
+_ort_device_type = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
 
 ort_session_A = onnxruntime.InferenceSession(onnx_model_A, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_A = ort_session_A.io_binding()
@@ -1269,7 +1276,7 @@ else:
     print('\nChat without image.')
 
 binding_A.bind_ortvalue_input(in_name_A, input_ids)
-bind_outputs_generic(binding_A, out_name_A, device_type, DEVICE_ID)
+bind_outputs_generic(binding_A, out_name_A, _ort_device_type)
 ort_session_A.run_with_iobinding(binding_A, run_options=run_options)
 out_A = binding_A.get_outputs()[0]
 
@@ -1281,7 +1288,7 @@ if use_vision:
     print('\nStart to Process the Image...')
     start_time = time.time()
     binding_B.bind_ortvalue_input(in_name_B[0], onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, DEVICE_ID))
-    bind_outputs_generic(binding_B, out_name_B, device_type, DEVICE_ID)
+    bind_outputs_generic(binding_B, out_name_B, _ort_device_type)
     ort_session_B.run_with_iobinding(binding_B, run_options=run_options)
     all_outputs_B = binding_B.get_outputs()
     print(f'\nImage Process Complete. Time Cost: {time.time() - start_time:.3f} Seconds')
@@ -1289,13 +1296,13 @@ if use_vision:
     binding_C.bind_ortvalue_input(in_name_C[deepstack_features_len], out_A)
     binding_C.bind_ortvalue_input(in_name_C[amount_of_outputs_C], all_outputs_B[deepstack_features_len])
     bind_ort_values(binding_C, in_name_C, all_outputs_B, deepstack_features_len)
-    bind_outputs_generic(binding_C, out_name_C, device_type, DEVICE_ID)
+    bind_outputs_generic(binding_C, out_name_C, _ort_device_type)
     ort_session_C.run_with_iobinding(binding_C, run_options=run_options)
     all_outputs_C = binding_C.get_outputs()
     
     binding_D.bind_ortvalue_input(in_name_D[0], ids_len)
     binding_D.bind_ortvalue_input(in_name_D[1], init_history_len)
-    bind_outputs_generic(binding_D, out_name_D, device_type, DEVICE_ID)
+    bind_outputs_generic(binding_D, out_name_D, _ort_device_type)
     ort_session_D.run_with_iobinding(binding_D, run_options=run_options)
     rotary_outputs = binding_D.get_outputs()
     
@@ -1304,7 +1311,7 @@ if use_vision:
 else:
     binding_E.bind_ortvalue_input(in_name_E[0], ids_len)
     binding_E.bind_ortvalue_input(in_name_E[1], init_history_len)
-    bind_outputs_generic(binding_E, out_name_E, device_type, DEVICE_ID)
+    bind_outputs_generic(binding_E, out_name_E, _ort_device_type)
     ort_session_E.run_with_iobinding(binding_E, run_options=run_options)
     rotary_outputs = binding_E.get_outputs()
     
@@ -1349,13 +1356,13 @@ print(f'\nTest Question: {query}\n\nQwenVL Answering:\n')
 num_decode = 0
 start_time = time.time()
 while num_decode < generate_limit:
-    bind_outputs_generic(binding_F, out_name_F, device_type, DEVICE_ID)
+    bind_outputs_generic(binding_F, out_name_F, _ort_device_type)
     ort_session_F.run_with_iobinding(binding_F, run_options=run_options)
     all_outputs_F = binding_F.get_outputs()
     if USE_BEAM_SEARCH:
         if num_decode < 1:
             bind_ort_values(binding_H, in_name_H_parts, all_outputs_F)
-            bind_outputs_generic(binding_H, out_name_H, device_type, DEVICE_ID)
+            bind_outputs_generic(binding_H, out_name_H, _ort_device_type)
             ort_session_H.run_with_iobinding(binding_H, run_options=run_options)
             all_outputs_H = binding_H.get_outputs()
             max_logits_idx = all_outputs_H[num_keys_values_plus_5].numpy()
@@ -1367,7 +1374,7 @@ while num_decode < generate_limit:
                 binding_J.bind_ortvalue_input(in_name_J[3], all_outputs_H[num_keys_values_plus_4])
         else:
             bind_ort_values(binding_I, in_name_I_parts, all_outputs_F)
-            bind_outputs_generic(binding_I, out_name_I, device_type, DEVICE_ID)
+            bind_outputs_generic(binding_I, out_name_I, _ort_device_type)
             ort_session_I.run_with_iobinding(binding_I, run_options=run_options)
             all_outputs_I = binding_I.get_outputs()
             max_logits_idx = all_outputs_I[num_keys_values_plus_4].numpy()
@@ -1376,7 +1383,7 @@ while num_decode < generate_limit:
         if USE_PENALTY and (num_decode >= PENALITY_RANGE):
             binding_J.bind_ortvalue_input(in_name_J[0], all_outputs_I[num_keys_values_plus_1])
             binding_J.bind_ortvalue_input(in_name_J[1], all_outputs_I[num_keys_values_plus_2])
-            bind_outputs_generic(binding_J, out_name_J, device_type, DEVICE_ID)
+            bind_outputs_generic(binding_J, out_name_J, _ort_device_type)
             ort_session_J.run_with_iobinding(binding_J, run_options=run_options)
             all_outputs_J = binding_J.get_outputs()
             binding_J.bind_ortvalue_input(in_name_J[2], all_outputs_J[2])
@@ -1415,7 +1422,7 @@ while num_decode < generate_limit:
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_G[0])
         else:
             binding_K.bind_ortvalue_input(in_name_K, all_outputs_F[num_keys_values])
-            bind_outputs_generic(binding_K, out_name_K, device_type, DEVICE_ID)
+            bind_outputs_generic(binding_K, out_name_K, _ort_device_type)
             ort_session_K.run_with_iobinding(binding_K, run_options=run_options)
             all_outputs_K = binding_K.get_outputs()[0]
             max_logits_idx = all_outputs_K.numpy().flat[0]
@@ -1425,19 +1432,19 @@ while num_decode < generate_limit:
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
         bind_ort_values(binding_F, in_name_F_parts, all_outputs_F)
         save_id_greedy[num_decode] = max_logits_idx
-    bind_outputs_generic(binding_A, out_name_A, device_type, DEVICE_ID)
+    bind_outputs_generic(binding_A, out_name_A, _ort_device_type)
     ort_session_A.run_with_iobinding(binding_A, run_options=run_options)
     binding_F.bind_ortvalue_input(in_name_F[num_keys_values], binding_A.get_outputs()[0])
     if use_vision:
         binding_D.bind_ortvalue_input(in_name_D[0], init_ids_len_1)
         binding_D.bind_ortvalue_input(in_name_D[1], rotary_outputs[rotary_outputs_len_minus])
-        bind_outputs_generic(binding_D, out_name_D, device_type, DEVICE_ID)
+        bind_outputs_generic(binding_D, out_name_D, _ort_device_type)
         ort_session_D.run_with_iobinding(binding_D, run_options=run_options)
         rotary_outputs = binding_D.get_outputs()
     else:
         binding_E.bind_ortvalue_input(in_name_E[0], init_ids_len_1)
         binding_E.bind_ortvalue_input(in_name_E[1], rotary_outputs[rotary_outputs_len_minus])
-        bind_outputs_generic(binding_E, out_name_E, device_type, DEVICE_ID)
+        bind_outputs_generic(binding_E, out_name_E, _ort_device_type)
         ort_session_E.run_with_iobinding(binding_E, run_options=run_options)
         rotary_outputs = binding_E.get_outputs()
     bind_ort_values(binding_F, rotary_in_name_F, rotary_outputs)
