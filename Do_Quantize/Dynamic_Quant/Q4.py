@@ -207,10 +207,13 @@ def process_vision_quantization(src_path, dst_path):
     )
 
 
-def process_weight_quantization(src_path, dst_path, algo, op_types, axes):
+def process_weight_quantization(src_path, dst_path, algo, op_types, axes, bits=BITS):
     """Handles weight-only quantization for standard models."""
     print("Loading model with shape inference...")
     model = quant_utils.load_model_with_shape_infer(Path(src_path))
+
+    if 'Gather' in op_types and bits == 2:
+        bits = 4
     
     # Configure Algorithm
     common_args = {
@@ -222,7 +225,7 @@ def process_weight_quantization(src_path, dst_path, algo, op_types, axes):
         q_config = matmul_nbits_quantizer.RTNWeightOnlyQuantConfig(**common_args)
     elif algo == "HQQ":
         q_config = matmul_nbits_quantizer.HQQWeightOnlyQuantConfig(
-            bits=BITS, block_size=BLOCK_SIZE, axis=axes[0],
+            bits=bits, block_size=BLOCK_SIZE, axis=axes[0],
             quant_axes=tuple((op_types[i], axes[i]) for i in range(len(op_types))),
             **common_args
         )
@@ -236,7 +239,7 @@ def process_weight_quantization(src_path, dst_path, algo, op_types, axes):
             **common_args
         )
     
-    q_config.bits = BITS
+    q_config.bits = bits
 
     print(f"Starting quantization process ({algo})...")
     quant = matmul_nbits_quantizer.MatMulNBitsQuantizer(
@@ -342,5 +345,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
