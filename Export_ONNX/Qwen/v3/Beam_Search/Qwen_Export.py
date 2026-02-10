@@ -179,6 +179,7 @@ class LLM_MAIN(torch.nn.Module):
         self.num_heads = num_heads
         self.num_key_value_heads = num_key_value_heads
         self.num_key_value_groups = num_heads // num_key_value_heads
+        self.total_qk_heads = self.num_heads + self.num_key_value_heads  # Pre-declared variable
         self.num_layers = num_layers
         self.num_layers_2 = num_layers * 2
         self.num_layers_3 = num_layers * 3
@@ -188,11 +189,12 @@ class LLM_MAIN(torch.nn.Module):
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
         self.quantizer = KVQuantizer().eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
+        self.eps = torch.tensor([1e-6], dtype=torch.float32)
         scale_factor = head_dim ** -0.25
         norm_factor = hidden_size ** 0.5
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         inv_freq = self.llm.model.rotary_emb.inv_freq
-        idx_theta = (position_ids * inv_freq).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        idx_theta = (position_ids * inv_freq).unsqueeze(1).unsqueeze(0)
         cos = torch.cos(idx_theta)
         sin = torch.sin(idx_theta)
         self.attention_mask = (1 - torch.tril(torch.ones([1, 1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
@@ -230,8 +232,11 @@ class LLM_MAIN(torch.nn.Module):
                 del layer.self_attn.k_proj
                 del layer.self_attn.v_proj
 
-                layer.self_attn.q_norm.weight.mul_(scale_factor)
-                layer.self_attn.k_norm.weight.mul_(scale_factor)
+                qk_norm_weight = torch.cat([layer.self_attn.q_norm.weight.repeat(self.num_heads), layer.self_attn.k_norm.weight.repeat(self.num_key_value_heads)]) * scale_factor
+                
+                layer.self_attn.qk_norm_weight = torch.nn.Parameter(qk_norm_weight.view(1, 1, self.total_qk_heads, self.head_dim))
+                del layer.self_attn.q_norm
+                del layer.self_attn.k_norm
 
                 w = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
                 qkv.weight.mul_(w)
@@ -277,10 +282,8 @@ class LLM_MAIN(torch.nn.Module):
         ids_len = all_inputs[-2]
         mask = all_inputs[-1]
         kv_seq_len = history_len + ids_len
-        rotary_pos_emb_cos_q = self.cos_rotary_pos_emb[..., history_len:kv_seq_len, :].float()
-        rotary_pos_emb_sin_q = self.sin_rotary_pos_emb[..., history_len:kv_seq_len, :].float()
-        rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2)
-        rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2)
+        rotary_pos_emb_cos = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        rotary_pos_emb_sin = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
         attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * mask).float()
         batch_size = hidden_states.shape[0].unsqueeze(0)
         for i, layer in enumerate(self.llm.model.layers):
@@ -289,13 +292,13 @@ class LLM_MAIN(torch.nn.Module):
                 hidden_states = hidden_states * self.overflow_scale
             hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             qkv = layer.self_attn.qkv(hidden_states)
-            q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
-            q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
-            k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
-            q = layer.self_attn.q_norm(q).permute(0, 2, 3, 1, 4)
-            k = layer.self_attn.k_norm(k).permute(0, 3, 2, 4, 1)
-            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, -1) * rotary_pos_emb_sin_q
-            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, -2) * rotary_pos_emb_sin_k
+            qk, v = torch.split(qkv, [layer.self_attn.q_out_features + layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
+            qk = qk.view(batch_size, -1, self.total_qk_heads, self.head_dim)
+            qk = layer.self_attn.qk_norm_weight * (qk * torch.rsqrt(qk.pow(2).mean(dim=-1, keepdim=True) + self.eps))
+            qk_rotated = qk * rotary_pos_emb_cos + self.rotate_half(qk, -1) * rotary_pos_emb_sin
+            q, k = torch.split(qk_rotated, [self.num_heads, self.num_key_value_heads], dim=2)
+            q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim).permute(0, 2, 3, 1, 4)
+            k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).permute(0, 3, 2, 4, 1)
             if self.kv_f16:
                 v = v.half()
             v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
@@ -352,7 +355,7 @@ class LLM_MAIN(torch.nn.Module):
             gate_up = layer.mlp.gate_up_proj(hidden_states)
             gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
-            hidden_states += residual
+            hidden_states = residual + hidden_states
         hidden_states = hidden_states[:, -1]
         if PREVENT_F16_OVERFLOW:
             hidden_states = hidden_states * self.overflow_scale
