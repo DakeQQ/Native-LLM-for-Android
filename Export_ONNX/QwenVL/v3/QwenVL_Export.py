@@ -301,7 +301,7 @@ class LLM_VISION(torch.nn.Module):
             q_rot = q * self.rotary_pos_emb_cos + self.rotate_half(q) * self.rotary_pos_emb_sin
             k_rot = k * self.rotary_pos_emb_cos + self.rotate_half(k) * self.rotary_pos_emb_sin
             attn_weights = torch.matmul(q_rot, k_rot.transpose(-1, -2))
-            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q_rot.dtype)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
             attn_output = torch.matmul(attn_weights, v)
             attn_output = attn_output.transpose(1, 2).reshape(batch_size, -1, blk.attn.proj.in_features)
             vision_hidden_states = vision_hidden_states + blk.attn.proj(attn_output)
@@ -1464,5 +1464,6 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
 
 
