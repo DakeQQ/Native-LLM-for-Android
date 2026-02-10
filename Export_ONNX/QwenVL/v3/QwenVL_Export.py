@@ -229,6 +229,11 @@ class LLM_VISION(torch.nn.Module):
         for deepstack_layer in visual_model.deepstack_merger_list:
             self.fuse_norm(deepstack_layer.norm, deepstack_layer.linear_fc1)
         self.fuse_norm(visual_model.merger.norm, visual_model.merger.linear_fc1)
+        patch_embed = self.llm.model.visual.patch_embed
+        if patch_embed.temporal_patch_size > 1:
+            fused_weight = patch_embed.proj.weight.data.sum(dim=2, keepdim=True)
+            patch_embed.proj.weight.data = fused_weight
+            patch_embed.proj.kernel_size = (1, self.patch_size, self.patch_size)
 
     def fuse_norm(self, norm, linear):
         norm_bias = norm.bias.data
@@ -269,11 +274,10 @@ class LLM_VISION(torch.nn.Module):
                 align_corners=False)
             pixel_values = pixel_values.unsqueeze(1)
         pixel_values = (pixel_values - self.means) * self.inv_std
-        pixel_values = torch.cat([pixel_values, pixel_values], dim=1)
         pixel_values = pixel_values.reshape(
             batch_size,
             1,
-            self.llm.model.visual.patch_embed.temporal_patch_size,
+            1,
             3,
             HEIGHT_FACTOR,
             self.merge_size,
@@ -286,7 +290,7 @@ class LLM_VISION(torch.nn.Module):
         pixel_values = pixel_values.reshape(
             -1,
             3,
-            self.llm.model.visual.patch_embed.temporal_patch_size,
+            1,
             self.patch_size,
             self.patch_size
         )
@@ -294,22 +298,15 @@ class LLM_VISION(torch.nn.Module):
         if batch_size != 1:
             if DYNAMIC_IMAGE_SHAPE:
                 self.pos_embeds = self.pos_embeds.repeat(1, batch_size, 1)                        # For batch size != 1 & dynamic shape inputs
-                self.rotary_pos_emb_cos = self.rotary_pos_emb_cos.repeat(1, 1, batch_size, 1)
-                self.rotary_pos_emb_sin = self.rotary_pos_emb_sin.repeat(1, 1, batch_size, 1)
             else:
                 self.pos_embeds = torch.cat([self.pos_embeds for _ in range(batch_size)], dim=1)  # For batch size != 1 & static shape inputs.
-                self.rotary_pos_emb_cos = torch.cat([self.rotary_pos_emb_cos for _ in range(batch_size)], dim=2)
-                self.rotary_pos_emb_sin = torch.cat([self.rotary_pos_emb_sin for _ in range(batch_size)], dim=2)
         vision_hidden_states += self.pos_embeds
         deepstack_features = []
         for layer_num, blk in enumerate(self.llm.model.visual.blocks):
             hidden_states_norm = blk.norm1(vision_hidden_states)
-            q, k, v = blk.attn.qkv(hidden_states_norm).reshape(-1, 3, self.num_heads, self.head_dim).permute(1, 2, 0, 3).split([1, 1, 1], dim=0)
+            q, k, v = blk.attn.qkv(hidden_states_norm).view(batch_size, -1, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4).unbind(0)
             q = q * self.rotary_pos_emb_cos + self.rotate_half(q, -1) * self.rotary_pos_emb_sin
             k = k * self.rotary_pos_emb_cos + self.rotate_half(k, -1) * self.rotary_pos_emb_sin
-            q = torch.cat(q.split(self.image_hidden_len, dim=2), dim=0)
-            k = torch.cat(k.split(self.image_hidden_len, dim=2), dim=0)
-            v = torch.cat(v.split(self.image_hidden_len, dim=2), dim=0)
             attn = torch.matmul(q, k.transpose(-1, -2))
             attn = torch.nn.functional.softmax(attn, dim=-1, dtype=torch.float32)
             attn = torch.matmul(attn, v).transpose(1, 2).reshape(1, -1, blk.attn.proj.in_features)
@@ -1465,3 +1462,4 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
