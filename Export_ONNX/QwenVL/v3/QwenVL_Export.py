@@ -206,19 +206,20 @@ class LLM_VISION(torch.nn.Module):
         vision_config = self.llm.config.vision_config
         self.num_heads = vision_config.num_heads
         self.head_dim = vision_config.hidden_size // self.num_heads
-        self.head_dim_half = [self.head_dim // 2, self.head_dim // 2]
+        self.head_dim_half = self.head_dim // 2
         self.patch_size = visual_model.patch_size
         self.merge_size = visual_model.spatial_merge_size
-        self.means = torch.full((1, 1, 1, 1, 1), 127.5, dtype=torch.float32)
-        self.inv_std = torch.full((1, 1, 1, 1, 1), 1.0 / 127.5, dtype=torch.float32)
+        self.register_buffer("means", torch.tensor([127.5], dtype=torch.float32).view(1, 1, 1, 1, 1))
+        self.register_buffer("inv_std", torch.tensor([1.0 / 127.5], dtype=torch.float32).view(1, 1, 1, 1, 1))
         grid_thw = torch.tensor([[1, HEIGHT_FACTOR * 2, WIDTH_FACTOR * 2]], dtype=torch.int32)
-        self.image_hidden_len = grid_thw[0, 1] * grid_thw[0, 2]
-        self.pos_embeds = Qwen3VLVisionModel.fast_pos_embed_interpolate(visual_model, grid_thw).unsqueeze(0)
+        self.image_hidden_len = int(grid_thw[0, 1] * grid_thw[0, 2])
+        pos_embeds = Qwen3VLVisionModel.fast_pos_embed_interpolate(visual_model, grid_thw).unsqueeze(0)
+        self.register_buffer("pos_embeds", pos_embeds)
         rotary_pos_emb = Qwen3VLVisionModel.rot_pos_emb(visual_model, grid_thw).float().unsqueeze(0).unsqueeze(0)
         cos = rotary_pos_emb.cos()
         sin = rotary_pos_emb.sin()
-        self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1)
-        self.rotary_pos_emb_sin = torch.cat([-sin, sin], dim=-1)
+        self.register_buffer("rotary_pos_emb_cos", torch.cat([cos, cos], dim=-1))
+        self.register_buffer("rotary_pos_emb_sin", torch.cat([-sin, sin], dim=-1))
         scaling = self.head_dim ** -0.25
         embed_dim_patch = visual_model.patch_embed.embed_dim
         for blk in visual_model.blocks:
@@ -248,80 +249,81 @@ class LLM_VISION(torch.nn.Module):
         norm.weight = None
         norm.bias = None
 
-    def rotate_half(self, x, dim):
-        x1, x2 = torch.split(x, self.head_dim_half, dim=dim)
-        return torch.cat((x2, x1), dim=dim)
+    def rotate_half(self, x):
+        x1, x2 = torch.split(x, self.head_dim_half, dim=-1)
+        return torch.cat((x2, x1), dim=-1)
 
     def _replace_gelu_with_tanh_approximation(self, module):
         for name, child in module.named_children():
             if isinstance(child, torch.nn.GELU):
                 setattr(module, name, torch.nn.GELU(approximate='tanh'))
-                print(f"Replaced GELU at: {name}")
             else:
                 self._replace_gelu_with_tanh_approximation(child)
 
     def forward(self, pixel_values):
         if INPUT_IMAGE_DIM != 5:
             pixel_values = pixel_values.unsqueeze(1)
-        batch_size = pixel_values.shape[0]  # [batch, 1, 3, width, height]
+        batch_size = pixel_values.shape[0]
         pixel_values = pixel_values.float()
         if DYNAMIC_IMAGE_SHAPE or list(pixel_values.shape[-2:]) != IMAGE_RESIZE:
             pixel_values = pixel_values.squeeze(1)
             pixel_values = torch.nn.functional.interpolate(
                 pixel_values,
-                IMAGE_RESIZE,
+                size=IMAGE_RESIZE,  # Ensure IMAGE_RESIZE is a tuple of ints
                 mode='bilinear',
-                align_corners=False)
+                align_corners=False
+            )
             pixel_values = pixel_values.unsqueeze(1)
         pixel_values = (pixel_values - self.means) * self.inv_std
         pixel_values = pixel_values.reshape(
-            batch_size,
-            1,
-            1,
-            3,
-            HEIGHT_FACTOR,
-            self.merge_size,
-            self.patch_size,
-            WIDTH_FACTOR,
-            self.merge_size,
-            self.patch_size
+            batch_size, 1, 1, 3,
+            HEIGHT_FACTOR, self.merge_size, self.patch_size,
+            WIDTH_FACTOR, self.merge_size, self.patch_size
         )
         pixel_values = pixel_values.permute(0, 1, 4, 7, 5, 8, 3, 2, 6, 9)
-        pixel_values = pixel_values.reshape(
-            -1,
-            3,
-            1,
-            self.patch_size,
-            self.patch_size
-        )
-        vision_hidden_states = self.llm.model.visual.patch_embed.proj(pixel_values).view(1, -1, self.llm.model.visual.patch_embed.embed_dim)
+        pixel_values = pixel_values.reshape(-1, 3, 1, self.patch_size, self.patch_size)
+        vision_hidden_states = self.llm.model.visual.patch_embed.proj(pixel_values)
+        vision_hidden_states = vision_hidden_states.view(1, -1, self.llm.model.visual.patch_embed.embed_dim)
         if batch_size != 1:
-            if DYNAMIC_IMAGE_SHAPE:
-                self.pos_embeds = self.pos_embeds.repeat(1, batch_size, 1)                        # For batch size != 1 & dynamic shape inputs
-            else:
-                self.pos_embeds = torch.cat([self.pos_embeds for _ in range(batch_size)], dim=1)  # For batch size != 1 & static shape inputs.
-        vision_hidden_states += self.pos_embeds
+             pos_embeds_batch = self.pos_embeds.expand(batch_size, -1, -1)
+             vision_hidden_states = vision_hidden_states + pos_embeds_batch
+        else:
+             vision_hidden_states = vision_hidden_states + self.pos_embeds
         deepstack_features = []
+        deepstack_indices = self.llm.model.visual.deepstack_visual_indexes
+        deepstack_modules = self.llm.model.visual.deepstack_merger_list
         for layer_num, blk in enumerate(self.llm.model.visual.blocks):
             hidden_states_norm = blk.norm1(vision_hidden_states)
-            q, k, v = blk.attn.qkv(hidden_states_norm).view(batch_size, -1, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4).unbind(0)
-            q = q * self.rotary_pos_emb_cos + self.rotate_half(q, -1) * self.rotary_pos_emb_sin
-            k = k * self.rotary_pos_emb_cos + self.rotate_half(k, -1) * self.rotary_pos_emb_sin
-            attn = torch.matmul(q, k.transpose(-1, -2))
-            attn = torch.nn.functional.softmax(attn, dim=-1, dtype=torch.float32)
-            attn = torch.matmul(attn, v).transpose(1, 2).reshape(1, -1, blk.attn.proj.in_features)
-            attn_out = blk.attn.proj(attn)
-            vision_hidden_states += attn_out
-            vision_hidden_states = vision_hidden_states + blk.mlp.linear_fc2(blk.mlp.act_fn(blk.mlp.linear_fc1(blk.norm2(vision_hidden_states))))
-            if layer_num in self.llm.model.visual.deepstack_visual_indexes:
-                deepstack_layer = self.llm.model.visual.deepstack_merger_list[self.llm.model.visual.deepstack_visual_indexes.index(layer_num)]
-                x = vision_hidden_states.view(1, -1, deepstack_layer.hidden_size)
-                x = deepstack_layer.norm(x)
-                x = deepstack_layer.linear_fc2(deepstack_layer.act_fn(deepstack_layer.linear_fc1(x)))
-                deepstack_features.append(x)
-        vision_hidden_states = self.llm.model.visual.merger.norm(vision_hidden_states).view(1, -1, self.llm.model.visual.merger.hidden_size)
-        vision_hidden_states = self.llm.model.visual.merger.linear_fc2(self.llm.model.visual.merger.act_fn(self.llm.model.visual.merger.linear_fc1(vision_hidden_states)))
-        return deepstack_features, vision_hidden_states
+            qkv = blk.attn.qkv(hidden_states_norm)
+            qkv = qkv.view(batch_size, -1, 3, self.num_heads, self.head_dim)
+            qkv = qkv.permute(2, 0, 3, 1, 4)
+            q, k, v = qkv.unbind(0)
+            q_rot = q * self.rotary_pos_emb_cos + self.rotate_half(q) * self.rotary_pos_emb_sin
+            k_rot = k * self.rotary_pos_emb_cos + self.rotate_half(k) * self.rotary_pos_emb_sin
+            attn_weights = torch.matmul(q_rot, k_rot.transpose(-1, -2))
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q_rot.dtype)
+            attn_output = torch.matmul(attn_weights, v)
+            attn_output = attn_output.transpose(1, 2).reshape(batch_size, -1, blk.attn.proj.in_features)
+            vision_hidden_states = vision_hidden_states + blk.attn.proj(attn_output)
+            mlp_out = blk.mlp.linear_fc1(blk.norm2(vision_hidden_states))
+            mlp_out = blk.mlp.act_fn(mlp_out)
+            mlp_out = blk.mlp.linear_fc2(mlp_out)
+            vision_hidden_states = vision_hidden_states + mlp_out
+            if layer_num in deepstack_indices:
+                idx = deepstack_indices.index(layer_num)
+                ds_layer = deepstack_modules[idx]
+                x_ds = vision_hidden_states.view(batch_size, -1, ds_layer.hidden_size)
+                x_ds = ds_layer.norm(x_ds)
+                x_ds = ds_layer.linear_fc1(x_ds)
+                x_ds = ds_layer.act_fn(x_ds)
+                x_ds = ds_layer.linear_fc2(x_ds)
+                deepstack_features.append(x_ds)
+        vision_hidden_states = self.llm.model.visual.merger.norm(vision_hidden_states)
+        vision_hidden_states = vision_hidden_states.view(batch_size, -1, self.llm.model.visual.merger.hidden_size)
+        vision_hidden_states = self.llm.model.visual.merger.linear_fc1(vision_hidden_states)
+        vision_hidden_states = self.llm.model.visual.merger.act_fn(vision_hidden_states)
+        vision_hidden_states = self.llm.model.visual.merger.linear_fc2(vision_hidden_states)
+        return tuple(deepstack_features), vision_hidden_states
 
 
 class LLM_CONCAT(torch.nn.Module):
@@ -1462,4 +1464,5 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
 
