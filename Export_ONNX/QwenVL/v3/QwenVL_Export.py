@@ -215,7 +215,7 @@ class LLM_VISION(torch.nn.Module):
         self.image_hidden_len = int(grid_thw[0, 1] * grid_thw[0, 2])
         pos_embeds = Qwen3VLVisionModel.fast_pos_embed_interpolate(visual_model, grid_thw).unsqueeze(0)
         self.register_buffer("pos_embeds", pos_embeds)
-        rotary_pos_emb = Qwen3VLVisionModel.rot_pos_emb(visual_model, grid_thw).float().unsqueeze(0).unsqueeze(0)
+        rotary_pos_emb = Qwen3VLVisionModel.rot_pos_emb(visual_model, grid_thw).float().unsqueeze(0).unsqueeze(0).unsqueeze(0)
         cos = rotary_pos_emb.cos()
         sin = rotary_pos_emb.sin()
         self.register_buffer("rotary_pos_emb_cos", torch.cat([cos, cos], dim=-1))
@@ -297,13 +297,13 @@ class LLM_VISION(torch.nn.Module):
             qkv = blk.attn.qkv(hidden_states_norm)
             qkv = qkv.view(batch_size, -1, 3, self.num_heads, self.head_dim)
             qkv = qkv.permute(2, 0, 3, 1, 4)
-            q, k, v = qkv.unbind(0)
-            q_rot = q * self.rotary_pos_emb_cos + self.rotate_half(q) * self.rotary_pos_emb_sin
-            k_rot = k * self.rotary_pos_emb_cos + self.rotate_half(k) * self.rotary_pos_emb_sin
+            qk, v = qkv.split([2, 1], dim=0)
+            qk_rot = qk * self.rotary_pos_emb_cos + self.rotate_half(qk) * self.rotary_pos_emb_sin
+            q_rot, k_rot = qk_rot.split([1, 1], dim=0)
             attn_weights = torch.matmul(q_rot, k_rot.transpose(-1, -2))
             attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
             attn_output = torch.matmul(attn_weights, v)
-            attn_output = attn_output.transpose(1, 2).reshape(batch_size, -1, blk.attn.proj.in_features)
+            attn_output = attn_output.transpose(2, 3).reshape(batch_size, -1, blk.attn.proj.in_features)
             vision_hidden_states = vision_hidden_states + blk.attn.proj(attn_output)
             mlp_out = blk.mlp.linear_fc1(blk.norm2(vision_hidden_states))
             mlp_out = blk.mlp.act_fn(mlp_out)
@@ -1464,6 +1464,7 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
 
 
 
