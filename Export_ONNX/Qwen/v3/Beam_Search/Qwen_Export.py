@@ -274,9 +274,9 @@ class LLM_MAIN(torch.nn.Module):
             else:
                 self._replace_gelu_with_tanh_approximation(child)
 
-    def rotate_half(self, x, dim):
-        x1, x2 = torch.split(x, self.head_dim_half, dim=dim)
-        return torch.cat((x2, x1), dim=dim)
+    def rotate_half(self, x):
+        x1, x2 = torch.split(x, self.head_dim_half, dim=-1)
+        return torch.cat((x2, x1), dim=-1)
 
     def forward(self, *all_inputs):
         hidden_states = all_inputs[-4]
@@ -299,16 +299,17 @@ class LLM_MAIN(torch.nn.Module):
             if PREVENT_F16_OVERFLOW:
                 qk = qk * self.overflow_scale
             qk = qk * torch.rsqrt(qk.square().sum(dim=-1, keepdim=True)) * layer.self_attn.qk_norm_weight
-            qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk, -1) * rotary_pos_emb_sin
+            qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk) * rotary_pos_emb_sin
             q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=3)
             q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             q = q.permute(0, 2, 3, 1, 4)
-            k = k.permute(0, 3, 2, 4, 1)
             if self.kv_f16:
                 v = v.half()
+                k = k.half()
+            k = k.permute(0, 3, 2, 4, 1)
             v = v.transpose(1, 3)
             if self.kv_f16:
-                k = torch.cat((all_inputs[i], k.half()), dim=-1)
+                k = torch.cat((all_inputs[i], k), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
