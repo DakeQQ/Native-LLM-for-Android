@@ -236,7 +236,7 @@ class LLM_MAIN(torch.nn.Module):
 
                 q_norm_w = layer.self_attn.q_norm.weight.repeat(self.num_heads)
                 k_norm_w = layer.self_attn.k_norm.weight.repeat(self.num_key_value_heads)
-                layer.self_attn.qk_norm_weight = torch.nn.Parameter(torch.cat([q_norm_w, k_norm_w], dim=0).view(-1, self.head_dim))
+                layer.self_attn.qk_norm_weight = torch.nn.Parameter(torch.cat([q_norm_w, k_norm_w], dim=0).view(1, 1, -1, self.head_dim))
                 del layer.self_attn.q_norm
                 del layer.self_attn.k_norm
 
@@ -963,3 +963,4 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
