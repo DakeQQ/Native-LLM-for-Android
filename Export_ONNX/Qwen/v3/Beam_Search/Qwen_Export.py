@@ -193,7 +193,7 @@ class LLM_MAIN(torch.nn.Module):
         norm_factor_qk = head_dim ** 0.5
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         inv_freq = self.llm.model.rotary_emb.inv_freq
-        idx_theta = (position_ids * inv_freq).unsqueeze(1).unsqueeze(0)
+        idx_theta = (position_ids * inv_freq).unsqueeze(1).unsqueeze(1).unsqueeze(0)
         cos = torch.cos(idx_theta)
         sin = torch.sin(idx_theta)
         self.attention_mask = (1 - torch.tril(torch.ones([1, 1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
@@ -294,18 +294,19 @@ class LLM_MAIN(torch.nn.Module):
                 hidden_states = hidden_states * self.overflow_scale
             hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             qkv = layer.self_attn.qkv(hidden_states)
-            qk, v = torch.split(qkv, [layer.self_attn.q_out_features + layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
-            qk = qk.view(batch_size, -1, self.num_heads + self.num_key_value_heads, self.head_dim)
+            qkv = qkv.view(batch_size, -1, 1, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
+            qk, v = torch.split(qkv, [self.num_heads + self.num_key_value_heads, self.num_key_value_heads], dim=3)
             if PREVENT_F16_OVERFLOW:
                 qk = qk * self.overflow_scale
             qk = qk * torch.rsqrt(qk.square().sum(dim=-1, keepdim=True)) * layer.self_attn.qk_norm_weight
             qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk, -1) * rotary_pos_emb_sin
-            q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=2)
-            q = q.reshape(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim).permute(0, 2, 3, 1, 4)
-            k = k.reshape(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).permute(0, 3, 2, 4, 1)
+            q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=3)
+            q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
+            q = q.permute(0, 2, 3, 1, 4)
+            k = k.permute(0, 3, 2, 4, 1)
             if self.kv_f16:
                 v = v.half()
-            v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
+            v = v.transpose(1, 3)
             if self.kv_f16:
                 k = torch.cat((all_inputs[i], k.half()), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
@@ -963,4 +964,3 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
