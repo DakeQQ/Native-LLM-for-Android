@@ -8,13 +8,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
-onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
-onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
-onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
-onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
-onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
-onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
+onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Embed.onnx'
+onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Main.onnx'
+onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_Optimized/Greedy_Search.onnx'
+onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_Optimized/First_Beam_Search.onnx'
+onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_Optimized/Second_Beam_Search.onnx'
+onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_Optimized/Reset_Penality.onnx'
+onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_Optimized/Argmax.onnx'
 
 # Test input
 TEST_THINK_MODE = True
@@ -175,10 +175,11 @@ class LLM_MAIN(torch.nn.Module):
         self.llm = llm
         self._replace_gelu_with_tanh_approximation(self.llm)
         self.head_dim = head_dim
-        self.head_dim_half = [head_dim // 2, head_dim // 2]
+        self.head_dim_half = head_dim // 2
         self.num_heads = num_heads
         self.num_key_value_heads = num_key_value_heads
         self.num_key_value_groups = num_heads // num_key_value_heads
+        self.qk_heads = self.num_heads + self.num_key_value_heads
         self.num_layers = num_layers
         self.num_layers_2 = num_layers * 2
         self.num_layers_3 = num_layers * 3
@@ -274,9 +275,10 @@ class LLM_MAIN(torch.nn.Module):
             else:
                 self._replace_gelu_with_tanh_approximation(child)
 
-    def rotate_half(self, x):
-        x1, x2 = torch.split(x, self.head_dim_half, dim=-1)
-        return torch.cat((x2, x1), dim=-1)
+    def rotate_half(self, x, batch_size):
+        x = x.view(batch_size, -1, 1, self.qk_heads, 2, self.head_dim_half)
+        x = x.flip(-2)
+        return x.view(batch_size, -1, 1, self.qk_heads, self.head_dim)
 
     def forward(self, *all_inputs):
         hidden_states = all_inputs[-4]
@@ -294,12 +296,12 @@ class LLM_MAIN(torch.nn.Module):
                 hidden_states = hidden_states * self.overflow_scale
             hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             qkv = layer.self_attn.qkv(hidden_states)
-            qkv = qkv.view(batch_size, -1, 1, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
-            qk, v = torch.split(qkv, [self.num_heads + self.num_key_value_heads, self.num_key_value_heads], dim=-2)
+            qkv = qkv.view(batch_size, -1, 1, self.qk_heads + self.num_key_value_heads, self.head_dim)
+            qk, v = torch.split(qkv, [self.qk_heads, self.num_key_value_heads], dim=-2)
             if PREVENT_F16_OVERFLOW:
                 qk = qk * self.overflow_scale
             qk = qk * torch.rsqrt(qk.square().sum(dim=-1, keepdim=True)) * layer.self_attn.qk_norm_weight
-            qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk) * rotary_pos_emb_sin
+            qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * rotary_pos_emb_sin
             q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=-2)
             q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             q = q.permute(0, 2, 3, 1, 4)
