@@ -2,10 +2,10 @@ import os
 import gc
 import time
 import torch
-import onnxruntime
-from onnxruntime.capi import _pybind_state as C
 import numpy as np
 from PIL import Image
+import onnxruntime
+from onnxruntime.capi import _pybind_state as C
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLVisionModel, AutoTokenizer
 from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLTextRotaryEmbedding
 
@@ -30,7 +30,7 @@ onnx_model_K = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 image_path = r"../psyduck.png"                                      # Test image for the exported onnx model.
 query = "Describe this image."                                      # Test query for the exported onnx model.
 
-DO_EXPORT = True                                                    # Whether to export the ONNX models
+DO_EXPORT = False                                                    # Whether to export the ONNX models
 
 KV_QUANT_DTYPE = "F16"                                              # "Q8" | "F16" | "F32"
 USE_FLOAT16_SCALE_BIAS = True                                       # If choose Q8, whether to use float16 for scale and bias.
@@ -205,12 +205,13 @@ class LLM_VISION(torch.nn.Module):
         visual_model = self.llm.model.visual
         vision_config = self.llm.config.vision_config
         self.num_heads = vision_config.num_heads
+        self.qk_heads = self.num_heads // 3 * 2
         self.head_dim = vision_config.hidden_size // self.num_heads
         self.head_dim_half = self.head_dim // 2
         self.patch_size = visual_model.patch_size
         self.merge_size = visual_model.spatial_merge_size
         self.register_buffer("means", torch.tensor([127.5], dtype=torch.float32).view(1, 1, 1, 1, 1))
-        self.register_buffer("inv_std", torch.tensor([1.0 / 127.5], dtype=torch.float32).view(1, 1, 1, 1, 1))
+        self.register_buffer("inv_std", torch.tensor([1.0 / 127.5], dtype=torch.float32))
         grid_thw = torch.tensor([[1, HEIGHT_FACTOR * 2, WIDTH_FACTOR * 2]], dtype=torch.int32)
         self.image_hidden_len = int(grid_thw[0, 1] * grid_thw[0, 2])
         pos_embeds = Qwen3VLVisionModel.fast_pos_embed_interpolate(visual_model, grid_thw).unsqueeze(0)
@@ -233,7 +234,7 @@ class LLM_VISION(torch.nn.Module):
         patch_embed = self.llm.model.visual.patch_embed
         if patch_embed.temporal_patch_size > 1:
             fused_weight = patch_embed.proj.weight.data.sum(dim=2, keepdim=True)
-            patch_embed.proj.weight.data = fused_weight
+            patch_embed.proj.weight.data = fused_weight * self.inv_std
             patch_embed.proj.kernel_size = (1, self.patch_size, self.patch_size)
 
     def fuse_norm(self, norm, linear):
@@ -249,9 +250,10 @@ class LLM_VISION(torch.nn.Module):
         norm.weight = None
         norm.bias = None
 
-    def rotate_half(self, x):
-        x1, x2 = torch.split(x, self.head_dim_half, dim=-1)
-        return torch.cat((x2, x1), dim=-1)
+    def rotate_half(self, x, batch_size):
+        x = x.view(2, batch_size, self.num_heads, -1, 2, self.head_dim_half)
+        x = x.flip(-2)
+        return x.view(2, batch_size, self.num_heads, -1, self.head_dim)
 
     def _replace_gelu_with_tanh_approximation(self, module):
         for name, child in module.named_children():
@@ -263,7 +265,10 @@ class LLM_VISION(torch.nn.Module):
     def forward(self, pixel_values):
         if INPUT_IMAGE_DIM != 5:
             pixel_values = pixel_values.unsqueeze(1)
-        batch_size = pixel_values.shape[0]
+        if DYNAMIC_IMAGE_SHAPE:
+            batch_size = pixel_values.shape[0]
+        else:
+            batch_size = VISION_BATCH_SIZE
         pixel_values = pixel_values.float()
         if DYNAMIC_IMAGE_SHAPE or list(pixel_values.shape[-2:]) != IMAGE_RESIZE:
             pixel_values = pixel_values.squeeze(1)
@@ -274,7 +279,7 @@ class LLM_VISION(torch.nn.Module):
                 align_corners=False
             )
             pixel_values = pixel_values.unsqueeze(1)
-        pixel_values = (pixel_values - self.means) * self.inv_std
+        pixel_values = (pixel_values - self.means)
         pixel_values = pixel_values.reshape(
             batch_size, 1, 1, 3,
             HEIGHT_FACTOR, self.merge_size, self.patch_size,
@@ -285,8 +290,7 @@ class LLM_VISION(torch.nn.Module):
         vision_hidden_states = self.llm.model.visual.patch_embed.proj(pixel_values)
         vision_hidden_states = vision_hidden_states.view(1, -1, self.llm.model.visual.patch_embed.embed_dim)
         if batch_size != 1:
-             pos_embeds_batch = self.pos_embeds.expand(batch_size, -1, -1)
-             vision_hidden_states = vision_hidden_states + pos_embeds_batch
+             vision_hidden_states = vision_hidden_states + self.pos_embeds.expand(batch_size, -1, -1)
         else:
              vision_hidden_states = vision_hidden_states + self.pos_embeds
         deepstack_features = []
@@ -298,7 +302,7 @@ class LLM_VISION(torch.nn.Module):
             qkv = qkv.view(batch_size, -1, 3, self.num_heads, self.head_dim)
             qkv = qkv.permute(2, 0, 3, 1, 4)
             qk, v = qkv.split([2, 1], dim=0)
-            qk_rot = qk * self.rotary_pos_emb_cos + self.rotate_half(qk) * self.rotary_pos_emb_sin
+            qk_rot = qk * self.rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * self.rotary_pos_emb_sin
             q_rot, k_rot = qk_rot.split([1, 1], dim=0)
             attn_weights = torch.matmul(q_rot, k_rot.transpose(-1, -2))
             attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
@@ -370,16 +374,14 @@ class LLM_ROTARY_VISION(torch.nn.Module):
         freqs = Qwen3VLTextRotaryEmbedding.apply_interleaved_mrope(llm.model.language_model.rotary_emb, freqs, llm.model.language_model.rotary_emb.mrope_section)
         cos = freqs.cos()
         sin = freqs.sin()
-        self.rotary_pos_emb_cos = torch.cat((cos, cos), dim=-1).half().unsqueeze(0).unsqueeze(0)
-        self.rotary_pos_emb_sin = torch.cat((-sin, sin), dim=-1).half().unsqueeze(0).unsqueeze(0)
+        self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2)
+        self.rotary_pos_emb_sin = torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2)
         
     def forward(self, ids_len, history_len):
         kv_seq_len = ids_len + history_len
-        rotary_pos_emb_cos_q = self.rotary_pos_emb_cos[..., history_len:kv_seq_len, :].float()
-        rotary_pos_emb_sin_q = self.rotary_pos_emb_sin[..., history_len:kv_seq_len, :].float()
-        rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2)
-        rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2)
-        return rotary_pos_emb_cos_q, rotary_pos_emb_sin_q, rotary_pos_emb_cos_k, rotary_pos_emb_sin_k, kv_seq_len
+        rotary_pos_emb_cos = self.rotary_pos_emb_cos[:, history_len:kv_seq_len].float()
+        rotary_pos_emb_sin = self.rotary_pos_emb_sin[:, history_len:kv_seq_len].float()
+        return rotary_pos_emb_cos, rotary_pos_emb_sin, kv_seq_len
     
 
 class LLM_ROTARY_TEXT(torch.nn.Module):
@@ -392,16 +394,14 @@ class LLM_ROTARY_TEXT(torch.nn.Module):
         freqs = Qwen3VLTextRotaryEmbedding.apply_interleaved_mrope(llm.model.language_model.rotary_emb, freqs, llm.model.language_model.rotary_emb.mrope_section)
         cos = freqs.cos()
         sin = freqs.sin()
-        self.rotary_pos_emb_cos = torch.cat((cos, cos), dim=-1).half().unsqueeze(0).unsqueeze(0)
-        self.rotary_pos_emb_sin = torch.cat((-sin, sin), dim=-1).half().unsqueeze(0).unsqueeze(0)
+        self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2)
+        self.rotary_pos_emb_sin = torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2)
         
     def forward(self, ids_len, history_len):
         kv_seq_len = ids_len + history_len
-        rotary_pos_emb_cos_q = self.rotary_pos_emb_cos[..., history_len:kv_seq_len, :].float()
-        rotary_pos_emb_sin_q = self.rotary_pos_emb_sin[..., history_len:kv_seq_len, :].float()
-        rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2)
-        rotary_pos_emb_sin_k = rotary_pos_emb_sin_q.transpose(-1, -2)
-        return rotary_pos_emb_cos_q, rotary_pos_emb_sin_q, rotary_pos_emb_cos_k, rotary_pos_emb_sin_k, kv_seq_len
+        rotary_pos_emb_cos = self.rotary_pos_emb_cos[:, history_len:kv_seq_len].float()
+        rotary_pos_emb_sin = self.rotary_pos_emb_sin[:, history_len:kv_seq_len].float()
+        return rotary_pos_emb_cos, rotary_pos_emb_sin, kv_seq_len
 
 
 class LLM_MAIN(torch.nn.Module):
@@ -410,6 +410,7 @@ class LLM_MAIN(torch.nn.Module):
         self.llm = llm
         self._replace_gelu_with_tanh_approximation(self.llm)
         self.head_dim = head_dim
+        self.head_dim_half = head_dim // 2
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.num_layers_2 = num_layers * 2
@@ -417,8 +418,8 @@ class LLM_MAIN(torch.nn.Module):
         self.num_layers_4 = num_layers * 4
         self.num_layers_5 = num_layers * 5
         self.num_key_value_heads = num_key_value_heads
-        self.head_dim_half = [head_dim // 2, head_dim // 2]
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        self.qk_heads = self.num_heads + self.num_key_value_heads
         max_seq_len += height_factor * width_factor
         self.attention_mask = (1 - torch.tril(torch.ones([1, 1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
         self.deepstack_features_len = deepstack_features_len
@@ -427,7 +428,8 @@ class LLM_MAIN(torch.nn.Module):
         self.quantizer = KVQuantizer().eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         norm_factor = hidden_size ** 0.5
-        scale_factor = float(head_dim ** -0.25)
+        norm_factor_qk = head_dim ** 0.5
+        scale_factor = head_dim ** -0.25
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers
         if self.kv_q8:
@@ -435,45 +437,50 @@ class LLM_MAIN(torch.nn.Module):
             self.save_k_bias = [None] * num_layers
             self.save_v_scale = [None] * num_layers
             self.save_v_bias = [None] * num_layers
-        
+
         with torch.no_grad():
             for layer in self.llm.model.language_model.layers:
-                layer.self_attn.q_norm.weight.data *= scale_factor
-                layer.self_attn.k_norm.weight.data *= scale_factor
                 q_proj = layer.self_attn.q_proj
                 k_proj = layer.self_attn.k_proj
                 v_proj = layer.self_attn.v_proj
                 layer.self_attn.q_out_features = int(q_proj.out_features)
                 layer.self_attn.k_out_features = int(k_proj.out_features)
                 layer.self_attn.v_out_features = int(v_proj.out_features)
-                out_features = q_proj.out_features + k_proj.out_features + v_proj.out_features
                 has_bias = (q_proj.bias is not None)
-                qkv = torch.nn.Linear(q_proj.in_features, out_features, bias=has_bias)
+                qkv = torch.nn.Linear(q_proj.in_features, q_proj.out_features + k_proj.out_features + v_proj.out_features, bias=has_bias)
                 qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
                 if has_bias:
                     qkv.bias.copy_(torch.cat([q_proj.bias, k_proj.bias, v_proj.bias], dim=0))
-                ln_weight = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
-                qkv.weight.mul_(ln_weight)
+                w = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
+                qkv.weight.mul_(w)
                 layer.self_attn.qkv = qkv
                 del layer.self_attn.q_proj
                 del layer.self_attn.k_proj
                 del layer.self_attn.v_proj
                 del layer.input_layernorm
 
+                layer.self_attn.q_norm.weight.mul_(scale_factor * norm_factor_qk)
+                layer.self_attn.k_norm.weight.mul_(scale_factor * norm_factor_qk)
+                q_norm_w = layer.self_attn.q_norm.weight.repeat(self.num_heads)
+                k_norm_w = layer.self_attn.k_norm.weight.repeat(self.num_key_value_heads)
+                layer.self_attn.qk_norm_weight = torch.nn.Parameter(torch.cat([q_norm_w, k_norm_w], dim=0).view(1, 1, 1, -1, self.head_dim))
+                del layer.self_attn.q_norm
+                del layer.self_attn.k_norm
+
                 gate = layer.mlp.gate_proj
                 up = layer.mlp.up_proj
                 gate_up = torch.nn.Linear(gate.in_features, gate.out_features + up.out_features, bias=False)
-                ln_post_weight = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
-                gate_weight = gate.weight * ln_post_weight
-                up_weight = up.weight * ln_post_weight
+                w = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
+                gate_weight = gate.weight * w
+                up_weight = up.weight * w
                 gate_up.weight.copy_(torch.cat([gate_weight, up_weight], dim=0))
                 layer.mlp.gate_up_proj = gate_up
                 del layer.mlp.gate_proj
                 del layer.mlp.up_proj
                 del layer.post_attention_layernorm
 
-            final_norm_w = self.llm.model.language_model.norm.weight.unsqueeze(0) * norm_factor
-            self.llm.lm_head.weight.mul_(final_norm_w)
+            w = self.llm.model.language_model.norm.weight.unsqueeze(0) * norm_factor
+            self.llm.lm_head.weight.mul_(w)
             del self.llm.model.language_model.norm
 
     def _replace_gelu_with_tanh_approximation(self, module):
@@ -484,16 +491,15 @@ class LLM_MAIN(torch.nn.Module):
             else:
                 self._replace_gelu_with_tanh_approximation(child)
 
-    def rotate_half(self, x, dim):
-        x1, x2 = torch.split(x, self.head_dim_half, dim=dim)
-        return torch.cat((x2, x1), dim=dim)
+    def rotate_half(self, x, batch_size):
+        x = x.view(batch_size, -1, 1, self.qk_heads, 2, self.head_dim_half)
+        x = x.flip(-2)
+        return x.view(batch_size, -1, 1, self.qk_heads, self.head_dim)
 
     def forward(self, *all_inputs):
-        hidden_states = all_inputs[-11]
-        rotary_pos_emb_cos_q = all_inputs[-7]
-        rotary_pos_emb_sin_q = all_inputs[-6]
-        rotary_pos_emb_cos_k = all_inputs[-5]
-        rotary_pos_emb_sin_k = all_inputs[-4]
+        hidden_states = all_inputs[-9]
+        rotary_pos_emb_cos = all_inputs[-5]
+        rotary_pos_emb_sin = all_inputs[-4]
         kv_seq_len = all_inputs[-3]
         ids_len = all_inputs[-2]
         mask = all_inputs[-1]
@@ -505,18 +511,22 @@ class LLM_MAIN(torch.nn.Module):
                 hidden_states = hidden_states * self.overflow_scale
             hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             qkv = layer.self_attn.qkv(hidden_states)
-            q, k, v = torch.split(qkv, [layer.self_attn.q_out_features, layer.self_attn.k_out_features, layer.self_attn.v_out_features], dim=-1)
+            qkv = qkv.view(batch_size, -1, 1, self.qk_heads + self.num_key_value_heads, self.head_dim)
+            qk, v = torch.split(qkv, [self.qk_heads, self.num_key_value_heads], dim=-2)
+            if PREVENT_F16_OVERFLOW:
+                qk = qk * self.overflow_scale
+            qk = qk * torch.rsqrt(qk.square().sum(dim=-1, keepdim=True)) * layer.self_attn.qk_norm_weight
+            qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * rotary_pos_emb_sin
+            q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=-2)
             q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
-            k = k.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim)
-            q = layer.self_attn.q_norm(q).permute(0, 2, 3, 1, 4)
-            k = layer.self_attn.k_norm(k).permute(0, 3, 2, 4, 1)
-            q = q * rotary_pos_emb_cos_q + self.rotate_half(q, -1) * rotary_pos_emb_sin_q
-            k = k * rotary_pos_emb_cos_k + self.rotate_half(k, -2) * rotary_pos_emb_sin_k
+            q = q.permute(0, 2, 3, 1, 4)
             if self.kv_f16:
                 v = v.half()
-            v = v.view(batch_size, -1, 1, self.num_key_value_heads, self.head_dim).transpose(1, 3)
+                k = k.half()
+            k = k.permute(0, 3, 2, 4, 1)
+            v = v.transpose(1, 3)
             if self.kv_f16:
-                k = torch.cat((all_inputs[i], k.half()), dim=-1)
+                k = torch.cat((all_inputs[i], k), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
@@ -570,7 +580,7 @@ class LLM_MAIN(torch.nn.Module):
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
             hidden_states += residual
             if i < self.deepstack_features_len:
-                hidden_states += all_inputs[i - 10]
+                hidden_states += all_inputs[i - 8]
         hidden_states = hidden_states[:, -1]
         if PREVENT_F16_OVERFLOW:
             hidden_states = hidden_states * self.overflow_scale
@@ -611,10 +621,8 @@ if DO_EXPORT:
         batch_size = 3
         ids_len = ids_len + vision_embed_size
         hidden_states = torch.ones((batch_size, ids_len, hidden_size), dtype=torch.float32)
-        rotary_pos_emb_cos_q = torch.ones((1, 1, 1, ids_len, head_dim), dtype=torch.float32)
-        rotary_pos_emb_sin_q = rotary_pos_emb_cos_q
-        rotary_pos_emb_cos_k = rotary_pos_emb_cos_q.transpose(-1, -2)
-        rotary_pos_emb_sin_k = rotary_pos_emb_cos_k
+        rotary_pos_emb_cos = torch.ones((1, ids_len, 1, 1, head_dim), dtype=torch.float32)
+        rotary_pos_emb_sin = rotary_pos_emb_cos
         attention_mask = torch.tensor([1], dtype=torch.int8)
 
         kv_tensors = {}
@@ -719,12 +727,10 @@ if DO_EXPORT:
             (ids_len, history_len),
             onnx_model_D,
             input_names=['ids_len', 'history_len'],
-            output_names=['rotary_pos_emb_cos_q', 'rotary_pos_emb_sin_q', 'rotary_pos_emb_cos_k', 'rotary_pos_emb_sin_k', 'kv_seq_len'],
+            output_names=['rotary_pos_emb_cos', 'rotary_pos_emb_sin', 'kv_seq_len'],
             dynamic_axes={
-                'rotary_pos_emb_cos_q': {3: 'ids_len'},
-                'rotary_pos_emb_sin_q': {3: 'ids_len'},
-                'rotary_pos_emb_cos_k': {4: 'ids_len'},
-                'rotary_pos_emb_sin_k': {4: 'ids_len'}
+                'rotary_pos_emb_cos': {1: 'ids_len'},
+                'rotary_pos_emb_sin': {1: 'ids_len'}
             },
             opset_version=OPSET,
             dynamo=False
@@ -735,12 +741,10 @@ if DO_EXPORT:
             (ids_len, history_len),
             onnx_model_E,
             input_names=['ids_len', 'history_len'],
-            output_names=['rotary_pos_emb_cos_q', 'rotary_pos_emb_sin_q', 'rotary_pos_emb_cos_k', 'rotary_pos_emb_sin_k', 'kv_seq_len'],
+            output_names=['rotary_pos_emb_cos', 'rotary_pos_emb_sin', 'kv_seq_len'],
             dynamic_axes={
-                'rotary_pos_emb_cos_q': {3: 'ids_len'},
-                'rotary_pos_emb_sin_q': {3: 'ids_len'},
-                'rotary_pos_emb_cos_k': {4: 'ids_len'},
-                'rotary_pos_emb_sin_k': {4: 'ids_len'}
+                'rotary_pos_emb_cos': {1: 'ids_len'},
+                'rotary_pos_emb_sin': {1: 'ids_len'}
             },
             opset_version=OPSET,
             dynamo=False
@@ -770,10 +774,8 @@ if DO_EXPORT:
         dynamic_axes = {
             **kv_axes,
             'hidden_states': {0: 'batch', 1: 'ids_len'},
-            'rotary_pos_emb_cos_q': {3: 'ids_len'},
-            'rotary_pos_emb_sin_q': {3: 'ids_len'},
-            'rotary_pos_emb_cos_k': {4: 'ids_len'},
-            'rotary_pos_emb_sin_k': {4: 'ids_len'},
+            'rotary_pos_emb_cos': {1: 'ids_len'},
+            'rotary_pos_emb_sin': {1: 'ids_len'},
             'logits': {0: 'batch'}
         }
         input_names.append('hidden_states')
@@ -784,14 +786,10 @@ if DO_EXPORT:
             input_names.append(name)
             dynamic_axes[name] = {1: 'total_len'}
             all_inputs.append(deepstack_features)
-        input_names.append('rotary_pos_emb_cos_q')
-        all_inputs.append(rotary_pos_emb_cos_q)
-        input_names.append('rotary_pos_emb_sin_q')
-        all_inputs.append(rotary_pos_emb_sin_q)
-        input_names.append('rotary_pos_emb_cos_k')
-        all_inputs.append(rotary_pos_emb_cos_k)
-        input_names.append('rotary_pos_emb_sin_k')
-        all_inputs.append(rotary_pos_emb_sin_k)
+        input_names.append('rotary_pos_emb_cos')
+        all_inputs.append(rotary_pos_emb_cos)
+        input_names.append('rotary_pos_emb_sin')
+        all_inputs.append(rotary_pos_emb_sin)
         input_names.append('kv_seq_len')
         all_inputs.append(kv_seq_len)
         input_names.append('ids_len')
@@ -828,10 +826,8 @@ if DO_EXPORT:
         del input_ids
         del batch_size
         del hidden_states
-        del rotary_pos_emb_cos_q
-        del rotary_pos_emb_sin_q
-        del rotary_pos_emb_cos_k
-        del rotary_pos_emb_sin_k
+        del rotary_pos_emb_cos
+        del rotary_pos_emb_sin
         del attention_mask
         del kv_seq_len
         gc.collect()
@@ -1464,7 +1460,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
-
-
-
