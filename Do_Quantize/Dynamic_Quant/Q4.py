@@ -77,7 +77,7 @@ def optimize_onnx_model(model_path, num_heads=0, hidden_size=0, use_f16=False, s
     model = optimize_model(
         model_path,
         use_gpu=False,
-        opt_level=2,
+        opt_level=0 if 'LLM_Vision' in model_path else 2,
         num_heads=num_heads,
         hidden_size=hidden_size,
         verbose=False,
@@ -345,6 +345,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
