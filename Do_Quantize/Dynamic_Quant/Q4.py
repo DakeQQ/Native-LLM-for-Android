@@ -1,9 +1,11 @@
 import os
 import gc
 import sys
+import site
 import glob
 import onnx
 import torch
+import importlib
 import onnx.version_converter
 from pathlib import Path
 from onnxslim import slim
@@ -14,7 +16,6 @@ from transformers import (
     Qwen2VLForConditionalGeneration,
     Gemma3ForCausalLM
 )
-from onnxruntime.transformers.optimizer import optimize_model
 from onnxruntime.quantization import (
     matmul_nbits_quantizer,
     quantize_dynamic,
@@ -52,7 +53,7 @@ BLOCK_SIZE = 32                 # [16, 32, 64, 128, 256]; Smaller block_size => 
 ACCURACY_LEVEL = 4              # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
 QUANT_SYMMETRIC = False         # False = Asymmetric (includes ZeroPoint), True = Symmetric
 NODES_TO_EXCLUDE = None         # List of specific ONNX node names to exclude from quantization
-USE_Q8_VISION = False           # Enable INT8 dynamic quantization specifically for Vision models.
+USE_Q8_VISION = True            # Enable INT8 dynamic quantization specifically for Vision models.
 USE_F16 = False                 # Convert Q4F32/Q8F32 to Q4F16/Q8F16. The BLOCK_SIZE <= 32 is recommended.
 TWO_PARTS_SAVE = False          # Force saving models with external data (.data) regardless of size
 UPGRADE_OPSET = 0               # Target ONNX Opset version (0 = keep current version)
@@ -60,24 +61,38 @@ UPGRADE_OPSET = 0               # Target ONNX Opset version (0 = keep current ve
 
 # --- Helper Functions ---
 def get_model_paths(model_name):
-    """Determines source and destination paths for a given model."""
-    # Special handling for LLM_Main path location
-    if ('LLM_Main' in model_name) and ('vl' in DOWNLOAD_PATH.lower() or 'LLM_Vision' in MODEL_NAMES):
-        src_dir = ORIGINAL_FOLDER_PATH.replace('Qwen_ONNX', 'Qwen_ONNX_2')
-    else:
-        src_dir = ORIGINAL_FOLDER_PATH
-    
-    src_path = os.path.join(src_dir, f"{model_name}.onnx")
+    src_path = os.path.join(ORIGINAL_FOLDER_PATH, f"{model_name}.onnx")
     dst_path = os.path.join(QUANTED_FOLDER_PATH, f"{model_name}.onnx")
     return src_path, dst_path
 
 
 def optimize_onnx_model(model_path, num_heads=0, hidden_size=0, use_f16=False, save_external=False):
     """wrapper for onnxruntime.transformers.optimizer"""
+    from onnxruntime.transformers.optimizer import optimize_model
+
+    if "LLM_Vision" in model_path:
+        python_package_path = site.getsitepackages()[-1]
+        optimizer_path = os.path.join(python_package_path, "onnxruntime/transformers/optimizer.py")
+        with open(optimizer_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        target_str = 'disabled_optimizers=disabled_optimizers'
+        replacement_str = 'disabled_optimizers=["TransposeOptimizer", "TransposeOptimizer_CPUExecutionProvider"]'
+
+        if target_str in content:
+            content = content.replace(target_str, replacement_str)
+            with open(optimizer_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"Patched {optimizer_path}")
+
+        import onnxruntime
+        importlib.reload(onnxruntime.transformers.optimizer)
+        from onnxruntime.transformers.optimizer import optimize_model
+
     model = optimize_model(
         model_path,
         use_gpu=False,
-        opt_level=0 if 'LLM_Vision' in model_path else 2,
+        opt_level=2,
         num_heads=num_heads,
         hidden_size=hidden_size,
         verbose=False,
@@ -94,10 +109,28 @@ def optimize_onnx_model(model_path, num_heads=0, hidden_size=0, use_f16=False, s
             min_positive_val=1e-7,
             op_block_list=['DynamicQuantizeLinear', 'DequantizeLinear', 'DynamicQuantizeMatMul', 'MatMulIntegerToFloat']
         )
-    
     model.save_model_to_file(model_path, use_external_data_format=save_external)
     del model
     gc.collect()
+
+    if "LLM_Vision" in model_path:
+        python_package_path = site.getsitepackages()[-1]
+        optimizer_path = os.path.join(python_package_path, "onnxruntime/transformers/optimizer.py")
+        with open(optimizer_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        target_str = 'disabled_optimizers=["TransposeOptimizer", "TransposeOptimizer_CPUExecutionProvider"]'
+        replacement_str = 'disabled_optimizers=disabled_optimizers'
+
+        if target_str in content:
+            content = content.replace(target_str, replacement_str)
+            with open(optimizer_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"Patched {optimizer_path}")
+
+        import onnxruntime
+        importlib.reload(onnxruntime.transformers.optimizer)
+        from onnxruntime.transformers.optimizer import optimize_model
 
 
 def run_onnxslim(model_path, save_external):
@@ -105,7 +138,7 @@ def run_onnxslim(model_path, save_external):
     slim(
         model=model_path,
         output_model=model_path,
-        no_shape_infer=True,
+        no_shape_infer=False,
         skip_fusion_patterns=False,
         no_constant_folding=False,
         save_as_external_data=save_external,
@@ -231,7 +264,7 @@ def process_weight_quantization(src_path, dst_path, algo, op_types, axes, bits=B
         )
     elif algo == "k_quant":
         q_config = matmul_nbits_quantizer.KQuantWeightOnlyQuantConfig(**common_args)
-    else: # DEFAULT
+    else:  # DEFAULT
         q_config = matmul_nbits_quantizer.DefaultWeightOnlyQuantConfig(
             block_size=BLOCK_SIZE, is_symmetric=QUANT_SYMMETRIC, 
             accuracy_level=ACCURACY_LEVEL,
@@ -345,7 +378,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
