@@ -16,10 +16,7 @@ onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Vision.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat.onnx'
 onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Rotary_Vision.onnx'
 onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Rotary_Text.onnx'
-
-# Note: Assign a different folder for 'LLM_Main' to avoid duplicate weight file names causing loading failures.
-onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX_2/LLM_Main.onnx'
-
+onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
 onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
 onnx_model_H = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
 onnx_model_I = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
@@ -30,7 +27,7 @@ onnx_model_K = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 image_path = r"../psyduck.png"                                      # Test image for the exported onnx model.
 query = "Describe this image."                                      # Test query for the exported onnx model.
 
-DO_EXPORT = False                                                    # Whether to export the ONNX models
+DO_EXPORT = True                                                    # Whether to export the ONNX models
 
 KV_QUANT_DTYPE = "F16"                                              # "Q8" | "F16" | "F32"
 USE_FLOAT16_SCALE_BIAS = True                                       # If choose Q8, whether to use float16 for scale and bias.
@@ -1025,7 +1022,9 @@ session_opts.add_session_config_entry('session.graph_optimizations_loop_level', 
 session_opts.add_session_config_entry('optimization.enable_gelu_approximation', '1')
 session_opts.add_session_config_entry('optimization.minimal_build_optimizations', '')
 session_opts.add_session_config_entry('optimization.enable_cast_chain_elimination', '1')
+session_opts.add_session_config_entry('optimization.disable_specified_optimizers', '')
 run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
+
 
 if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [
@@ -1097,6 +1096,7 @@ out_name_B = [x.name for x in out_name_B_objs]
 deepstack_features_len = len(out_name_B) - 1
 in_name_B_parts = in_name_B[:deepstack_features_len+1]
 vision_dtype = np.float16 if 'float16' in ort_session_B._outputs_meta[0].type else np.float32
+
 
 ort_session_C = onnxruntime.InferenceSession(onnx_model_C, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_C = ort_session_C.io_binding()
