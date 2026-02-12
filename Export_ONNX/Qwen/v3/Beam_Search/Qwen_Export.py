@@ -72,7 +72,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         super(FIRST_BEAM_SEARCH, self).__init__()
         self.total_layers = total_layers
         self.save_keys_values = [None] * self.total_layers
-        self.batch_indices = torch.arange(MAX_BEAM_SIZE, dtype=torch.int8)
+        self.batch_indices = torch.arange(MAX_BEAM_SIZE, dtype=torch.int64)
 
     def forward(self, *all_inputs):
         logits = all_inputs[-5]
@@ -81,11 +81,11 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         penality_value = all_inputs[-2]
         beam_size = all_inputs[-1]
         logits = torch.log_softmax(logits, dim=-1)
-        top_beam_prob, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=False, largest=True)
+        top_beam_prob, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=True, largest=True)
         for i in range(self.total_layers):
             self.save_keys_values[i] = all_inputs[i].repeat(beam_size, *([1] * (all_inputs[i].dim() - 1)))
         top_beam_indices = top_beam_indices.transpose(0, 1)
-        batch_indices = self.batch_indices[:beam_size].long()
+        batch_indices = self.batch_indices[:beam_size]
         repeat_penality[batch_indices, top_beam_indices] *= penality_value
         top_beam_indices = top_beam_indices.int()
         save_id = torch.cat([save_id, top_beam_indices], dim=-1)
@@ -98,7 +98,6 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         super(SECOND_BEAM_SEARCH, self).__init__()
         self.total_layers = total_layers
         self.save_keys_values = [None] * self.total_layers
-        self.batch_indices = torch.arange(MAX_BEAM_SIZE, dtype=torch.int8)
 
     def forward(self, *all_inputs):
         logits = all_inputs[-8]
@@ -110,9 +109,9 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         beam_size = all_inputs[-2]
         topK = all_inputs[-1]
         logits = torch.log_softmax(logits * repeat_penality, dim=-1)
-        top_k_prob, top_k_indices = torch.topk(logits, k=topK, dim=-1, largest=True, sorted=False)
+        top_k_prob, top_k_indices = torch.topk(logits, k=topK, dim=-1, largest=True, sorted=True)
         current_prob = (top_k_prob + previous_prob).view(-1)
-        top_beam_prob, top_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=False)
+        top_beam_prob, top_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=True)
         beam_index = top_beam_indices // topK
         top_beam_indices = top_k_indices.view(-1)[top_beam_indices]
         for i in range(self.total_layers):
@@ -967,3 +966,4 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
