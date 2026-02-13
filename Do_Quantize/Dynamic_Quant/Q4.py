@@ -308,15 +308,7 @@ def main():
         is_split_disabled = ('Concat' in model_name) or ('Rotary' in model_name)
         current_two_parts = False if is_split_disabled else TWO_PARTS_SAVE
 
-        # --- Case 1: Reset_Penality (Optimization only) ---
-        if 'Reset_Penality' in model_name:
-            print("Optimizing Reset_Penality...")
-            optimize_onnx_model(src_path, use_f16=USE_F16, save_external=False)
-            if UPGRADE_OPSET > 0:
-                upgrade_opset_version(src_path, UPGRADE_OPSET, False)
-            continue
-
-        # --- Case 2: Quantization ---
+        # --- Case 1: Quantization ---
         # Determine algorithm and types
         current_algo = "DEFAULT" if 'Embed' in model_name else ALGORITHM
         op_types = ["Gather"] if 'Embed' in model_name else ["MatMul"]
@@ -328,7 +320,7 @@ def main():
         else:
             process_weight_quantization(src_path, dst_path, current_algo, op_types, quant_axes)
 
-        # --- Case 3: Post-Quantization Optimization Pipeline ---
+        # --- Case 2: Post-Quantization Optimization Pipeline ---
         
         # Check size to determine storage format
         is_large = check_is_large_model(dst_path, current_two_parts)
@@ -378,3 +370,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
