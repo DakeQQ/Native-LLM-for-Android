@@ -17,7 +17,7 @@ onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
 onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # Test input
-TEST_THINK_MODE = False
+TEST_THINK_MODE = True
 TEST_QUERY = "地球最高的山是哪座山？"
 
 # Model Config
@@ -947,4 +947,5 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
 
