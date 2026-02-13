@@ -8,16 +8,16 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
-onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Embed.onnx'
-onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_Optimized/LLM_Main.onnx'
-onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_Optimized/Greedy_Search.onnx'
-onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_Optimized/First_Beam_Search.onnx'
-onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_Optimized/Second_Beam_Search.onnx'
-onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_Optimized/Reset_Penality.onnx'
-onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_Optimized/Argmax.onnx'
+onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
+onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
+onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
+onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
+onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
+onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
+onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # Test input
-TEST_THINK_MODE = True
+TEST_THINK_MODE = False
 TEST_QUERY = "地球最高的山是哪座山？"
 
 # Model Config
@@ -31,8 +31,8 @@ KV_QUANT_DTYPE = "F16"              # "Q8" | "F16" | "F32"
 USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
-USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
+USE_BEAM_SEARCH = True             # Use beam search or greedy search
+REPEAT_PENALTY = 0.9               # 0.0 ~ 1.0; No penalty = 1.0
 PENALTY_RANGE = 30                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
 TOP_K = 3                           # Top-K for beam search
@@ -58,12 +58,10 @@ class ARGMAX(torch.nn.Module):
 class GREEDY_SEARCH(torch.nn.Module):
     def __init__(self):
         super(GREEDY_SEARCH, self).__init__()
-        self.batch_indices = torch.arange(MAX_BEAM_SIZE, dtype=torch.int8)
 
-    def forward(self, logits, repeat_penality, penality_value, batch_size):
+    def forward(self, logits, repeat_penality, penality_value):
         max_logits_idx = torch.argmax(logits * repeat_penality, dim=-1, keepdim=True)
-        batch_indices = self.batch_indices[:batch_size].long()
-        repeat_penality[batch_indices, max_logits_idx.squeeze(-1)] *= penality_value
+        repeat_penality.scatter_(1, max_logits_idx, repeat_penality.gather(1, max_logits_idx) * penality_value)
         return max_logits_idx.int(), repeat_penality
 
 
@@ -72,7 +70,6 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         super(FIRST_BEAM_SEARCH, self).__init__()
         self.total_layers = total_layers
         self.save_keys_values = [None] * self.total_layers
-        self.batch_indices = torch.arange(MAX_BEAM_SIZE, dtype=torch.int64)
 
     def forward(self, *all_inputs):
         logits = all_inputs[-5]
@@ -85,12 +82,11 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         for i in range(self.total_layers):
             self.save_keys_values[i] = all_inputs[i].repeat(beam_size, *([1] * (all_inputs[i].dim() - 1)))
         top_beam_indices = top_beam_indices.transpose(0, 1)
-        batch_indices = self.batch_indices[:beam_size]
-        repeat_penality[batch_indices, top_beam_indices] *= penality_value
+        repeat_penality.scatter_(1, top_beam_indices, repeat_penality.gather(1, top_beam_indices) * penality_value)
         top_beam_indices = top_beam_indices.int()
         save_id = torch.cat([save_id, top_beam_indices], dim=-1)
         max_logits_idx = top_beam_indices[0]
-        return *self.save_keys_values, top_beam_indices, save_id, repeat_penality, top_beam_prob.transpose(0, 1), batch_indices, max_logits_idx
+        return *self.save_keys_values, top_beam_indices, save_id, repeat_penality, top_beam_prob.transpose(0, 1), max_logits_idx
 
 
 class SECOND_BEAM_SEARCH(torch.nn.Module):
@@ -100,11 +96,10 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         self.save_keys_values = [None] * self.total_layers
 
     def forward(self, *all_inputs):
-        logits = all_inputs[-8]
-        save_id = all_inputs[-7]
-        repeat_penality = all_inputs[-6]
-        previous_prob = all_inputs[-5]
-        batch_indices = all_inputs[-4]
+        logits = all_inputs[-7]
+        save_id = all_inputs[-6]
+        repeat_penality = all_inputs[-5]
+        previous_prob = all_inputs[-4]
         penality_value = all_inputs[-3]
         beam_size = all_inputs[-2]
         topK = all_inputs[-1]
@@ -117,10 +112,10 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         for i in range(self.total_layers):
             self.save_keys_values[i] = all_inputs[i][beam_index]
         repeat_penality = repeat_penality[beam_index]
-        repeat_penality[batch_indices, top_beam_indices] *= penality_value
-        top_beam_indices = top_beam_indices.int()
-        max_logits_idx = top_beam_indices[[0]]
         top_beam_indices = top_beam_indices.unsqueeze(-1)
+        repeat_penality.scatter_(1, top_beam_indices, repeat_penality.gather(1, top_beam_indices) * penality_value)
+        top_beam_indices = top_beam_indices.int()
+        max_logits_idx = top_beam_indices[0]
         save_id = torch.cat([save_id[beam_index], top_beam_indices], dim=-1)
         return *self.save_keys_values, top_beam_indices, save_id, repeat_penality, top_beam_prob.unsqueeze(-1), max_logits_idx
 
@@ -130,10 +125,11 @@ class RESET_PENALITY(torch.nn.Module):
         super(RESET_PENALITY, self).__init__()
         pass
 
-    def forward(self, save_id, repeat_penality, penality_reset_count, batch_indices):
-        repeat_penality[batch_indices, save_id[batch_indices, penality_reset_count[batch_indices]]] = 1.0
+    def forward(self, save_id, repeat_penality, penality_reset_count):
+        token_indices = save_id.gather(1, penality_reset_count).long()
+        repeat_penality.scatter_(1, token_indices, 1.0)
         penality_reset_count += 1
-        return save_id, repeat_penality, penality_reset_count
+        return repeat_penality, penality_reset_count
 
 
 class KVQuantizer(torch.nn.Module):
@@ -425,10 +421,9 @@ if DO_EXPORT:
         )
         del model_A, input_ids
 
-        # 5. Export LLM_MAIN
         print("Exporting LLM_MAIN...")
 
-        def get_kv_io(tensors_dict, batch_axis='batch', seq_axis='history_len', out_seq_axis='kv_seq_len'):
+        def get_kv_io(tensors_dict, batch_axis='batch_size', seq_axis='history_len', out_seq_axis='kv_seq_len'):
             inputs, in_names, out_names, axes = [], [], [], {}
             for name, dim in kv_specs:
                 t = tensors_dict[name]
@@ -441,7 +436,7 @@ if DO_EXPORT:
                     axes[out_n] = {0: batch_axis, dim: out_seq_axis}
             return inputs, in_names, out_names, axes
 
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch', 'history_len', 'kv_seq_len')
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch_size', 'history_len', 'kv_seq_len')
         hidden_states = torch.ones((batch_size, ids_len, hidden_size), dtype=torch.float32)
         attention_mask = torch.tensor([1], dtype=torch.int8)
         all_inputs = kv_ins + [hidden_states, history_len, ids_len, attention_mask]
@@ -464,15 +459,14 @@ if DO_EXPORT:
         del model_main, hidden_states, attention_mask, all_inputs
         gc.collect()
 
-        # 6. Export Helper Models (Greedy, Reset, Argmax)
         print("Exporting Helper Models...")
         repeat_penality_in = torch.ones((BEAM_SIZE, vocab_size), dtype=torch.float32)
         penality_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
         torch.onnx.export(
             GREEDY_SEARCH(),
-            (logits_t, repeat_penality_in, penality_value, beam_size_t),
+            (logits_t, repeat_penality_in, penality_value),
             onnx_model_C,
-            input_names=['logits', 'repeat_penality_in', 'penality_value', 'batch_size'],
+            input_names=['logits', 'repeat_penality_in', 'penality_value'],
             output_names=['max_logits_idx', 'repeat_penality_out'],
             dynamic_axes={
                 'logits': {0: 'batch'},
@@ -484,22 +478,19 @@ if DO_EXPORT:
         )
 
         save_id_in = torch.zeros((BEAM_SIZE, 10), dtype=torch.int32)
-        penality_reset_count_in = torch.zeros(BEAM_SIZE, dtype=torch.int32)
-        batch_indices = torch.arange(BEAM_SIZE, dtype=torch.int64)
+        penality_reset_count_in = torch.zeros([BEAM_SIZE, 1], dtype=torch.int32)
         torch.onnx.export(
             RESET_PENALITY(),
-            (save_id_in, repeat_penality_in, penality_reset_count_in, batch_indices),
+            (save_id_in, repeat_penality_in, penality_reset_count_in),
             onnx_model_F,
-            input_names=['save_id_in', 'repeat_penality_in', 'penality_reset_count_in', 'batch_indices'],
-            output_names=['save_id_out', 'repeat_penality_out', 'penality_reset_count_out'],
+            input_names=['save_id', 'repeat_penality_in', 'penality_reset_count_in'],
+            output_names=['repeat_penality_out', 'penality_reset_count_out'],
             dynamic_axes={
-                'save_id_in': {0: 'batch', 1: 'history_len'},
-                'save_id_out': {0: 'batch', 1: 'history_len'},
+                'save_id': {0: 'batch', 1: 'history_len'},
                 'repeat_penality_in': {0: 'batch'},
                 'repeat_penality_out': {0: 'batch'},
                 'penality_reset_count_in': {0: 'batch'},
-                'penality_reset_count_out': {0: 'batch'},
-                'batch_indices': {0: 'batch'}
+                'penality_reset_count_out': {0: 'batch'}
             },
             opset_version=OPSET,
             dynamo=False
@@ -519,9 +510,8 @@ if DO_EXPORT:
         )
         del penality_reset_count_in
 
-        # 7. Export Beam Search Models
         print("Exporting Beam Search Models...")
-        kv_tensors_greedy = {k: v[[0]] for k, v in kv_tensors.items()} # Slice batch dim for first beam
+        kv_tensors_greedy = {k: v[[0]] for k, v in kv_tensors.items()}  # Slice batch dim for first beam
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_greedy, 'batch_size', 'history_len', 'history_len')
         kv_axes = {k: v for k, v in kv_axes.items() if k not in kv_out_names}
         other_inputs = [logits_t[[0]], save_id_in, repeat_penality_in, penality_value, beam_size_t]
@@ -546,25 +536,23 @@ if DO_EXPORT:
             tuple(kv_ins + other_inputs),
             onnx_model_D,
             input_names=kv_ins_names,
-            output_names=['out_' + n[3:] for n in kv_in_names] + ['top_beam_indices', 'save_id_out', 'repeat_penality_out', 'top_beam_prob', 'batch_indices', 'max_logits_idx'], # Outputs mimic inputs for KV
+            output_names=['out_' + n[3:] for n in kv_in_names] + ['top_beam_indices', 'save_id_out', 'repeat_penality_out', 'top_beam_prob', 'max_logits_idx'],  # Outputs mimic inputs for KV
             dynamic_axes=dynamic_axes,
             opset_version=OPSET,
             dynamo=False
         )
 
-        # Second Beam Search
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch', 'history_len', 'kv_seq_len')
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch_size', 'history_len', 'kv_seq_len')
         previous_prob = torch.zeros((BEAM_SIZE, 1), dtype=torch.float32)
         topK = torch.tensor([TOP_K], dtype=torch.int64)
-        other_inputs = [logits_t, save_id_in, repeat_penality_in, previous_prob, batch_indices, penality_value, beam_size_t, topK]
-        other_names = ['logits', 'save_id_in', 'repeat_penality_in', 'previous_prob', 'batch_indices', 'penality_value', 'beam_size', 'topK']
+        other_inputs = [logits_t, save_id_in, repeat_penality_in, previous_prob, penality_value, beam_size_t, topK]
+        other_names = ['logits', 'save_id_in', 'repeat_penality_in', 'previous_prob', 'penality_value', 'beam_size', 'topK']
         dynamic_axes = {
             **kv_axes,
             'logits': {0: 'batch'},
             'save_id_in': {0: 'batch', 1: 'history_len'},
             'repeat_penality_in': {0: 'batch'},
             'previous_prob': {0: 'batch'},
-            'batch_indices': {0: 'batch'},
             'save_id_out': {0: 'batch', 1: 'history_len'},
             'repeat_penality_out': {0: 'batch'},
             'top_beam_prob': {0: 'batch'},
@@ -583,7 +571,7 @@ if DO_EXPORT:
             dynamo=False
         )
 
-        del kv_tensors, kv_tensors_greedy, repeat_penality_in, penality_value, save_id_in, batch_indices, previous_prob, topK, logits_t
+        del kv_tensors, kv_tensors_greedy, repeat_penality_in, penality_value, save_id_in, previous_prob, topK, logits_t
         gc.collect()
     print('\nExport done!\n\nStart running the LLM by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
@@ -734,7 +722,6 @@ num_keys_values_plus_3 = num_keys_values + 3
 num_keys_values_plus_4 = num_keys_values + 4
 num_keys_values_plus_5 = num_keys_values + 5
 num_keys_values_plus_6 = num_keys_values + 6
-num_keys_values_plus_7 = num_keys_values + 7
 vocab_size = ort_session_B._outputs_meta[num_keys_values].shape[1]
 
 topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
@@ -743,7 +730,6 @@ init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
 init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
 init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
 init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
-init_batch_size_greedy = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
 init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
 
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
@@ -775,16 +761,16 @@ if USE_BEAM_SEARCH:
     penality_dtype = np.float16 if 'float16' in ort_session_D._inputs_meta[num_keys_values_plus_3].type else np.float32
     penality_value = create_ortvalue([REPEAT_PENALTY], penality_dtype, device_type, DEVICE_ID)
     init_repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
-    init_penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(BEAM_SIZE, dtype=np.int32), device_type, DEVICE_ID)
+    init_penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros([BEAM_SIZE, 1], dtype=np.int32), device_type, DEVICE_ID)
 
     binding_F.bind_ortvalue_input(in_name_F[2], init_penality_reset_count)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_1], init_save_id_beam)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_2], init_repeat_penality)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_3], penality_value)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_4], beam_size)
-    binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_5], penality_value)
-    binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_6], beam_size)
-    binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_7], topK)
+    binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_4], penality_value)
+    binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_5], beam_size)
+    binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_6], topK)
 else:
     BEAM_SIZE = 1
     save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
@@ -798,7 +784,6 @@ else:
         current_penalty = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype),device_type, DEVICE_ID)
         next_penalty = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
         binding_C.bind_ortvalue_input(in_name_C[2], penality_value)
-        binding_C.bind_ortvalue_input(in_name_C[3], init_batch_size_greedy)
         penalty_shape = (BEAM_SIZE, vocab_size)
         binding_C.bind_output(out_name_C[0], device_type=device_type, device_id=DEVICE_ID)
         binding_C.bind_output(name=out_name_C[1], device_type=device_type, device_id=DEVICE_ID, element_type=penality_dtype, shape=penalty_shape, buffer_ptr=next_penalty.data_ptr())
@@ -873,12 +858,9 @@ while num_decode < generate_limit:
             bind_outputs_generic(binding_D, out_name_D, _ort_device_type)
             ort_session_D.run_with_iobinding(binding_D, run_options=run_options)
             all_outputs_D = binding_D.get_outputs()
-            max_logits_idx = all_outputs_D[num_keys_values_plus_5].numpy()
+            max_logits_idx = all_outputs_D[num_keys_values_plus_4].numpy()
             if max_logits_idx in STOP_TOKEN:
                 break
-            binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_4], all_outputs_D[num_keys_values_plus_4])
-            if do_repeat_penalty:
-                binding_F.bind_ortvalue_input(in_name_F[3], all_outputs_D[num_keys_values_plus_4])
         else:
             bind_ort_values(binding_E, in_name_E_parts, all_outputs_B)
             bind_outputs_generic(binding_E, out_name_E, _ort_device_type)
@@ -893,9 +875,8 @@ while num_decode < generate_limit:
             bind_outputs_generic(binding_F, out_name_F, _ort_device_type)
             ort_session_F.run_with_iobinding(binding_F, run_options=run_options)
             all_outputs_F = binding_F.get_outputs()
-            binding_F.bind_ortvalue_input(in_name_F[2], all_outputs_F[2])
-            binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_1], all_outputs_F[0])
-            binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_2], all_outputs_F[1])
+            binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_2], all_outputs_F[0])
+            binding_F.bind_ortvalue_input(in_name_F[2], all_outputs_F[1])
         if num_decode < 1:
             bind_ort_values(binding_B, in_name_B_parts, all_outputs_D)
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_D[num_keys_values])
@@ -966,4 +947,3 @@ tokens_per_second = (num_decode + 1) / elapsed_time
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
