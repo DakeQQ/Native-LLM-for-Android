@@ -7,7 +7,7 @@ from onnxruntime.capi import _pybind_state as C
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-path         = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
+path         = r'/home/DakeQQ/Downloads/Qwen3-0.6B'                             # Set the folder path where the Qwen whole project downloaded.
 onnx_model_A = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
 onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
@@ -812,6 +812,7 @@ else:
         penality_value = create_ortvalue([REPEAT_PENALTY], penality_dtype, device_type, DEVICE_ID)
         current_penalty = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype),device_type, DEVICE_ID)
         binding_C.bind_ortvalue_input(in_name_C[2], penality_value)
+        binding_G.bind_ortvalue_output(out_name_G, current_penalty)
         penalty_shape = (BEAM_SIZE, vocab_size)
         init_penality_reset_count = 0
     else:
@@ -932,7 +933,6 @@ while num_decode < generate_limit:
                     reset_ids = create_ortvalue([[reset_ids]], np.int64, device_type, DEVICE_ID)
                     binding_G.bind_ortvalue_input(in_name_G[0], all_outputs_C[1])
                     binding_G.bind_ortvalue_input(in_name_G[1], reset_ids)
-                    binding_G.bind_ortvalue_output(out_name_G, current_penalty)
                     ort_session_G.run_with_iobinding(binding_G, run_options=run_options)
                 init_penality_reset_count += 1
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_C[0])
