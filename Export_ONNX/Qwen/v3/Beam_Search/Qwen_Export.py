@@ -755,7 +755,6 @@ init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
 init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
 init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
 init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
-init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
 
 
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
@@ -769,7 +768,6 @@ USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
 if USE_BEAM_SEARCH:
     print("\nBeam Search does not display immediate decoding results...")
-
     ort_session_D = onnxruntime.InferenceSession(onnx_model_D, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_D = ort_session_D.io_binding()
     in_name_D = [x.name for x in ort_session_D.get_inputs()]
@@ -784,12 +782,11 @@ if USE_BEAM_SEARCH:
     binding_F = ort_session_F.io_binding()
     in_name_F = [x.name for x in ort_session_F.get_inputs()]
     out_name_F = [x.name for x in ort_session_F.get_outputs()]
-
     penality_dtype = np.float16 if 'float16' in ort_session_D._inputs_meta[num_keys_values_plus_3].type else np.float32
     penality_value = create_ortvalue([REPEAT_PENALTY], penality_dtype, device_type, DEVICE_ID)
     init_repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
     init_penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros([BEAM_SIZE, 1], dtype=np.int32), device_type, DEVICE_ID)
-
+    init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
     binding_F.bind_ortvalue_input(in_name_F[2], init_penality_reset_count)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_1], init_save_id_beam)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_2], init_repeat_penality)
@@ -828,6 +825,7 @@ else:
         in_name_H = ort_session_H.get_inputs()[0].name
         out_name_H = ort_session_H.get_outputs()[0].name  # Only one output for Argmax
         binding_H.bind_ortvalue_output(out_name_H, ort_idx)
+        penality_dtype = np.float32
 
 if TEST_THINK_MODE:
     prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
@@ -957,4 +955,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
