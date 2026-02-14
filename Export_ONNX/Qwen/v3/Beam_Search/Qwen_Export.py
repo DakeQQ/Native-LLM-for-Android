@@ -787,7 +787,6 @@ if USE_BEAM_SEARCH:
     init_repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
     init_penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros([BEAM_SIZE, 1], dtype=np.int32), device_type, DEVICE_ID)
     init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
-    binding_F.bind_ortvalue_input(in_name_F[2], init_penality_reset_count)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_1], init_save_id_beam)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_2], init_repeat_penality)
     binding_D.bind_ortvalue_input(in_name_D[num_keys_values_plus_3], penality_value)
@@ -795,6 +794,7 @@ if USE_BEAM_SEARCH:
     binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_4], penality_value)
     binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_5], beam_size)
     binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_6], topK)
+    binding_F.bind_ortvalue_input(in_name_F[2], init_penality_reset_count)
 else:
     BEAM_SIZE = 1
     save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
