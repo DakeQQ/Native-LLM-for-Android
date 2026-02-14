@@ -740,7 +740,7 @@ if (TOP_K < 2) or (BEAM_SIZE < 2):
     USE_BEAM_SEARCH = False
     print("\nInappropriate Beam Search setting detected. Falling back to Greedy Search.")
 
-do_repeat_penalty = (REPEAT_PENALTY != 1.0)
+USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
 if USE_BEAM_SEARCH:
     ort_session_D = onnxruntime.InferenceSession(onnx_model_D, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
@@ -774,7 +774,7 @@ if USE_BEAM_SEARCH:
 else:
     BEAM_SIZE = 1
     save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
-    if do_repeat_penalty:
+    if USE_PENALTY:
         ort_session_C = onnxruntime.InferenceSession(onnx_model_C, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
         binding_C = ort_session_C.io_binding()
         in_name_C = [x.name for x in ort_session_C.get_inputs()]
@@ -860,6 +860,7 @@ while num_decode < generate_limit:
             all_outputs_D = binding_D.get_outputs()
             max_logits_idx = all_outputs_D[num_keys_values_plus_4].numpy()
             if max_logits_idx in STOP_TOKEN:
+                print("\n\nBad Generation. Please Retry.")
                 break
         else:
             bind_ort_values(binding_E, in_name_E_parts, all_outputs_B)
@@ -869,7 +870,7 @@ while num_decode < generate_limit:
             max_logits_idx = all_outputs_E[num_keys_values_plus_4].numpy()
             if max_logits_idx in STOP_TOKEN:
                 break
-        if do_repeat_penalty and (num_decode >= PENALTY_RANGE):
+        if USE_PENALTY and (num_decode >= PENALTY_RANGE):
             binding_F.bind_ortvalue_input(in_name_F[0], all_outputs_E[num_keys_values_plus_1])
             binding_F.bind_ortvalue_input(in_name_F[1], all_outputs_E[num_keys_values_plus_2])
             bind_outputs_generic(binding_F, out_name_F, _ort_device_type)
@@ -890,7 +891,7 @@ while num_decode < generate_limit:
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_2], all_outputs_E[num_keys_values_plus_2])
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_3], all_outputs_E[num_keys_values_plus_3])
     else:
-        if do_repeat_penalty:
+        if USE_PENALTY:
             binding_C.bind_ortvalue_input(in_name_C[0], all_outputs_B[num_keys_values])
             binding_C.bind_ortvalue_input(in_name_C[1], current_penalty)
             ort_session_C.run_with_iobinding(binding_C, run_options=run_options)
@@ -906,29 +907,22 @@ while num_decode < generate_limit:
                     next_penalty.update_inplace(tmp)
                 init_penality_reset_count += 1
             current_penalty, next_penalty = next_penalty, current_penalty
-            binding_C.bind_output(
-                name=out_name_C[1],
-                device_type=device_type,
-                device_id=DEVICE_ID,
-                element_type=penality_dtype,
-                shape=penalty_shape,
-                buffer_ptr=next_penalty.data_ptr()
-            )
+            binding_C.bind_output(name=out_name_C[1], device_type=device_type, device_id=DEVICE_ID, element_type=penality_dtype, shape=penalty_shape, buffer_ptr=next_penalty.data_ptr())
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_C[0])
         else:
             binding_G.bind_ortvalue_input(in_name_G, all_outputs_B[num_keys_values])
             bind_outputs_generic(binding_G, out_name_G, _ort_device_type)
-            ort_session_G.run_with_iobinding(binding_G)
+            ort_session_G.run_with_iobinding(binding_G, run_options=run_options)
             all_outputs_G = binding_G.get_outputs()
-            binding_A.bind_ortvalue_input(in_name_A, all_outputs_G[0])
             max_logits_idx = all_outputs_G[0].numpy().flat[0]
             if max_logits_idx in STOP_TOKEN:
                 break
+            binding_A.bind_ortvalue_input(in_name_A, all_outputs_G[0])
         bind_ort_values(binding_B, in_name_B_parts, all_outputs_B)
         save_id_greedy[num_decode] = max_logits_idx
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
     bind_outputs_generic(binding_A, out_name_A, _ort_device_type)
-    ort_session_A.run_with_iobinding(binding_A)
+    ort_session_A.run_with_iobinding(binding_A, run_options=run_options)
     binding_B.bind_ortvalue_input(in_name_B[num_keys_values], binding_A.get_outputs()[0])
     binding_B.bind_ortvalue_input(in_name_B[num_keys_values_plus_1], all_outputs_B[num_keys_values_plus_1])
     if num_decode < 1:
@@ -936,16 +930,14 @@ while num_decode < generate_limit:
         binding_B.bind_ortvalue_input(in_name_B[num_keys_values_plus_3], init_attention_mask_0)
     num_decode += 1
 
+elapsed_time = time.time() - start_time
+tokens_per_second = (num_decode + 1) / elapsed_time
+
 if USE_BEAM_SEARCH:
     result = tokenizer.decode(all_outputs_E[num_keys_values_plus_1].numpy()[0, :num_decode], skip_special_tokens=True)
 else:
     result = tokenizer.decode(save_id_greedy[:num_decode], skip_special_tokens=True)
 
-elapsed_time = time.time() - start_time
-tokens_per_second = (num_decode + 1) / elapsed_time
-
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
-
