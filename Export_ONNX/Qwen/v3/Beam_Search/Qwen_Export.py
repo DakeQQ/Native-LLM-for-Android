@@ -817,7 +817,6 @@ else:
         binding_C.bind_ortvalue_output(out_name_C[1], current_penalty)
         binding_G.bind_ortvalue_input(in_name_G[0], current_penalty)
         binding_G.bind_ortvalue_output(out_name_G, current_penalty)
-        penalty_shape = (BEAM_SIZE, vocab_size)
         init_penality_reset_count = 0
     else:
         ort_session_H = onnxruntime.InferenceSession(onnx_model_H, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
