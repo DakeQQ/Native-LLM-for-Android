@@ -810,7 +810,7 @@ else:
         ort_session_G = onnxruntime.InferenceSession(onnx_model_G, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
         binding_G = ort_session_G.io_binding()
         in_name_G = [x.name for x in ort_session_G.get_inputs()]
-        out_name_G = [x.name for x in ort_session_G.get_outputs()][0]  # Only one output for Greedy Penalty Reset
+        out_name_G = ort_session_G.get_outputs()[0].name[0]  # Only one output for Greedy Penalty Reset
         penality_dtype = np.float16 if 'float16' in ort_session_C._inputs_meta[2].type else np.float32
         penality_value = create_ortvalue([REPEAT_PENALTY], penality_dtype, device_type, DEVICE_ID)
         current_penalty = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
@@ -826,7 +826,7 @@ else:
         ort_session_H = onnxruntime.InferenceSession(onnx_model_H, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
         binding_H = ort_session_H.io_binding()
         in_name_H = ort_session_H.get_inputs()[0].name
-        out_name_H = [ort_session_H.get_outputs()[0].name][0]  # Only one output for Argmax
+        out_name_H = ort_session_H.get_outputs()[0].name  # Only one output for Argmax
         binding_H.bind_ortvalue_output(out_name_H, ort_idx)
         penality_dtype = np.float32
 
