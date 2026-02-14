@@ -576,9 +576,7 @@ if DO_EXPORT:
     print('\nExport done!\n\nStart running the LLM by ONNXRuntime.\nNow loading . . . it could cost minutes.')
 
 
-# Inference with ONNXRuntime
-# =======================================================#
-def bind_ort_values(binding, names, values, num=0):
+def bind_ort_in(binding, names, values, num=0):
     if num != 0:
         for i in range(num):
             binding.bind_ortvalue_input(names[i], values[i])
@@ -587,7 +585,7 @@ def bind_ort_values(binding, names, values, num=0):
             binding.bind_ortvalue_input(name, val)
 
 
-def bind_outputs_generic(binding, output_names, device_type):
+def bind_ort_out(binding, output_names, device_type):
     for name in output_names:
         binding._iobinding.bind_output(name, device_type)
 
@@ -699,14 +697,14 @@ else:
 
 if 'uint8' in model_dtype_B_str:
     model_dtype_B = np.uint8
-    num_keys_values = (amount_of_outputs_B - 2) // 3
-    num_layers = num_keys_values // 2
-    scale_dtype_B = np.float16 if 'float16' in ort_session_B._inputs_meta[num_keys_values].type else np.float32
+    num_keys_values_temp = (amount_of_outputs_B - 2) // 3
+    num_layers = num_keys_values_temp // 2
+    num_keys_values = amount_of_outputs_B - 2  # Including scales and biases, but excluding logits.
+    scale_dtype_B = np.float16 if 'float16' in ort_session_B._inputs_meta[num_keys_values_temp].type else np.float32
     k_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[0].shape[1], 1, 1, 0), dtype=scale_dtype_B), kv_device, DEVICE_ID)
     k_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[0].shape[1], 1, 1, 0), dtype=scale_dtype_B), kv_device, DEVICE_ID)
     v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[num_layers].shape[1], 1, 1, 0), dtype=scale_dtype_B), kv_device, DEVICE_ID)
     v_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=scale_dtype_B), kv_device, DEVICE_ID)
-    num_keys_values = amount_of_outputs_B - 2  # Revert to original for later use
 else:
     model_dtype_B = np.float16 if 'float16' in model_dtype_B_str else np.float32
     num_keys_values = amount_of_outputs_B - 2
@@ -808,7 +806,7 @@ input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE
 ids_len = create_ortvalue([num_prefill], np.int64, device_type, DEVICE_ID)
 
 binding_A.bind_ortvalue_input(in_name_A, input_ids)
-bind_outputs_generic(binding_A, out_name_A, _ort_device_type)
+bind_ort_out(binding_A, out_name_A, _ort_device_type)
 ort_session_A.run_with_iobinding(binding_A, run_options=run_options)
 out_A = binding_A.get_outputs()[0]
 
@@ -850,13 +848,13 @@ num_decode = 0
 generate_limit = MAX_SEQ_LEN - num_prefill
 start_time = time.time()
 while num_decode < generate_limit:
-    bind_outputs_generic(binding_B, out_name_B, _ort_device_type)
+    bind_ort_out(binding_B, out_name_B, _ort_device_type)
     ort_session_B.run_with_iobinding(binding_B, run_options=run_options)
     all_outputs_B = binding_B.get_outputs()
     if USE_BEAM_SEARCH:
         if num_decode < 1:
-            bind_ort_values(binding_D, in_name_D_parts, all_outputs_B)
-            bind_outputs_generic(binding_D, out_name_D, _ort_device_type)
+            bind_ort_in(binding_D, in_name_D_parts, all_outputs_B)
+            bind_ort_out(binding_D, out_name_D, _ort_device_type)
             ort_session_D.run_with_iobinding(binding_D, run_options=run_options)
             all_outputs_D = binding_D.get_outputs()
             max_logits_idx = all_outputs_D[num_keys_values_plus_4].numpy()
@@ -864,8 +862,8 @@ while num_decode < generate_limit:
                 print("\n\nBad Generation. Please Retry.")
                 break
         else:
-            bind_ort_values(binding_E, in_name_E_parts, all_outputs_B)
-            bind_outputs_generic(binding_E, out_name_E, _ort_device_type)
+            bind_ort_in(binding_E, in_name_E_parts, all_outputs_B)
+            bind_ort_out(binding_E, out_name_E, _ort_device_type)
             ort_session_E.run_with_iobinding(binding_E, run_options=run_options)
             all_outputs_E = binding_E.get_outputs()
             max_logits_idx = all_outputs_E[num_keys_values_plus_4].numpy()
@@ -874,19 +872,19 @@ while num_decode < generate_limit:
         if USE_PENALTY and (num_decode >= PENALTY_RANGE):
             binding_F.bind_ortvalue_input(in_name_F[0], all_outputs_E[num_keys_values_plus_1])
             binding_F.bind_ortvalue_input(in_name_F[1], all_outputs_E[num_keys_values_plus_2])
-            bind_outputs_generic(binding_F, out_name_F, _ort_device_type)
+            bind_ort_out(binding_F, out_name_F, _ort_device_type)
             ort_session_F.run_with_iobinding(binding_F, run_options=run_options)
             all_outputs_F = binding_F.get_outputs()
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_2], all_outputs_F[0])
             binding_F.bind_ortvalue_input(in_name_F[2], all_outputs_F[1])
         if num_decode < 1:
-            bind_ort_values(binding_B, in_name_B_parts, all_outputs_D)
+            bind_ort_in(binding_B, in_name_B_parts, all_outputs_D)
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_D[num_keys_values])
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_1], all_outputs_D[num_keys_values_plus_1])
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_2], all_outputs_D[num_keys_values_plus_2])
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_3], all_outputs_D[num_keys_values_plus_3])
         else:
-            bind_ort_values(binding_B, in_name_B_parts, all_outputs_E)
+            bind_ort_in(binding_B, in_name_B_parts, all_outputs_E)
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_E[num_keys_values])
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_1], all_outputs_E[num_keys_values_plus_1])
             binding_E.bind_ortvalue_input(in_name_E[num_keys_values_plus_2], all_outputs_E[num_keys_values_plus_2])
@@ -912,17 +910,17 @@ while num_decode < generate_limit:
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_C[0])
         else:
             binding_G.bind_ortvalue_input(in_name_G, all_outputs_B[num_keys_values])
-            bind_outputs_generic(binding_G, out_name_G, _ort_device_type)
+            bind_ort_out(binding_G, out_name_G, _ort_device_type)
             ort_session_G.run_with_iobinding(binding_G, run_options=run_options)
             all_outputs_G = binding_G.get_outputs()
             max_logits_idx = all_outputs_G[0].numpy().flat[0]
             if max_logits_idx in STOP_TOKEN:
                 break
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_G[0])
-        bind_ort_values(binding_B, in_name_B_parts, all_outputs_B)
+        bind_ort_in(binding_B, in_name_B_parts, all_outputs_B)
         save_id_greedy[num_decode] = max_logits_idx
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
-    bind_outputs_generic(binding_A, out_name_A, _ort_device_type)
+    bind_ort_out(binding_A, out_name_A, _ort_device_type)
     ort_session_A.run_with_iobinding(binding_A, run_options=run_options)
     binding_B.bind_ortvalue_input(in_name_B[num_keys_values], binding_A.get_outputs()[0])
     binding_B.bind_ortvalue_input(in_name_B[num_keys_values_plus_1], all_outputs_B[num_keys_values_plus_1])
