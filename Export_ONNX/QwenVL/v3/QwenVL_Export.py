@@ -1213,31 +1213,25 @@ if (TOP_K < 2) or (BEAM_SIZE < 2):
 
 if USE_BEAM_SEARCH:
     print("\nBeam Search does not display immediate decoding results...")
-
     ort_session_H = onnxruntime.InferenceSession(onnx_model_H, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_H = ort_session_H.io_binding()
     in_name_H = [x.name for x in ort_session_H.get_inputs()]
     out_name_H = [x.name for x in ort_session_H.get_outputs()]
     in_name_H_parts = in_name_H[:num_keys_values_plus_1]
-    
     ort_session_I = onnxruntime.InferenceSession(onnx_model_I, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_I = ort_session_I.io_binding()
     in_name_I = [x.name for x in ort_session_I.get_inputs()]
     out_name_I = [x.name for x in ort_session_I.get_outputs()]
     in_name_I_parts = in_name_I[:num_keys_values_plus_1]
-    
     ort_session_J = onnxruntime.InferenceSession(onnx_model_J, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_J = ort_session_J.io_binding()
     in_name_J = [x.name for x in ort_session_J.get_inputs()]
     out_name_J = [x.name for x in ort_session_J.get_outputs()]
-    
     penality_dtype = np.float16 if 'float16' in ort_session_H._inputs_meta[num_keys_values_plus_3].type else np.float32
     penality_value = create_ortvalue([REPEAT_PENALITY], penality_dtype, device_type, DEVICE_ID)
     init_repeat_penality = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype), device_type, DEVICE_ID)
     init_penality_reset_count = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros([BEAM_SIZE, 1], dtype=np.int32), device_type, DEVICE_ID)
     init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
-    
-    binding_J.bind_ortvalue_input(in_name_J[2], init_penality_reset_count)
     binding_H.bind_ortvalue_input(in_name_H[num_keys_values_plus_1], init_save_id_beam)
     binding_H.bind_ortvalue_input(in_name_H[num_keys_values_plus_2], init_repeat_penality)
     binding_H.bind_ortvalue_input(in_name_H[num_keys_values_plus_3], penality_value)
@@ -1245,6 +1239,7 @@ if USE_BEAM_SEARCH:
     binding_I.bind_ortvalue_input(in_name_I[num_keys_values_plus_4], penality_value)
     binding_I.bind_ortvalue_input(in_name_I[num_keys_values_plus_5], beam_size)
     binding_I.bind_ortvalue_input(in_name_I[num_keys_values_plus_6], topK)
+    binding_J.bind_ortvalue_input(in_name_J[2], init_penality_reset_count)
 else:
     BEAM_SIZE = 1
     save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
