@@ -733,7 +733,6 @@ init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
 init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
 
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
-    print("\nBeam Search does not display immediate decoding results...")
     TOP_K = BEAM_SIZE
 
 if (TOP_K < 2) or (BEAM_SIZE < 2):
@@ -743,6 +742,8 @@ if (TOP_K < 2) or (BEAM_SIZE < 2):
 USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
 if USE_BEAM_SEARCH:
+    print("\nBeam Search does not display immediate decoding results...")
+
     ort_session_D = onnxruntime.InferenceSession(onnx_model_D, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_D = ort_session_D.io_binding()
     in_name_D = [x.name for x in ort_session_D.get_inputs()]
