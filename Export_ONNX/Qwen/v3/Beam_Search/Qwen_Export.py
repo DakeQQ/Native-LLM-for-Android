@@ -824,7 +824,6 @@ else:
         in_name_H = ort_session_H.get_inputs()[0].name
         out_name_H = ort_session_H.get_outputs()[0].name  # Only one output for Argmax
         binding_H.bind_ortvalue_output(out_name_H, ort_idx)
-        penality_dtype = np.float32
 
 if TEST_THINK_MODE:
     prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
