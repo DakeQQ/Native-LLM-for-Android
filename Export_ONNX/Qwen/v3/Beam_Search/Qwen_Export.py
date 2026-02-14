@@ -516,7 +516,8 @@ if DO_EXPORT:
             output_names=['repeat_penality_out'],
             dynamic_axes={
                 'repeat_penality_in': {0: 'batch'},
-                'repeat_penality_out': {0: 'batch'}
+                'repeat_penality_out': {0: 'batch'},
+                'target_id': {0: 'batch'}
             },
             opset_version=OPSET,
             dynamo=False
@@ -755,7 +756,7 @@ init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
 init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
 init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
 init_save_id_beam = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
-ort_idx = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, 1), dtype=np.int32), device_type, DEVICE_ID)
+
 
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
     TOP_K = BEAM_SIZE
@@ -800,6 +801,7 @@ if USE_BEAM_SEARCH:
 else:
     BEAM_SIZE = 1
     save_id_greedy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
+    ort_idx = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 1), dtype=np.int32), device_type, DEVICE_ID)
     if USE_PENALTY:
         ort_session_C = onnxruntime.InferenceSession(onnx_model_C, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
         binding_C = ort_session_C.io_binding()
