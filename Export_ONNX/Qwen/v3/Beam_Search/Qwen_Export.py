@@ -13,8 +13,9 @@ onnx_model_B = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
 onnx_model_C = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
 onnx_model_D = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
 onnx_model_E = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
-onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality.onnx'
-onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
+onnx_model_F = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality_Beam.onnx'
+onnx_model_G = r'/home/DakeQQ/Downloads/Qwen_ONNX/Reset_Penality_Greedy.onnx'
+onnx_model_H = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # Test input
 TEST_THINK_MODE = True
@@ -120,9 +121,9 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         return *self.save_keys_values, top_beam_indices, save_id, repeat_penality, top_beam_prob.unsqueeze(-1), max_logits_idx
 
 
-class RESET_PENALITY(torch.nn.Module):
+class RESET_PENALITY_BEAM(torch.nn.Module):
     def __init__(self):
-        super(RESET_PENALITY, self).__init__()
+        super(RESET_PENALITY_BEAM, self).__init__()
         pass
 
     def forward(self, save_id, repeat_penality, penality_reset_count):
@@ -130,6 +131,16 @@ class RESET_PENALITY(torch.nn.Module):
         repeat_penality.scatter_(1, token_indices, 1.0)
         penality_reset_count += 1
         return repeat_penality, penality_reset_count
+
+
+class RESET_PENALITY_GREEDY(torch.nn.Module):
+    def __init__(self):
+        super(RESET_PENALITY_GREEDY, self).__init__()
+        pass
+
+    def forward(self, repeat_penality, target_id):
+        repeat_penality.scatter_(1, target_id, 1.0)
+        return repeat_penality
 
 
 class KVQuantizer(torch.nn.Module):
@@ -480,7 +491,7 @@ if DO_EXPORT:
         save_id_in = torch.zeros((BEAM_SIZE, 10), dtype=torch.int32)
         penality_reset_count_in = torch.zeros([BEAM_SIZE, 1], dtype=torch.int32)
         torch.onnx.export(
-            RESET_PENALITY(),
+            RESET_PENALITY_BEAM(),
             (save_id_in, repeat_penality_in, penality_reset_count_in),
             onnx_model_F,
             input_names=['save_id', 'repeat_penality_in', 'penality_reset_count_in'],
@@ -496,10 +507,25 @@ if DO_EXPORT:
             dynamo=False
         )
 
+        target_id = torch.tensor([[0]], dtype=torch.int64)
+        torch.onnx.export(
+            RESET_PENALITY_GREEDY(),
+            (repeat_penality_in, target_id),
+            onnx_model_G,
+            input_names=['repeat_penality_in', 'target_id'],
+            output_names=['repeat_penality_out'],
+            dynamic_axes={
+                'repeat_penality_in': {0: 'batch'},
+                'repeat_penality_out': {0: 'batch'}
+            },
+            opset_version=OPSET,
+            dynamo=False
+        )
+
         torch.onnx.export(
             ARGMAX(),
             (logits_t,),
-            onnx_model_G,
+            onnx_model_H,
             input_names=['logits'], output_names=['max_logits_idx'],
             dynamic_axes={
                 'logits': {0: 'batch'},
@@ -778,6 +804,10 @@ else:
         binding_C = ort_session_C.io_binding()
         in_name_C = [x.name for x in ort_session_C.get_inputs()]
         out_name_C = [x.name for x in ort_session_C.get_outputs()]
+        ort_session_G = onnxruntime.InferenceSession(onnx_model_G, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+        binding_G = ort_session_G.io_binding()
+        in_name_G = [x.name for x in ort_session_G.get_inputs()]
+        out_name_G = [x.name for x in ort_session_G.get_outputs()][0]  # Only one output for Greedy Penalty Reset
         penality_dtype = np.float16 if 'float16' in ort_session_C._inputs_meta[2].type else np.float32
         penality_value = create_ortvalue([REPEAT_PENALTY], penality_dtype, device_type, DEVICE_ID)
         current_penalty = onnxruntime.OrtValue.ortvalue_from_numpy(np.ones((BEAM_SIZE, vocab_size), dtype=penality_dtype),device_type, DEVICE_ID)
@@ -785,10 +815,10 @@ else:
         penalty_shape = (BEAM_SIZE, vocab_size)
         init_penality_reset_count = 0
     else:
-        ort_session_G = onnxruntime.InferenceSession(onnx_model_G, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-        binding_G = ort_session_G.io_binding()
-        in_name_G = ort_session_G.get_inputs()[0].name
-        out_name_G = [ort_session_G.get_outputs()[0].name]
+        ort_session_H = onnxruntime.InferenceSession(onnx_model_H, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+        binding_H = ort_session_H.io_binding()
+        in_name_H = ort_session_H.get_inputs()[0].name
+        out_name_H = [ort_session_H.get_outputs()[0].name]
         penality_dtype = np.float32
 
 if TEST_THINK_MODE:
@@ -899,20 +929,22 @@ while num_decode < generate_limit:
             if num_decode >= PENALTY_RANGE:
                 reset_ids = save_id_greedy[init_penality_reset_count]
                 if reset_ids != max_logits_idx:
-                    tmp = all_outputs_C[1].numpy()
-                    tmp[:, reset_ids] = 1.0
-                    current_penalty.update_inplace(tmp)
+                    reset_ids = create_ortvalue([[reset_ids]], np.int64, device_type, DEVICE_ID)
+                    binding_G.bind_ortvalue_input(in_name_G[0], all_outputs_C[1])
+                    binding_G.bind_ortvalue_input(in_name_G[1], reset_ids)
+                    binding_G.bind_ortvalue_output(out_name_G, current_penalty)
+                    ort_session_G.run_with_iobinding(binding_G, run_options=run_options)
                 init_penality_reset_count += 1
             binding_A.bind_ortvalue_input(in_name_A, all_outputs_C[0])
         else:
-            binding_G.bind_ortvalue_input(in_name_G, all_outputs_B[num_keys_values])
-            bind_ort_out(binding_G, out_name_G, _ort_device_type)
-            ort_session_G.run_with_iobinding(binding_G, run_options=run_options)
-            all_outputs_G = binding_G.get_outputs()
-            max_logits_idx = all_outputs_G[0].numpy().flat[0]
+            binding_H.bind_ortvalue_input(in_name_H, all_outputs_B[num_keys_values])
+            bind_ort_out(binding_H, out_name_H, _ort_device_type)
+            ort_session_H.run_with_iobinding(binding_H, run_options=run_options)
+            all_outputs_H = binding_H.get_outputs()
+            max_logits_idx = all_outputs_H[0].numpy().flat[0]
             if max_logits_idx in STOP_TOKEN:
                 break
-            binding_A.bind_ortvalue_input(in_name_A, all_outputs_G[0])
+            binding_A.bind_ortvalue_input(in_name_A, all_outputs_H[0])
         bind_ort_in(binding_B, in_name_B_parts, all_outputs_B)
         save_id_greedy[num_decode] = max_logits_idx
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
