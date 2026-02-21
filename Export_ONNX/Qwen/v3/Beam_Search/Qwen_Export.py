@@ -114,13 +114,14 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         beam_index = top_beam_indices // topK
         top_beam_indices = top_k_indices.view(-1)[top_beam_indices]
         for i in range(self.total_layers):
-            self.save_keys_values[i] = all_inputs[i][beam_index]
-        repeat_penality = repeat_penality[beam_index]
+            self.save_keys_values[i] = torch.index_select(all_inputs[i], dim=0, index=beam_index)
+        repeat_penality = torch.index_select(repeat_penality, dim=0, index=beam_index)
+        gathered_save_id = torch.index_select(save_id, dim=0, index=beam_index)
         top_beam_indices = top_beam_indices.unsqueeze(-1)
         repeat_penality = repeat_penality.scatter(1, top_beam_indices, repeat_penality.gather(1, top_beam_indices) * penality_value)
         top_beam_indices = top_beam_indices.int()
         max_logits_idx = top_beam_indices[0]
-        save_id = torch.cat([save_id[beam_index], top_beam_indices], dim=-1)
+        save_id = torch.cat([gathered_save_id, top_beam_indices], dim=-1)
         return *self.save_keys_values, top_beam_indices, save_id, repeat_penality, top_beam_prob.unsqueeze(-1), max_logits_idx
 
 
@@ -1000,3 +1001,4 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
