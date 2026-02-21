@@ -40,7 +40,7 @@ TOP_K = 3                           # Top-K for beam search
 BEAM_SIZE = 3                       # Beam size for beam search. Must be <= MAX_BEAM_SIZE
 
 # Runtime config
-ORT_Accelerate_Providers = []       # ORT execution providers; ['CUDAExecutionProvider'', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+ORT_Accelerate_Providers = []       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS = 0                     # 0 = auto
 DEVICE_ID = 0                       # Device ID for GPU
 OPSET = 17                          # ONNX opset version
@@ -1005,3 +1005,4 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
