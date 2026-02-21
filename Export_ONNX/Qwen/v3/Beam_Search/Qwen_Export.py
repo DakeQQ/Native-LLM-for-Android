@@ -79,7 +79,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         penality_value = all_inputs[-2]
         beam_size = all_inputs[-1]
         row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_beam_logits, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=True, largest=True)
+        top_beam_logits, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=False, largest=True)
         top_beam_prob = top_beam_logits - row_logsumexp
         for i in range(self.total_layers):
             self.save_keys_values[i] = all_inputs[i].repeat(beam_size, *([1] * (all_inputs[i].dim() - 1)))
@@ -107,10 +107,10 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         topK = all_inputs[-1]
         penalized_logits = logits * repeat_penality
         row_logsumexp = torch.logsumexp(penalized_logits, dim=-1, keepdim=True)
-        top_k_logits, top_k_indices = torch.topk(penalized_logits, k=topK, dim=-1, largest=True, sorted=True)
+        top_k_logits, top_k_indices = torch.topk(penalized_logits, k=topK, dim=-1, largest=True, sorted=False)
         top_k_prob = top_k_logits - row_logsumexp
         current_prob = (top_k_prob + previous_prob).view(-1)
-        top_beam_prob, top_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=True)
+        top_beam_prob, top_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=False)
         beam_index = top_beam_indices // topK
         top_beam_indices = top_k_indices.view(-1)[top_beam_indices]
         for i in range(self.total_layers):
@@ -1000,4 +1000,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
