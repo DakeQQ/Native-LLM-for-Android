@@ -438,30 +438,22 @@ if DO_EXPORT:
         logits_t = torch.ones((BEAM_SIZE, vocab_size), dtype=torch.float32)
         kv_tensors = {}
         kv_specs = [('key', 4), ('value', 3)]
-        
         if KV_QUANT_DTYPE == "F16":
             kv_dtype = torch.float16
         elif KV_QUANT_DTYPE == "Q8":
             kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 4), ('value_bias', 3)])
             kv_dtype = torch.uint8
         elif KV_QUANT_DTYPE == "Q8_CUDA":
-            # Q8_CUDA uses the same scale/bias specs as Q8
             kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 4), ('value_bias', 3)])
             kv_dtype = torch.int32
         else:
             kv_dtype = torch.float32
-
-        # Initialize Tensors
         if KV_QUANT_DTYPE == "Q8_CUDA":
-            # For Q8_CUDA, head_dim is divided by 4 due to packing
             kv_tensors['key'] = torch.zeros((batch_size, num_kv_heads, 1, head_dim // 4, history_len), dtype=kv_dtype)
             kv_tensors['value'] = torch.zeros((batch_size, num_kv_heads, 1, history_len, head_dim // 4), dtype=kv_dtype)
         else:
-            # Standard initialization for F16, FP32, and standard Q8
             kv_tensors['key'] = torch.zeros((batch_size, num_kv_heads, 1, head_dim, history_len), dtype=kv_dtype)
             kv_tensors['value'] = torch.zeros((batch_size, num_kv_heads, 1, history_len, head_dim), dtype=kv_dtype)
-
-        # Initialize Scales and Biases (Shared by Q8 and Q8_CUDA)
         if KV_QUANT_DTYPE in ["Q8", "Q8_CUDA"]:
             kv_tensors['key_scale'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
             kv_tensors['key_bias'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
@@ -1005,4 +997,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
