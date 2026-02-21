@@ -28,7 +28,7 @@ STOP_TOKEN = [151643, 151645]       # Qwen stop token ids
 MAX_SEQ_LEN = 4096                  # Max context length. Can not edit after export.
 
 # KV cache quantization
-KV_QUANT_DTYPE = "F16"              # "Q8" | "F16" | "F32"
+KV_QUANT_DTYPE = "F16"              # "Q8" | "Q8_CUDA" | "F16" | "F32"
 USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
@@ -143,29 +143,6 @@ class RESET_PENALITY_GREEDY(torch.nn.Module):
         return repeat_penality
 
 
-class KVQuantizer(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.qmax = 255.0
-        self.register_buffer('inv_qmax', torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
-
-    def _quantize_block(self, x, dim):
-        block_min = x.min(dim=dim, keepdim=True).values  # bias
-        block_max = x.max(dim=dim, keepdim=True).values
-        scale = (block_max - block_min) * self.inv_qmax
-        x_normalized = (x - block_min) / scale
-        x_packed = torch.round(x_normalized).to(torch.uint8)
-        if USE_FLOAT16_SCALE_BIAS:
-            scale = scale.half()
-            block_min = block_min.half()
-        return x_packed, scale, block_min
-
-    def forward(self, keys, values):
-        k_packed, k_scale, k_bias = self._quantize_block(keys, 3)
-        v_packed, v_scale, v_bias = self._quantize_block(values, 4)
-        return k_packed, k_scale, k_bias, v_packed, v_scale.transpose(-1, -2), v_bias
-
-
 class LLM_EMBED(torch.nn.Module):
     def __init__(self, llm):
         super(LLM_EMBED, self).__init__()
@@ -175,6 +152,59 @@ class LLM_EMBED(torch.nn.Module):
         return self.embed_tokens(input_ids)
 
 
+class KVQuantizer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.qmax = 255.0
+        self.register_buffer("inv_qmax", torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
+        self.register_buffer("mul_256", torch.tensor([256], dtype=torch.int32))
+        self.register_buffer("offset_128", torch.tensor([128], dtype=torch.int32))
+        self.register_buffer("mul_65536", torch.tensor([65536], dtype=torch.int32))
+        self.register_buffer("pack_mul", torch.tensor([16777216], dtype=torch.int32))
+
+    def _quantize_block(self, x, dim):
+        block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
+        scale = (block_max - block_min) * self.inv_qmax
+        x_normalized = (x - block_min) / scale
+        x_packed = torch.round(x_normalized)
+        if KV_QUANT_DTYPE == "Q8":
+            x_packed = x_packed.to(torch.uint8)
+        if USE_FLOAT16_SCALE_BIAS:
+            scale = scale.half()
+            block_min = block_min.half()
+        return x_packed, scale, block_min
+
+    def pack_q8_cuda(self, x, dim, batch_size, num_key_value_heads, head_dim_quarter):
+        x_i32 = x.to(torch.int32)
+        if dim != -1:
+            x_i32 = x_i32.reshape(batch_size, num_key_value_heads, 1, head_dim_quarter, 4, -1)
+        else:
+            x_i32 = x_i32.reshape(batch_size, num_key_value_heads, 1, -1, head_dim_quarter, 4)
+        x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
+        packed = x0 + x1 * self.mul_256 + x2 * self.mul_65536 + (x3 - self.offset_128) * self.pack_mul
+        return packed
+
+    def unpack_q8_cuda(self, x_i32, dim, batch_size, num_key_value_heads, head_dim):
+        r3 = x_i32 % self.pack_mul
+        x3 = ((x_i32 - r3) // self.pack_mul) + self.offset_128
+        x2 = r3 // self.mul_65536
+        r2 = r3 % self.mul_65536
+        x1 = r2 // self.mul_256
+        x0 = r2 % self.mul_256
+        unpacked = torch.stack([x0, x1, x2, x3], dim=dim)
+        if dim != -1:
+            return unpacked.reshape(batch_size, num_key_value_heads, 1, head_dim, -1)
+        return unpacked.reshape(batch_size, num_key_value_heads, 1, -1, head_dim)
+
+    def forward(self, keys, values, batch_size, num_key_value_heads, head_dim_quarter):
+        k_packed, k_scale, k_bias = self._quantize_block(keys, -2)
+        v_packed, v_scale, v_bias = self._quantize_block(values, -1)
+        if KV_QUANT_DTYPE == "Q8_CUDA":
+            k_packed = self.pack_q8_cuda(k_packed, -2, batch_size, num_key_value_heads, head_dim_quarter)
+            v_packed = self.pack_q8_cuda(v_packed, -1, batch_size, num_key_value_heads, head_dim_quarter)
+        return k_packed, k_scale, k_bias, v_packed, v_scale.transpose(-1, -2), v_bias
+
+
 class LLM_MAIN(torch.nn.Module):
     def __init__(self, llm, max_seq_len, num_heads, num_key_value_heads, head_dim, num_layers, hidden_size):
         super(LLM_MAIN, self).__init__()
@@ -182,6 +212,7 @@ class LLM_MAIN(torch.nn.Module):
         self._replace_gelu_with_tanh_approximation(self.llm)
         self.head_dim = head_dim
         self.head_dim_half = head_dim // 2
+        self.head_dim_quarter = head_dim // 4
         self.num_heads = num_heads
         self.num_key_value_heads = num_key_value_heads
         self.num_key_value_groups = num_heads // num_key_value_heads
@@ -193,6 +224,7 @@ class LLM_MAIN(torch.nn.Module):
         self.num_layers_5 = num_layers * 5
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
+        self.kv_q8_cuda = (KV_QUANT_DTYPE == "Q8_CUDA")
         self.quantizer = KVQuantizer().eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         scale_factor = head_dim ** -0.25
@@ -204,11 +236,12 @@ class LLM_MAIN(torch.nn.Module):
         cos = torch.cos(idx_theta)
         sin = torch.sin(idx_theta)
         self.attention_mask = (1 - torch.tril(torch.ones([1, 1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
-        self.register_buffer("cos_rotary_pos_emb", torch.cat((cos, cos), dim=-1).half(), persistent=False)
-        self.register_buffer("sin_rotary_pos_emb", torch.cat((-sin, sin), dim=-1).half(), persistent=False)
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half(), persistent=False)
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half(), persistent=False)
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers
-        if self.kv_q8:
+        
+        if self.kv_q8 or self.kv_q8_cuda:
             self.save_k_scale = [None] * num_layers
             self.save_k_bias = [None] * num_layers
             self.save_v_scale = [None] * num_layers
@@ -324,8 +357,8 @@ class LLM_MAIN(torch.nn.Module):
                 attn = torch.matmul(q, k.float())
                 attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
                 attn = torch.matmul(attn, v.float())
-            elif self.kv_q8:
-                packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v)
+            elif self.kv_q8 or self.kv_q8_cuda:
+                packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.head_dim_quarter)
                 self.save_key[i] = torch.cat([all_inputs[i], packed_k], dim=-1)
                 self.save_k_scale[i] = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
                 self.save_k_bias[i] = torch.cat([all_inputs[i + self.num_layers_3], bias_k], dim=-1)
@@ -342,13 +375,19 @@ class LLM_MAIN(torch.nn.Module):
                     k_b = self.save_k_bias[i]
                     v_s = self.save_v_scale[i]
                     v_b = self.save_v_bias[i]
-                attn_main = torch.matmul(q, self.save_key[i].float())
+                if self.kv_q8_cuda:
+                    k = self.quantizer.unpack_q8_cuda(self.save_key[i], -2, batch_size, self.num_key_value_heads, self.head_dim)
+                    v = self.quantizer.unpack_q8_cuda(self.save_value[i], -1, batch_size, self.num_key_value_heads, self.head_dim)
+                else:
+                    k = self.save_key[i]
+                    v = self.save_value[i]
+                attn_main = torch.matmul(q, k.float())
                 q_sum = q.sum(dim=-1, keepdim=True)
                 attn_bias = torch.matmul(q_sum, k_b)
                 attn = attn_main * k_s + attn_bias
                 attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
                 attn_scaled = attn * v_s
-                out_main = torch.matmul(attn_scaled, self.save_value[i].float())
+                out_main = torch.matmul(attn_scaled, v.float())
                 out_bias = torch.matmul(attn, v_b)
                 attn = out_main + out_bias
             else:
@@ -375,7 +414,7 @@ class LLM_MAIN(torch.nn.Module):
             hidden_states = hidden_states * self.overflow_scale
         hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
         logits = self.llm.lm_head(hidden_states)
-        if self.kv_q8:
+        if self.kv_q8 or self.kv_q8_cuda:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits, kv_seq_len
         return *self.save_key, *self.save_value, logits, kv_seq_len
 
@@ -399,16 +438,31 @@ if DO_EXPORT:
         logits_t = torch.ones((BEAM_SIZE, vocab_size), dtype=torch.float32)
         kv_tensors = {}
         kv_specs = [('key', 4), ('value', 3)]
+        
         if KV_QUANT_DTYPE == "F16":
             kv_dtype = torch.float16
         elif KV_QUANT_DTYPE == "Q8":
             kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 4), ('value_bias', 3)])
             kv_dtype = torch.uint8
+        elif KV_QUANT_DTYPE == "Q8_CUDA":
+            # Q8_CUDA uses the same scale/bias specs as Q8
+            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 4), ('value_bias', 3)])
+            kv_dtype = torch.int32
         else:
             kv_dtype = torch.float32
-        kv_tensors['key'] = torch.zeros((batch_size, num_kv_heads, 1, head_dim, history_len), dtype=kv_dtype)
-        kv_tensors['value'] = torch.zeros((batch_size, num_kv_heads, 1, history_len, head_dim), dtype=kv_dtype)
-        if KV_QUANT_DTYPE == "Q8":
+
+        # Initialize Tensors
+        if KV_QUANT_DTYPE == "Q8_CUDA":
+            # For Q8_CUDA, head_dim is divided by 4 due to packing
+            kv_tensors['key'] = torch.zeros((batch_size, num_kv_heads, 1, head_dim // 4, history_len), dtype=kv_dtype)
+            kv_tensors['value'] = torch.zeros((batch_size, num_kv_heads, 1, history_len, head_dim // 4), dtype=kv_dtype)
+        else:
+            # Standard initialization for F16, FP32, and standard Q8
+            kv_tensors['key'] = torch.zeros((batch_size, num_kv_heads, 1, head_dim, history_len), dtype=kv_dtype)
+            kv_tensors['value'] = torch.zeros((batch_size, num_kv_heads, 1, history_len, head_dim), dtype=kv_dtype)
+
+        # Initialize Scales and Biases (Shared by Q8 and Q8_CUDA)
+        if KV_QUANT_DTYPE in ["Q8", "Q8_CUDA"]:
             kv_tensors['key_scale'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
             kv_tensors['key_bias'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
             kv_tensors['value_scale'] = torch.ones([batch_size, num_kv_heads, 1, 1, history_len], dtype=scale_dtype)
@@ -722,19 +776,17 @@ if 'dml' in device_type:
 else:
     kv_device = device_type
 
-if 'uint8' in model_dtype_B_str:
-    model_dtype_B = np.uint8
-    num_keys_values_temp = (amount_of_outputs_B - 2) // 3
-    num_layers = num_keys_values_temp // 2
-    num_keys_values = amount_of_outputs_B - 2  # Including scales and biases, but excluding logits.
-    scale_dtype_B = np.float16 if 'float16' in ort_session_B._inputs_meta[num_keys_values_temp].type else np.float32
+num_keys_values = amount_of_outputs_B - 2
+if 'uint8' in model_dtype_B_str or 'int32' in model_dtype_B_str:
+    model_dtype_B = np.int32 if 'int32' in model_dtype_B_str else np.uint8
+    num_layers = num_keys_values // 6
+    scale_dtype_B = np.float16 if 'float16' in ort_session_B._inputs_meta[num_layers + num_layers].type else np.float32
     k_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[0].shape[1], 1, 1, 0), dtype=scale_dtype_B), kv_device, DEVICE_ID)
     k_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[0].shape[1], 1, 1, 0), dtype=scale_dtype_B), kv_device, DEVICE_ID)
     v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[num_layers].shape[1], 1, 1, 0), dtype=scale_dtype_B), kv_device, DEVICE_ID)
     v_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_B._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=scale_dtype_B), kv_device, DEVICE_ID)
 else:
     model_dtype_B = np.float16 if 'float16' in model_dtype_B_str else np.float32
-    num_keys_values = amount_of_outputs_B - 2
     num_layers = num_keys_values // 2
     k_scales = None
 
