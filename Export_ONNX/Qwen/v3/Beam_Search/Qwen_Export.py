@@ -62,7 +62,7 @@ class GREEDY_SEARCH(torch.nn.Module):
 
     def forward(self, logits, repeat_penality, penality_value):
         max_logits_idx = torch.argmax(logits * repeat_penality, dim=-1, keepdim=True)
-        repeat_penality.scatter_(1, max_logits_idx, repeat_penality.gather(1, max_logits_idx) * penality_value)
+        repeat_penality = repeat_penality.scatter(1, max_logits_idx, repeat_penality.gather(1, max_logits_idx) * penality_value)
         return max_logits_idx.int(), repeat_penality
 
 
@@ -1000,3 +1000,4 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
