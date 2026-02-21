@@ -32,7 +32,7 @@ KV_QUANT_DTYPE = "F16"              # "Q8" | "Q8_CUDA" | "F16" | "F32"
 USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
-USE_BEAM_SEARCH = False             # Use beam search or greedy search
+USE_BEAM_SEARCH = True             # Use beam search or greedy search
 REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
 PENALTY_RANGE = 20                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
@@ -84,7 +84,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         for i in range(self.total_layers):
             self.save_keys_values[i] = all_inputs[i].repeat(beam_size, *([1] * (all_inputs[i].dim() - 1)))
         top_beam_indices = top_beam_indices.transpose(0, 1)
-        repeat_penality.scatter_(1, top_beam_indices, repeat_penality.gather(1, top_beam_indices) * penality_value)
+        repeat_penality = repeat_penality.scatter(1, top_beam_indices, repeat_penality.gather(1, top_beam_indices) * penality_value)
         top_beam_indices = top_beam_indices.int()
         save_id = torch.cat([save_id, top_beam_indices], dim=-1)
         max_logits_idx = top_beam_indices[0]
@@ -117,7 +117,7 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
             self.save_keys_values[i] = all_inputs[i][beam_index]
         repeat_penality = repeat_penality[beam_index]
         top_beam_indices = top_beam_indices.unsqueeze(-1)
-        repeat_penality.scatter_(1, top_beam_indices, repeat_penality.gather(1, top_beam_indices) * penality_value)
+        repeat_penality = repeat_penality.scatter(1, top_beam_indices, repeat_penality.gather(1, top_beam_indices) * penality_value)
         top_beam_indices = top_beam_indices.int()
         max_logits_idx = top_beam_indices[0]
         save_id = torch.cat([save_id[beam_index], top_beam_indices], dim=-1)
@@ -131,7 +131,7 @@ class RESET_PENALITY_BEAM(torch.nn.Module):
 
     def forward(self, save_id, repeat_penality, penality_reset_count):
         token_indices = save_id.gather(1, penality_reset_count).long()
-        repeat_penality.scatter_(1, token_indices, 1.0)
+        repeat_penality = repeat_penality.scatter(1, token_indices, 1.0)
         penality_reset_count += 1
         return repeat_penality, penality_reset_count
 
@@ -142,7 +142,7 @@ class RESET_PENALITY_GREEDY(torch.nn.Module):
         pass
 
     def forward(self, repeat_penality, target_id):
-        repeat_penality.scatter_(1, target_id, 1.0)
+        repeat_penality = repeat_penality.scatter(1, target_id, 1.0)
         return repeat_penality
 
 
