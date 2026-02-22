@@ -743,12 +743,6 @@ num_keys_values_plus_3 = num_keys_values + 3
 num_keys_values_plus_4 = num_keys_values + 4
 vocab_size = ort_session_Main._outputs_meta[num_keys_values].shape[1]
 
-topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
-beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
-init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
-init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
-init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
-init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
 
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
     TOP_K = BEAM_SIZE
@@ -756,6 +750,17 @@ if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
 if (TOP_K < 2) or (BEAM_SIZE < 2):
     USE_BEAM_SEARCH = False
     print("\nInappropriate Beam Search setting detected. Falling back to Greedy Search.")
+    
+if not USE_BEAM_SEARCH:
+    BEAM_SIZE = 1
+
+topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
+beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
+init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
+init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
+init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
+init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
+init_save_id = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
 
 USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
@@ -771,22 +776,21 @@ if USE_BEAM_SEARCH:
     in_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_inputs()]
     out_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_outputs()]
     in_name_Second_Beam_parts = in_name_Second_Beam[:num_keys_values]
-    init_save_id = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
     binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_1], init_save_id)
     binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_2], beam_size)
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_3], beam_size)
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_4], topK)
 else:
-    BEAM_SIZE = 1
-    ort_session_Greedy = onnxruntime.InferenceSession(onnx_model_Greedy if USE_PENALTY else onnx_model_Argmax, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+    ort_session_Greedy = onnxruntime.InferenceSession(onnx_model_Greedy, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_Greedy = ort_session_Greedy.io_binding()
     in_name_Greedy = [x.name for x in ort_session_Greedy.get_inputs()]
     out_name_Greedy = [x.name for x in ort_session_Greedy.get_outputs()]
-    if USE_PENALTY:
-        init_save_id = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
-        binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], init_save_id)
-    else:
-        save_id = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
+    binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], init_save_id)
+    ort_session_Argmax = onnxruntime.InferenceSession(onnx_model_Argmax, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+    binding_Argmax = ort_session_Argmax.io_binding()
+    in_name_Argmax = ort_session_Argmax.get_inputs()[0].name
+    out_name_Argmax = [x.name for x in ort_session_Argmax.get_outputs()]
+    save_id_numpy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
 
 if USE_PENALTY:
     ort_session_Penalty = onnxruntime.InferenceSession(onnx_model_Penalty, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
@@ -884,19 +888,25 @@ while num_decode < generate_limit:
         binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_1], outputs_Beam[num_keys_values_plus_1])
         binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_2], outputs_Beam[num_keys_values_plus_2])
     else:
-        binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], logits)
-        bind_ort_out(binding_Greedy, out_name_Greedy, _ort_device_type)
-        ort_session_Greedy.run_with_iobinding(binding_Greedy, run_options=run_options)
-        outputs_Greedy = binding_Greedy.get_outputs()
-        max_logits_idx = outputs_Greedy[0].numpy().flat[0]
+        if USE_PENALTY:
+            binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], logits)
+            bind_ort_out(binding_Greedy, out_name_Greedy, _ort_device_type)
+            ort_session_Greedy.run_with_iobinding(binding_Greedy, run_options=run_options)
+            max_logits_ort, save_id = binding_Greedy.get_outputs()
+            max_logits_idx = max_logits_ort.numpy().flat[0]
+        else:
+            binding_Argmax.bind_ortvalue_input(in_name_Argmax, logits)
+            bind_ort_out(binding_Argmax, out_name_Argmax, _ort_device_type)
+            ort_session_Argmax.run_with_iobinding(binding_Argmax, run_options=run_options)
+            max_logits_ort = binding_Argmax.get_outputs()[0]
+            max_logits_idx = max_logits_ort.numpy().flat[0]
         if max_logits_idx in STOP_TOKEN:
             break
         if USE_PENALTY:
-            save_id = outputs_Greedy[1]
             binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id)
         else:
-            save_id[num_decode] = max_logits_idx
-        binding_Embed.bind_ortvalue_input(in_name_Embed, outputs_Greedy[0])
+            save_id_numpy[num_decode] = max_logits_idx
+        binding_Embed.bind_ortvalue_input(in_name_Embed, max_logits_ort)
         bind_ort_in(binding_Main, in_name_Main_parts, outputs_Main)
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
     bind_ort_out(binding_Embed, out_name_Embed, _ort_device_type)
@@ -912,10 +922,10 @@ elapsed_time = time.time() - start_time
 tokens_per_second = (num_decode + 1) / elapsed_time
 
 if USE_PENALTY or USE_BEAM_SEARCH:
-    save_id = save_id.numpy()[0]
-
-result = tokenizer.decode(save_id[:num_decode], skip_special_tokens=True)
-
+    result = tokenizer.decode(save_id.numpy()[0, :num_decode], skip_special_tokens=True)
+else:
+    result = tokenizer.decode(save_id_numpy[:num_decode], skip_special_tokens=True)
+    
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
