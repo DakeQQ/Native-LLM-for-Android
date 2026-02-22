@@ -743,24 +743,28 @@ num_keys_values_plus_3 = num_keys_values + 3
 num_keys_values_plus_4 = num_keys_values + 4
 vocab_size = ort_session_Main._outputs_meta[num_keys_values].shape[1]
 
-
 if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
     TOP_K = BEAM_SIZE
 
 if (TOP_K < 2) or (BEAM_SIZE < 2):
     USE_BEAM_SEARCH = False
     print("\nInappropriate Beam Search setting detected. Falling back to Greedy Search.")
-    
-if not USE_BEAM_SEARCH:
-    BEAM_SIZE = 1
 
-topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
-beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
+if TEST_THINK_MODE:
+    prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
+else:
+    prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+num_prefill = tokens.shape[-1]
+input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
+ids_len = create_ortvalue([num_prefill], np.int64, device_type, DEVICE_ID)
 init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
 init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
 init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
 init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
 init_save_id = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
+topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
+beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
 
 USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
@@ -802,16 +806,6 @@ if USE_PENALTY:
     penality_range = create_ortvalue([PENALTY_RANGE], np.int64, device_type, DEVICE_ID)
     binding_Penalty.bind_ortvalue_input(in_name_Penalty[2], penalty_value)
     binding_Penalty.bind_ortvalue_input(in_name_Penalty[3], penality_range)
-
-if TEST_THINK_MODE:
-    prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
-else:
-    prompt = f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
-
-tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
-num_prefill = tokens.shape[-1]
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len = create_ortvalue([num_prefill], np.int64, device_type, DEVICE_ID)
 
 binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
 bind_ort_out(binding_Embed, out_name_Embed, _ort_device_type)
