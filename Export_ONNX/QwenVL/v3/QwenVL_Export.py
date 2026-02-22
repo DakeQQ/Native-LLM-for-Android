@@ -548,47 +548,37 @@ class LLM_MAIN(torch.nn.Module):
             q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             q = q.permute(0, 2, 3, 1, 4)
             if self.kv_f16:
-                v = v.half()
                 k = k.half()
+                v = v.half()
             k = k.permute(0, 3, 2, 4, 1)
             v = v.transpose(1, 3)
-            if self.kv_f16:
-                k = torch.cat((all_inputs[i], k), dim=-1)
-                v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
+            if self.kv_q8 or self.kv_q8_cuda:
+                packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.head_dim_quarter)
+                k = torch.cat([all_inputs[i], packed_k], dim=-1)
+                k_s = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
+                k_b = torch.cat([all_inputs[i + self.num_layers_3], bias_k], dim=-1)
+                v = torch.cat([all_inputs[i + self.num_layers], packed_v], dim=-2)
+                v_s = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-1)
+                v_b = torch.cat([all_inputs[i + self.num_layers_5], bias_v], dim=-2)
+                self.save_k_scale[i] = k_s
+                self.save_k_bias[i] = k_b
+                self.save_v_scale[i] = v_s
+                self.save_v_bias[i] = v_b
                 self.save_key[i] = k
                 self.save_value[i] = v
-                attn = torch.matmul(q, k.float())
-                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
-                attn = torch.matmul(attn, v.float())
-            elif self.kv_q8 or self.kv_q8_cuda:
-                packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.head_dim_quarter)
-                self.save_key[i] = torch.cat([all_inputs[i], packed_k], dim=-1)
-                self.save_k_scale[i] = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
-                self.save_k_bias[i] = torch.cat([all_inputs[i + self.num_layers_3], bias_k], dim=-1)
-                self.save_value[i] = torch.cat([all_inputs[i + self.num_layers], packed_v], dim=-2)
-                self.save_v_scale[i] = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-1)
-                self.save_v_bias[i] = torch.cat([all_inputs[i + self.num_layers_5], bias_v], dim=-2)
                 if USE_FLOAT16_SCALE_BIAS:
-                    k_s = self.save_k_scale[i].float()
-                    k_b = self.save_k_bias[i].float()
-                    v_s = self.save_v_scale[i].float()
-                    v_b = self.save_v_bias[i].float()
-                else:
-                    k_s = self.save_k_scale[i]
-                    k_b = self.save_k_bias[i]
-                    v_s = self.save_v_scale[i]
-                    v_b = self.save_v_bias[i]
+                    k_s = k_s.float()
+                    k_b = k_b.float()
+                    v_s = v_s.float()
+                    v_b = v_b.float()
                 if self.kv_q8_cuda:
-                    k = self.quantizer.unpack_q8_cuda(self.save_key[i], -2, batch_size, self.num_key_value_heads, self.head_dim)
-                    v = self.quantizer.unpack_q8_cuda(self.save_value[i], -1, batch_size, self.num_key_value_heads, self.head_dim)
-                else:
-                    k = self.save_key[i]
-                    v = self.save_value[i]
+                    k = self.quantizer.unpack_q8_cuda(k, -2, batch_size, self.num_key_value_heads, self.head_dim)
+                    v = self.quantizer.unpack_q8_cuda(v, -1, batch_size, self.num_key_value_heads, self.head_dim)
                 attn_main = torch.matmul(q, k.float())
                 q_sum = q.sum(dim=-1, keepdim=True)
                 attn_bias = torch.matmul(q_sum, k_b)
                 attn = attn_main * k_s + attn_bias
-                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
+                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1)
                 attn_scaled = attn * v_s
                 out_main = torch.matmul(attn_scaled, v.float())
                 out_bias = torch.matmul(attn, v_b)
@@ -598,8 +588,11 @@ class LLM_MAIN(torch.nn.Module):
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
+                if self.kv_f16:
+                    k = k.float()
+                    v = v.float()
                 attn = torch.matmul(q, k)
-                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
+                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1)
                 attn = torch.matmul(attn, v)
             attn = attn.permute(0, 3, 1, 2, 4).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
             attn_out = layer.self_attn.o_proj(attn)
@@ -611,9 +604,9 @@ class LLM_MAIN(torch.nn.Module):
             gate_up = layer.mlp.gate_up_proj(hidden_states)
             gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
             hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
-            hidden_states += residual
+            hidden_states = residual + hidden_states
             if i < self.deepstack_features_len:
-                hidden_states += all_inputs[i - 8]
+                hidden_states = all_inputs[i - 8] + hidden_states
         hidden_states = hidden_states[:, -1]
         if PREVENT_F16_OVERFLOW:
             hidden_states = hidden_states * self.overflow_scale
@@ -1507,5 +1500,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
-
