@@ -32,7 +32,7 @@ KV_QUANT_DTYPE = "F16"              # "Q8" | "Q8_CUDA" | "F16" | "F32"
 USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
-USE_BEAM_SEARCH = True             # Use beam search or greedy search
+USE_BEAM_SEARCH = False             # Use beam search or greedy search
 REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
 PENALTY_RANGE = 20                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
@@ -349,19 +349,11 @@ class LLM_MAIN(torch.nn.Module):
             q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             q = q.permute(0, 2, 3, 1, 4)
             if self.kv_f16:
-                v = v.half()
                 k = k.half()
+                v = v.half()
             k = k.permute(0, 3, 2, 4, 1)
             v = v.transpose(1, 3)
-            if self.kv_f16:
-                k = torch.cat((all_inputs[i], k), dim=-1)
-                v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
-                self.save_key[i] = k
-                self.save_value[i] = v
-                attn = torch.matmul(q, k.float())
-                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
-                attn = torch.matmul(attn, v.float())
-            elif self.kv_q8 or self.kv_q8_cuda:
+            if self.kv_q8 or self.kv_q8_cuda:
                 packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.head_dim_quarter)
                 self.save_key[i] = torch.cat([all_inputs[i], packed_k], dim=-1)
                 self.save_k_scale[i] = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
@@ -379,12 +371,11 @@ class LLM_MAIN(torch.nn.Module):
                     k_b = self.save_k_bias[i]
                     v_s = self.save_v_scale[i]
                     v_b = self.save_v_bias[i]
+                k = self.save_key[i]
+                v = self.save_value[i]
                 if self.kv_q8_cuda:
-                    k = self.quantizer.unpack_q8_cuda(self.save_key[i], -2, batch_size, self.num_key_value_heads, self.head_dim)
-                    v = self.quantizer.unpack_q8_cuda(self.save_value[i], -1, batch_size, self.num_key_value_heads, self.head_dim)
-                else:
-                    k = self.save_key[i]
-                    v = self.save_value[i]
+                    k = self.quantizer.unpack_q8_cuda(k, -2, batch_size, self.num_key_value_heads, self.head_dim)
+                    v = self.quantizer.unpack_q8_cuda(v, -1, batch_size, self.num_key_value_heads, self.head_dim)
                 attn_main = torch.matmul(q, k.float())
                 q_sum = q.sum(dim=-1, keepdim=True)
                 attn_bias = torch.matmul(q_sum, k_b)
@@ -399,6 +390,9 @@ class LLM_MAIN(torch.nn.Module):
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
                 self.save_key[i] = k
                 self.save_value[i] = v
+                if self.kv_f16:
+                    k = k.float()
+                    v = v.float()
                 attn = torch.matmul(q, k)
                 attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1, dtype=torch.float32)
                 attn = torch.matmul(attn, v)
@@ -1001,4 +995,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
