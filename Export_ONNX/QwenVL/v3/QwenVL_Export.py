@@ -24,8 +24,8 @@ onnx_model_Penalty          = r'/home/DakeQQ/Downloads/Qwen_ONNX/Apply_Penalty.o
 onnx_model_Argmax           = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 
 # Test Input
-image_path = r"../psyduck.png"                                      # Test image for the exported onnx model.
-query = "Describe this image."                                      # Test query for the exported onnx model.
+TEST_IMAGE = r"../psyduck.png"                                      # Test image for the exported onnx model.
+TEST_QUERY = "Describe this image."                                 # Test query for the exported onnx model.
 
 DO_EXPORT = True                                                    # Whether to export the ONNX models
 
@@ -932,15 +932,15 @@ if DO_EXPORT:
 
 # Inference with ONNXRuntime
 # =======================================================#
-def is_valid_image_path(image_path):
-    if image_path is None:
+def is_valid_image_path(TEST_IMAGE):
+    if TEST_IMAGE is None:
         return False
-    elif image_path == "":
+    elif TEST_IMAGE == "":
         return False
-    elif not os.path.exists(image_path):
+    elif not os.path.exists(TEST_IMAGE):
         return False
-    valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff'}
-    _, ext = os.path.splitext(image_path)
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', 'raw'}
+    _, ext = os.path.splitext(TEST_IMAGE)
     return ext.lower() in valid_extensions
 
 
@@ -1128,7 +1128,7 @@ vocab_size = ort_session_Main._outputs_meta[num_keys_values].shape[1]
 topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
 beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
 
-prompt = f"<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n<|im_start|>assistant\n"
+prompt = f"<|im_start|>user\n<|vision_start|><|vision_end|>{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n"
 tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
 ids_len_val = tokens.shape[-1]
@@ -1191,8 +1191,8 @@ if USE_PENALTY:
     binding_Penalty.bind_ortvalue_input(in_name_Penalty[2], penalty_value)
     binding_Penalty.bind_ortvalue_input(in_name_Penalty[3], penality_range)
 
-if is_valid_image_path(image_path):
-    image = Image.open(image_path)
+if is_valid_image_path(TEST_IMAGE):
+    image = Image.open(TEST_IMAGE)
     image = image.resize((INPUT_IMAGE_SIZE[1], INPUT_IMAGE_SIZE[0]))
     if image.mode != 'RGB':
         image = image.convert('RGB')
@@ -1285,7 +1285,7 @@ if k_scales:
 for i in range(rotary_outputs_len):
     binding_Main.bind_ortvalue_input(in_name_Main[rotary_indices[i]], rotary_outputs[i])
 
-print(f'\nTest Question: {query}\nLLM Answering:\n')
+print(f'\nTest Question: {TEST_QUERY}\nLLM Answering:\n')
 num_decode = 0
 start_time = time.time()
 while num_decode < generate_limit:
