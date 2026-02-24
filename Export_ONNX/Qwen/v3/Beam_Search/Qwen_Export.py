@@ -142,10 +142,10 @@ class KVQuantizer(torch.nn.Module):
         super().__init__()
         self.qmax = 255.0
         self.register_buffer("inv_qmax", torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
-        self.register_buffer("_256", torch.tensor([256], dtype=torch.int32))
-        self.register_buffer("_128", torch.tensor([128], dtype=torch.int32))
-        self.register_buffer("_65536", torch.tensor([65536], dtype=torch.int32))
-        self.register_buffer("_16777216", torch.tensor([16777216], dtype=torch.int32))
+        self.register_buffer("_256", torch.tensor([256], dtype=torch.int32).view(1, 1, 1, 1, -1))
+        self.register_buffer("_128", torch.tensor([128], dtype=torch.int32).view(1, 1, 1, 1, -1))
+        self.register_buffer("_65536", torch.tensor([65536], dtype=torch.int32).view(1, 1, 1, 1, -1))
+        self.register_buffer("_16777216", torch.tensor([16777216], dtype=torch.int32).view(1, 1, 1, 1, -1))
 
     def _quantize_block(self, x, dim):
         block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
