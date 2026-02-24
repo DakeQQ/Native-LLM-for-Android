@@ -40,6 +40,7 @@ TOP_K = 3                           # Top-K for beam search
 BEAM_SIZE = 3                       # Beam size for beam search. Must be <= MAX_BEAM_SIZE
 
 # Runtime config
+ORT_FP16 = False                    # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
 ORT_Accelerate_Providers = []       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS = 0                     # 0 = auto
 DEVICE_ID = 0                       # Device ID for GPU
@@ -633,13 +634,15 @@ session_opts.add_session_config_entry('session.set_denormal_as_zero', '1')
 session_opts.add_session_config_entry('session.intra_op.allow_spinning', '1')
 session_opts.add_session_config_entry('session.inter_op.allow_spinning', '1')
 session_opts.add_session_config_entry('session.enable_quant_qdq_cleanup', '1')
-session_opts.add_session_config_entry('session.qdq_matmulnbits_accuracy_level', '4')
+session_opts.add_session_config_entry('session.qdq_matmulnbits_accuracy_level', '2' if ORT_FP16 else '4')
 session_opts.add_session_config_entry('session.use_device_allocator_for_initializers', '1')
 session_opts.add_session_config_entry('session.graph_optimizations_loop_level', '2')
 session_opts.add_session_config_entry('optimization.enable_gelu_approximation', '1')
 session_opts.add_session_config_entry('optimization.minimal_build_optimizations', '')
 session_opts.add_session_config_entry('optimization.enable_cast_chain_elimination', '1')
+session_opts.add_session_config_entry('optimization.disable_specified_optimizers', 'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else '')
 run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
+disabled_optimizers = ['CastFloat16Transformer', 'FuseFp16InitializerToFp32NodeTransformer'] if ORT_FP16 else None
 
 if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [
@@ -697,12 +700,12 @@ else:
 
 _ort_device_type = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
 
-ort_session_Embed = onnxruntime.InferenceSession(onnx_model_Embed, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+ort_session_Embed = onnxruntime.InferenceSession(onnx_model_Embed, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
 binding_Embed = ort_session_Embed.io_binding()
 in_name_Embed = ort_session_Embed.get_inputs()[0].name
 out_name_Embed = [ort_session_Embed.get_outputs()[0].name]
 
-ort_session_Main = onnxruntime.InferenceSession(onnx_model_Main, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+ort_session_Main = onnxruntime.InferenceSession(onnx_model_Main, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
 binding_Main = ort_session_Main.io_binding()
 print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
 
@@ -770,12 +773,12 @@ USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
 if USE_BEAM_SEARCH:
     print("\nBeam Search does not display immediate decoding results...")
-    ort_session_First_Beam = onnxruntime.InferenceSession(onnx_model_First_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+    ort_session_First_Beam = onnxruntime.InferenceSession(onnx_model_First_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
     binding_First_Beam = ort_session_First_Beam.io_binding()
     in_name_First_Beam = [x.name for x in ort_session_First_Beam.get_inputs()]
     out_name_First_Beam = [x.name for x in ort_session_First_Beam.get_outputs()]
     in_name_First_Beam_parts = in_name_First_Beam[:num_keys_values]
-    ort_session_Second_Beam = onnxruntime.InferenceSession(onnx_model_Second_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+    ort_session_Second_Beam = onnxruntime.InferenceSession(onnx_model_Second_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
     binding_Second_Beam = ort_session_Second_Beam.io_binding()
     in_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_inputs()]
     out_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_outputs()]
@@ -785,19 +788,19 @@ if USE_BEAM_SEARCH:
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_3], beam_size)
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_4], topK)
 else:
-    ort_session_Greedy = onnxruntime.InferenceSession(onnx_model_Greedy, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+    ort_session_Greedy = onnxruntime.InferenceSession(onnx_model_Greedy, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
     binding_Greedy = ort_session_Greedy.io_binding()
     in_name_Greedy = [x.name for x in ort_session_Greedy.get_inputs()]
     out_name_Greedy = [x.name for x in ort_session_Greedy.get_outputs()]
     binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], init_save_id)
-    ort_session_Argmax = onnxruntime.InferenceSession(onnx_model_Argmax, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+    ort_session_Argmax = onnxruntime.InferenceSession(onnx_model_Argmax, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
     binding_Argmax = ort_session_Argmax.io_binding()
     in_name_Argmax = ort_session_Argmax.get_inputs()[0].name
     out_name_Argmax = [x.name for x in ort_session_Argmax.get_outputs()]
     save_id_numpy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
 
 if USE_PENALTY:
-    ort_session_Penalty = onnxruntime.InferenceSession(onnx_model_Penalty, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
+    ort_session_Penalty = onnxruntime.InferenceSession(onnx_model_Penalty, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
     binding_Penalty = ort_session_Penalty.io_binding()
     in_name_Penalty = [x.name for x in ort_session_Penalty.get_inputs()]
     out_name_Penalty = [x.name for x in ort_session_Penalty.get_outputs()]
@@ -923,4 +926,3 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
-
