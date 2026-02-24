@@ -141,10 +141,10 @@ class KVQuantizer(torch.nn.Module):
         super().__init__()
         self.qmax = 255.0
         self.register_buffer("inv_qmax", torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
-        self.register_buffer("mul_256", torch.tensor([256], dtype=torch.int32))
-        self.register_buffer("offset_128", torch.tensor([128], dtype=torch.int32))
-        self.register_buffer("mul_65536", torch.tensor([65536], dtype=torch.int32))
-        self.register_buffer("pack_mul", torch.tensor([16777216], dtype=torch.int32))
+        self.register_buffer("_256", torch.tensor([256], dtype=torch.int32))
+        self.register_buffer("_128", torch.tensor([128], dtype=torch.int32))
+        self.register_buffer("_65536", torch.tensor([65536], dtype=torch.int32))
+        self.register_buffer("_16777216", torch.tensor([16777216], dtype=torch.int32))
 
     def _quantize_block(self, x, dim):
         block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
@@ -165,16 +165,16 @@ class KVQuantizer(torch.nn.Module):
         else:
             x_i32 = x_i32.reshape(batch_size, num_key_value_heads, 1, -1, head_dim_quarter, 4)
         x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
-        packed = x0 + x1 * self.mul_256 + x2 * self.mul_65536 + (x3 - self.offset_128) * self.pack_mul
+        packed = x0 + x1 * self._256 + x2 * self._65536 + (x3 - self._128) * self._16777216
         return packed
 
     def unpack_q8_cuda(self, x_i32, dim, batch_size, num_key_value_heads, head_dim):
-        r3 = x_i32 % self.pack_mul
-        x3 = ((x_i32 - r3) // self.pack_mul) + self.offset_128
-        x2 = r3 // self.mul_65536
-        r2 = r3 % self.mul_65536
-        x1 = r2 // self.mul_256
-        x0 = r2 % self.mul_256
+        r3 = x_i32 % self._16777216
+        x3 = ((x_i32 - r3) // self._16777216) + self._128
+        x2 = r3 // self._65536
+        r2 = r3 % self._65536
+        x1 = r2 // self._256
+        x0 = r2 % self._256
         unpacked = torch.stack([x0, x1, x2, x3], dim=dim)
         if dim != -1:
             return unpacked.reshape(batch_size, num_key_value_heads, 1, head_dim, -1)
@@ -923,3 +923,4 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
