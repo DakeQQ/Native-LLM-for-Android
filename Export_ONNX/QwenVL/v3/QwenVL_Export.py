@@ -52,7 +52,6 @@ MAX_BEAM_SIZE = 10                                                  # Max beams 
 REPEAT_PENALITY = 1.0                                               # Range from 0.0 to 1.0; "1.0" means no penality.
 PENALTY_RANGE = 20                                                  # Penalizes the most recent output. "10" means the last 10 tokens.
 
-ORT_FP16 = False                                                    # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
 ORT_Accelerate_Providers = []                                       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS = 0                                                     # 0 = auto
 DEVICE_ID = 0                                                       # Device ID for GPU
@@ -251,7 +250,7 @@ class LLM_VISION(torch.nn.Module):
         for layer_num, blk in enumerate(self.llm.model.visual.blocks):
             hidden_states_norm = blk.norm1(vision_hidden_states)
             qkv = blk.attn.qkv(hidden_states_norm)
-            qkv = qkv.view(batch_size, -1, 3, self.num_heads, self.head_dim)
+            qkv = qkv.reshape(batch_size, -1, 3, self.num_heads, self.head_dim)
             qkv = qkv.permute(2, 0, 3, 1, 4)
             qk, v = qkv.split([2, 1], dim=0)
             qk_rot = qk * self.rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * self.rotary_pos_emb_sin
@@ -361,10 +360,10 @@ class KVQuantizer(torch.nn.Module):
         super().__init__()
         self.qmax = 255.0
         self.register_buffer("inv_qmax", torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
-        self.register_buffer("_256", torch.tensor([256], dtype=torch.int32).view(1, 1, 1, 1, -1))
-        self.register_buffer("_128", torch.tensor([128], dtype=torch.int32).view(1, 1, 1, 1, -1))
-        self.register_buffer("_65536", torch.tensor([65536], dtype=torch.int32).view(1, 1, 1, 1, -1))
-        self.register_buffer("_16777216", torch.tensor([16777216], dtype=torch.int32).view(1, 1, 1, 1, -1))
+        self.register_buffer("mul_256", torch.tensor([256], dtype=torch.int32))
+        self.register_buffer("offset_128", torch.tensor([128], dtype=torch.int32))
+        self.register_buffer("mul_65536", torch.tensor([65536], dtype=torch.int32))
+        self.register_buffer("pack_mul", torch.tensor([16777216], dtype=torch.int32))
 
     def _quantize_block(self, x, dim):
         block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
@@ -385,16 +384,16 @@ class KVQuantizer(torch.nn.Module):
         else:
             x_i32 = x_i32.reshape(batch_size, num_key_value_heads, 1, -1, head_dim_quarter, 4)
         x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
-        packed = x0 + x1 * self._256 + x2 * self._65536 + (x3 - self._128) * self._16777216
+        packed = x0 + x1 * self.mul_256 + x2 * self.mul_65536 + (x3 - self.offset_128) * self.pack_mul
         return packed
 
     def unpack_q8_cuda(self, x_i32, dim, batch_size, num_key_value_heads, head_dim):
-        r3 = x_i32 % self._16777216
-        x3 = ((x_i32 - r3) // self._16777216) + self._128
-        x2 = r3 // self._65536
-        r2 = r3 % self._65536
-        x1 = r2 // self._256
-        x0 = r2 % self._256
+        r3 = x_i32 % self.pack_mul
+        x3 = ((x_i32 - r3) // self.pack_mul) + self.offset_128
+        x2 = r3 // self.mul_65536
+        r2 = r3 % self.mul_65536
+        x1 = r2 // self.mul_256
+        x0 = r2 % self.mul_256
         unpacked = torch.stack([x0, x1, x2, x3], dim=dim)
         if dim != -1:
             return unpacked.reshape(batch_size, num_key_value_heads, 1, head_dim, -1)
@@ -406,7 +405,7 @@ class KVQuantizer(torch.nn.Module):
         if KV_QUANT_DTYPE == "Q8_CUDA":
             k_packed = self.pack_q8_cuda(k_packed, -2, batch_size, num_key_value_heads, head_dim_quarter)
             v_packed = self.pack_q8_cuda(v_packed, -1, batch_size, num_key_value_heads, head_dim_quarter)
-        return k_packed, k_scale, k_bias, v_packed, v_scale.transpose(-1, -2), v_bias
+        return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
 
 
 class LLM_MAIN(torch.nn.Module):
@@ -518,14 +517,14 @@ class LLM_MAIN(torch.nn.Module):
                 hidden_states = hidden_states * self.overflow_scale
             hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
             qkv = layer.self_attn.qkv(hidden_states)
-            qkv = qkv.view(batch_size, -1, 1, self.qk_heads + self.num_key_value_heads, self.head_dim)
+            qkv = qkv.reshape(batch_size, -1, 1, self.qk_heads + self.num_key_value_heads, self.head_dim)
             qk, v = torch.split(qkv, [self.qk_heads, self.num_key_value_heads], dim=-2)
             if PREVENT_F16_OVERFLOW:
                 qk = qk * self.overflow_scale
             qk = qk * torch.rsqrt(qk.square().sum(dim=-1, keepdim=True)) * layer.self_attn.qk_norm_weight
             qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * rotary_pos_emb_sin
             q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=-2)
-            q = q.view(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
+            q = q.reshape(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             q = q.permute(0, 2, 3, 1, 4)
             if self.kv_f16:
                 k = k.half()
@@ -538,7 +537,7 @@ class LLM_MAIN(torch.nn.Module):
                 k_s = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
                 k_b = torch.cat([all_inputs[i + self.num_layers_3], bias_k], dim=-1)
                 v = torch.cat([all_inputs[i + self.num_layers], packed_v], dim=-2)
-                v_s = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-1)
+                v_s = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-2)
                 v_b = torch.cat([all_inputs[i + self.num_layers_5], bias_v], dim=-2)
                 self.save_k_scale[i] = k_s
                 self.save_k_bias[i] = k_b
@@ -554,15 +553,14 @@ class LLM_MAIN(torch.nn.Module):
                 if self.kv_q8_cuda:
                     k = self.quantizer.unpack_q8_cuda(k, -2, batch_size, self.num_key_value_heads, self.head_dim)
                     v = self.quantizer.unpack_q8_cuda(v, -1, batch_size, self.num_key_value_heads, self.head_dim)
-                attn_main = torch.matmul(q, k.float())
+                attn_Main = torch.matmul(q, k.float())
                 q_sum = q.sum(dim=-1, keepdim=True)
-                attn_bias = torch.matmul(q_sum, k_b)
-                attn = attn_main * k_s + attn_bias
-                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1)
-                attn_scaled = attn * v_s
-                out_main = torch.matmul(attn_scaled, v.float())
-                out_bias = torch.matmul(attn, v_b)
-                attn = out_main + out_bias
+                attn_bias = q_sum * k_b
+                fused_bias_mask = attn_bias + attention_mask
+                attn = torch.addcmul(fused_bias_mask, attn_Main, k_s)
+                attn = torch.nn.functional.softmax(attn, dim=-1)
+                v_dequant = torch.addcmul(v_b, v.float(), v_s)
+                attn = torch.matmul(attn, v_dequant)
             else:
                 k = torch.cat((all_inputs[i], k), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
@@ -571,8 +569,8 @@ class LLM_MAIN(torch.nn.Module):
                 if self.kv_f16:
                     k = k.float()
                     v = v.float()
-                attn = torch.matmul(q, k)
-                attn = torch.nn.functional.softmax(attn + attention_mask, dim=-1)
+                attn = torch.matmul(q, k) + attention_mask
+                attn = torch.nn.functional.softmax(attn, dim=-1)
                 attn = torch.matmul(attn, v)
             attn = attn.permute(0, 3, 1, 2, 4).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
             attn_out = layer.self_attn.o_proj(attn)
@@ -739,10 +737,10 @@ if DO_EXPORT:
         if KV_QUANT_DTYPE == "F16":
             kv_dtype = torch.float16
         elif KV_QUANT_DTYPE == "Q8":
-            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 4), ('value_bias', 3)])
+            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 3), ('value_bias', 3)])
             kv_dtype = torch.uint8
         elif KV_QUANT_DTYPE == "Q8_CUDA":
-            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 4), ('value_bias', 3)])
+            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 3), ('value_bias', 3)])
             kv_dtype = torch.int32
         else:
             kv_dtype = torch.float32
@@ -757,7 +755,7 @@ if DO_EXPORT:
         if KV_QUANT_DTYPE in ["Q8", "Q8_CUDA"]:
             kv_tensors['key_scale'] = torch.ones([batch_size, num_key_value_heads, 1, 1, history_len], dtype=scale_dtype)
             kv_tensors['key_bias'] = torch.ones([batch_size, num_key_value_heads, 1, 1, history_len], dtype=scale_dtype)
-            kv_tensors['value_scale'] = torch.ones([batch_size, num_key_value_heads, 1, 1, history_len], dtype=scale_dtype)
+            kv_tensors['value_scale'] = torch.ones([batch_size, num_key_value_heads, 1, history_len, 1], dtype=scale_dtype)
             kv_tensors['value_bias'] = torch.ones([batch_size, num_key_value_heads, 1, history_len, 1], dtype=scale_dtype)
 
         def get_kv_io(tensors_dict, batch_axis='batch', seq_axis='history_len', out_seq_axis='kv_seq_len'):
@@ -980,15 +978,14 @@ session_opts.add_session_config_entry('session.set_denormal_as_zero', '1')
 session_opts.add_session_config_entry('session.intra_op.allow_spinning', '1')
 session_opts.add_session_config_entry('session.inter_op.allow_spinning', '1')
 session_opts.add_session_config_entry('session.enable_quant_qdq_cleanup', '1')
-session_opts.add_session_config_entry('session.qdq_matmulnbits_accuracy_level', '2' if ORT_FP16 else '4')
+session_opts.add_session_config_entry('session.qdq_matmulnbits_accuracy_level', '4')
 session_opts.add_session_config_entry('session.use_device_allocator_for_initializers', '1')
 session_opts.add_session_config_entry('session.graph_optimizations_loop_level', '2')
 session_opts.add_session_config_entry('optimization.enable_gelu_approximation', '1')
 session_opts.add_session_config_entry('optimization.minimal_build_optimizations', '')
 session_opts.add_session_config_entry('optimization.enable_cast_chain_elimination', '1')
-session_opts.add_session_config_entry('optimization.disable_specified_optimizers', 'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else '')
+session_opts.add_session_config_entry('optimization.disable_specified_optimizers', '')
 run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
-disabled_optimizers = ['CastFloat16Transformer', 'FuseFp16InitializerToFp32NodeTransformer'] if ORT_FP16 else None
 
 
 if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
@@ -1048,12 +1045,12 @@ else:
 
 _ort_device_type = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
 
-ort_session_Embed = onnxruntime.InferenceSession(onnx_model_Embed, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+ort_session_Embed = onnxruntime.InferenceSession(onnx_model_Embed, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_Embed = ort_session_Embed.io_binding()
 in_name_Embed = ort_session_Embed.get_inputs()[0].name
 out_name_Embed = [ort_session_Embed.get_outputs()[0].name]
 
-ort_session_Vision = onnxruntime.InferenceSession(onnx_model_Vision, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+ort_session_Vision = onnxruntime.InferenceSession(onnx_model_Vision, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_Vision = ort_session_Vision.io_binding()
 in_name_Vision_objs = ort_session_Vision.get_inputs()
 out_name_Vision_objs = ort_session_Vision.get_outputs()
@@ -1063,7 +1060,7 @@ deepstack_features_len = len(out_name_Vision) - 1
 in_name_Vision_parts = in_name_Vision[:deepstack_features_len+1]
 vision_dtype = np.float16 if 'float16' in ort_session_Vision._outputs_meta[0].type else np.float32
 
-ort_session_Concat = onnxruntime.InferenceSession(onnx_model_Concat, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+ort_session_Concat = onnxruntime.InferenceSession(onnx_model_Concat, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_Concat = ort_session_Concat.io_binding()
 in_name_Concat_objs = ort_session_Concat.get_inputs()
 out_name_Concat_objs = ort_session_Concat.get_outputs()
@@ -1071,19 +1068,19 @@ amount_of_outputs_Concat = len(out_name_Concat_objs)
 in_name_Concat = [x.name for x in in_name_Concat_objs]
 out_name_Concat = [x.name for x in out_name_Concat_objs]
 
-ort_session_Rotary_Vision = onnxruntime.InferenceSession(onnx_model_Rotary_Vision, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+ort_session_Rotary_Vision = onnxruntime.InferenceSession(onnx_model_Rotary_Vision, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_Rotary_Vision = ort_session_Rotary_Vision.io_binding()
 in_name_Rotary_Vision = [x.name for x in ort_session_Rotary_Vision.get_inputs()]
 out_name_Rotary_Vision = [x.name for x in ort_session_Rotary_Vision.get_outputs()]
 rotary_outputs_len = len(out_name_Rotary_Vision)
 rotary_outputs_len_minus = rotary_outputs_len - 1
 
-ort_session_Rotary_Text = onnxruntime.InferenceSession(onnx_model_Rotary_Text, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+ort_session_Rotary_Text = onnxruntime.InferenceSession(onnx_model_Rotary_Text, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_Rotary_Text = ort_session_Rotary_Text.io_binding()
 in_name_Rotary_Text = [x.name for x in ort_session_Rotary_Text.get_inputs()]
 out_name_Rotary_Text = [x.name for x in ort_session_Rotary_Text.get_outputs()]
 
-ort_session_Main = onnxruntime.InferenceSession(onnx_model_Main, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+ort_session_Main = onnxruntime.InferenceSession(onnx_model_Main, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
 binding_Main = ort_session_Main.io_binding()
 print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
 
@@ -1106,7 +1103,7 @@ if 'uint8' in model_dtype_Main_str or 'int32' in model_dtype_Main_str:
     kv_scale_dtype = np.float16 if 'float16' in ort_session_Main._inputs_meta[num_layers + num_layers].type else np.float32
     k_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
     k_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
-    v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[num_layers].shape[1], 1, 1, 0), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
+    v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
     v_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
 else:
     kv_dtype = np.float16 if 'float16' in model_dtype_Main_str else np.float32
@@ -1159,12 +1156,12 @@ USE_PENALTY = (REPEAT_PENALITY != 1.0)
 
 if USE_BEAM_SEARCH:
     print("\nBeam Search does not display immediate decoding results...")
-    ort_session_First_Beam = onnxruntime.InferenceSession(onnx_model_First_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+    ort_session_First_Beam = onnxruntime.InferenceSession(onnx_model_First_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_First_Beam = ort_session_First_Beam.io_binding()
     in_name_First_Beam = [x.name for x in ort_session_First_Beam.get_inputs()]
     out_name_First_Beam = [x.name for x in ort_session_First_Beam.get_outputs()]
     in_name_First_Beam_parts = in_name_First_Beam[:num_keys_values]
-    ort_session_Second_Beam = onnxruntime.InferenceSession(onnx_model_Second_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+    ort_session_Second_Beam = onnxruntime.InferenceSession(onnx_model_Second_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_Second_Beam = ort_session_Second_Beam.io_binding()
     in_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_inputs()]
     out_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_outputs()]
@@ -1174,19 +1171,19 @@ if USE_BEAM_SEARCH:
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_3], beam_size)
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_4], topK)
 else:
-    ort_session_Greedy = onnxruntime.InferenceSession(onnx_model_Greedy, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+    ort_session_Greedy = onnxruntime.InferenceSession(onnx_model_Greedy, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_Greedy = ort_session_Greedy.io_binding()
     in_name_Greedy = [x.name for x in ort_session_Greedy.get_inputs()]
     out_name_Greedy = [x.name for x in ort_session_Greedy.get_outputs()]
     binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], init_save_id)
-    ort_session_Argmax = onnxruntime.InferenceSession(onnx_model_Argmax, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+    ort_session_Argmax = onnxruntime.InferenceSession(onnx_model_Argmax, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_Argmax = ort_session_Argmax.io_binding()
     in_name_Argmax = ort_session_Argmax.get_inputs()[0].name
     out_name_Argmax = [x.name for x in ort_session_Argmax.get_outputs()]
     save_id_numpy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
 
 if USE_PENALTY:
-    ort_session_Penalty = onnxruntime.InferenceSession(onnx_model_Penalty, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options, disabled_optimizers=disabled_optimizers)
+    ort_session_Penalty = onnxruntime.InferenceSession(onnx_model_Penalty, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
     binding_Penalty = ort_session_Penalty.io_binding()
     in_name_Penalty = [x.name for x in ort_session_Penalty.get_inputs()]
     out_name_Penalty = [x.name for x in ort_session_Penalty.get_outputs()]
