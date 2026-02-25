@@ -34,7 +34,7 @@ KV_QUANT_DTYPE = "F16"              # "Q8" | "Q8_CUDA" | "F16" | "F32"
 USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
-USE_BEAM_SEARCH = True              # Use beam search or greedy search
+USE_BEAM_SEARCH = False             # Use beam search or greedy search
 REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
 PENALTY_RANGE = 20                  # Recent-token window to apply penalty
 MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
@@ -689,10 +689,10 @@ def make_session(model_path):
     )
 
 def get_in_names(session):  return [x.name for x in session.get_inputs()]
+    
 def get_out_names(session): return [x.name for x in session.get_outputs()]
 
-def run(session, binding):
-    session.run_with_iobinding(binding, run_options=run_options)
+def run(session, binding): session.run_with_iobinding(binding, run_options=run_options)
 
 
 # ── Session Options ───────────────────────────────────────────────────────────
@@ -798,8 +798,8 @@ tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
 
 ort_session_Embed               = make_session(onnx_model_Embed)
 binding_Embed                   = ort_session_Embed.io_binding()
-in_name_Embed                   = ort_session_Embed.get_inputs()[0].name
-out_name_Embed                  = ort_session_Embed.get_outputs()[0].name
+in_name_Embed                   = get_in_names(ort_session_Embed)[0]
+out_name_Embed                  = get_out_names(ort_session_Embed)[0]
 
 
 # ── Session: Rotary + Mask ────────────────────────────────────────────────────
@@ -811,7 +811,7 @@ out_name_Rotary_Mask_Prefill    = get_out_names(ort_session_Rotary_Mask_Prefill)
 
 ort_session_Rotary_Mask_Decode  = make_session(onnx_model_Rotary_Mask_Decode)
 binding_Rotary_Mask_Decode      = ort_session_Rotary_Mask_Decode.io_binding()
-in_name_Rotary_Mask_Decode      = ort_session_Rotary_Mask_Decode.get_inputs()[0].name
+in_name_Rotary_Mask_Decode      = get_in_names(ort_session_Rotary_Mask_Decode)[0]
 out_name_Rotary_Mask_Decode     = get_out_names(ort_session_Rotary_Mask_Decode)
 
 
