@@ -39,6 +39,9 @@ MODEL_NAMES = [
     "Apply_Penalty",
     "Argmax",
 
+    # "Rotary_Mask_Prefill",
+    # "Rotary_Mask_Decode",
+
     # Vision Models
     "LLM_Vision",
     "LLM_Concat",
@@ -371,5 +374,6 @@ def main():
 if __name__ == "__main__":
     main()
     
+
 
 
