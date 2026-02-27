@@ -438,7 +438,7 @@ if DO_EXPORT:
             scale_dtype = torch.float32
 
         # Dummy Tensors
-        batch_size = 3
+        batch_size = BEAM_SIZE
         ids_len = torch.tensor([10], dtype=torch.int64)
         history_len = torch.tensor([0], dtype=torch.int64)
         kv_seq_len = ids_len + history_len
@@ -1106,3 +1106,4 @@ result = (
 )
 
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s\nTotal tokens generated: {num_decode}\nTotal time: {elapsed_time:.3f}s")
+
