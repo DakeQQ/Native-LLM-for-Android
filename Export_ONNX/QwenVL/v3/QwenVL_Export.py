@@ -730,7 +730,7 @@ if DO_EXPORT:
             dynamo=False
         )
         
-        batch_size = 3
+        batch_size = BEAM_SIZE
         ids_len = ids_len + vision_embed_size
         kv_tensors = {}
         kv_specs = [('key', 4), ('value', 3)]
@@ -1379,3 +1379,4 @@ else:
 print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
 print(f"Total tokens generated: {num_decode}")
 print(f"Total time: {elapsed_time:.3f}s")
+
