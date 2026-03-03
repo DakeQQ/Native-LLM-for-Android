@@ -1484,7 +1484,7 @@ if num_decode <= 1:
     num_pure_decode = 0
 else:
     decode_elapsed  = decode_end_time - decode_start_time
-    num_pure_decode = num_decode - 1  # First token is from prefill step
+    num_pure_decode = num_decode  # First token is from prefill step. However, the last token is not counted.
 
 total_elapsed = decode_end_time - prefill_start_time
 
@@ -1519,3 +1519,4 @@ print(
     f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
     f"{'─' * 56}\n"
 )
+
