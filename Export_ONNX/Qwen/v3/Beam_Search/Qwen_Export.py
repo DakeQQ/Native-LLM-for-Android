@@ -42,6 +42,7 @@ TOP_K = 3                           # Top-K for beam search
 BEAM_SIZE = 3                       # Beam size for beam search. Must be <= MAX_BEAM_SIZE
 
 # Runtime config
+ORT_LOG = False                     # Enable ONNX Runtime logging for debugging. Set to False for best performance.
 ORT_FP16 = False                    # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
 ORT_Accelerate_Providers = []       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS = 0                     # 0 = auto
@@ -52,15 +53,13 @@ OPSET = 17                          # ONNX opset version
 # ══════════════════════════════════════════════════════════════════════════════
 # Decoding Strategy Modules
 # ══════════════════════════════════════════════════════════════════════════════
-
-
 class GREEDY_SEARCH(torch.nn.Module):
     """Greedy decoding: select the token with the highest logit."""
 
     def __init__(self):
         super().__init__()
 
-    def forward(self, logits: torch.Tensor, save_id: torch.Tensor):
+    def forward(self, logits, save_id):
         max_logits_idx = torch.argmax(logits, dim=-1, keepdim=True).int()
         save_id = torch.cat([save_id, max_logits_idx], dim=-1)
         return max_logits_idx, save_id
@@ -69,10 +68,11 @@ class GREEDY_SEARCH(torch.nn.Module):
 class FIRST_BEAM_SEARCH(torch.nn.Module):
     """First beam-search step: expand a single hypothesis into `beam_size` beams."""
 
-    def __init__(self, total_layers: int):
+    def __init__(self, total_layers):
         super().__init__()
         self.total_layers = total_layers
         self.save_keys_values = [None] * self.total_layers
+        self.kv_q8_cuda = (KV_QUANT_DTYPE == "Q8_CUDA")
 
     def forward(self, *all_inputs):
         logits = all_inputs[-3]
@@ -98,14 +98,14 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
             save_id,
             top_beam_prob.transpose(0, 1),
             top_beam_indices,
-            max_logits_idx,
+            max_logits_idx
         )
 
 
 class SECOND_BEAM_SEARCH(torch.nn.Module):
     """Subsequent beam-search steps: prune and re-expand beams."""
 
-    def __init__(self, total_layers: int):
+    def __init__(self, total_layers):
         super().__init__()
         self.total_layers = total_layers
         self.save_keys_values = [None] * self.total_layers
@@ -142,28 +142,20 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
             save_id,
             top_beam_prob.unsqueeze(-1),
             top_beam_indices,
-            max_logits_idx,
+            max_logits_idx
         )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Penalty & Utility Modules
 # ══════════════════════════════════════════════════════════════════════════════
-
-
 class APPLY_PENALTY(torch.nn.Module):
     """Apply repetition penalty to recently generated token logits."""
 
     def __init__(self):
         super().__init__()
 
-    def forward(
-        self,
-        logits: torch.Tensor,
-        save_id: torch.Tensor,
-        penalty_value: torch.Tensor,
-        penalty_range: torch.Tensor,
-    ) -> torch.Tensor:
+    def forward(self, logits, save_id, penalty_value, penalty_range):
         target_indices = save_id[:, -penalty_range:].long()
         penalized = logits.gather(1, target_indices) * penalty_value
         logits = logits.scatter(1, target_indices, penalized)
@@ -176,15 +168,13 @@ class ARGMAX(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, logits: torch.Tensor) -> torch.Tensor:
+    def forward(self, logits):
         return torch.argmax(logits, dim=-1, keepdim=True).int()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Embedding Module
 # ══════════════════════════════════════════════════════════════════════════════
-
-
 class LLM_EMBED(torch.nn.Module):
     """Extract and apply the token embedding layer in float32."""
 
@@ -192,25 +182,21 @@ class LLM_EMBED(torch.nn.Module):
         super().__init__()
         self.embed_tokens = llm.model.embed_tokens.float()
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_ids):
         return self.embed_tokens(input_ids)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Rotary Positional Embedding & Attention Mask
 # ══════════════════════════════════════════════════════════════════════════════
-
-
 class ROTARY_MASK_PREFILL(torch.nn.Module):
     """Precompute rotary embeddings and causal mask for the prefill phase."""
 
-    def __init__(self, llm, max_seq_len: int):
+    def __init__(self, llm, max_seq_len):
         super().__init__()
 
         # Causal attention mask: upper triangle → -128
-        self.attention_mask = (
-            (1 - torch.tril(torch.ones(1, 1, 1, max_seq_len, max_seq_len, dtype=torch.int8))) * -128
-        )
+        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, max_seq_len, max_seq_len, dtype=torch.int8))) * -128
 
         # Precompute rotary embeddings
         cos, sin = self._build_rotary_table(llm, max_seq_len)
@@ -218,13 +204,13 @@ class ROTARY_MASK_PREFILL(torch.nn.Module):
         self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half(), persistent=False)
 
     @staticmethod
-    def _build_rotary_table(llm, max_seq_len: int):
+    def _build_rotary_table(llm, max_seq_len):
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
         inv_freq = llm.model.rotary_emb.inv_freq
         idx_theta = (position_ids * inv_freq).unsqueeze(1).unsqueeze(1).unsqueeze(0)
         return torch.cos(idx_theta), torch.sin(idx_theta)
 
-    def forward(self, ids_len: torch.Tensor, history_len: torch.Tensor):
+    def forward(self, ids_len, history_len):
         kv_seq_len = ids_len + history_len
         rotary_cos = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
         rotary_sin = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
@@ -235,13 +221,13 @@ class ROTARY_MASK_PREFILL(torch.nn.Module):
 class ROTARY_MASK_DECODE(torch.nn.Module):
     """Provide rotary embeddings for a single decode step."""
 
-    def __init__(self, llm, max_seq_len: int):
+    def __init__(self, llm, max_seq_len):
         super().__init__()
         cos, sin = ROTARY_MASK_PREFILL._build_rotary_table(llm, max_seq_len)
         self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half(), persistent=False)
         self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half(), persistent=False)
 
-    def forward(self, kv_seq_len: torch.Tensor):
+    def forward(self, kv_seq_len):
         kv_seq_len_next = kv_seq_len + 1
         rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len_next].float()
         rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len_next].float()
@@ -251,21 +237,18 @@ class ROTARY_MASK_DECODE(torch.nn.Module):
 # ══════════════════════════════════════════════════════════════════════════════
 # KV Cache Quantization
 # ══════════════════════════════════════════════════════════════════════════════
-
-
 class KVQuantizer(torch.nn.Module):
     """Quantize key/value tensors to Q8 or Q8_CUDA packed formats."""
-
-    QMAX = 255.0
-
+    
     def __init__(self):
         super().__init__()
+        self.QMAX = 255.0
         self.register_buffer("inv_qmax", torch.tensor([1.0 / self.QMAX]).view(1, 1, 1, 1, -1))
         # Constants for Q8_CUDA int32 packing/unpacking
         for name, val in [("_256", 256), ("_128", 128), ("_65536", 65536), ("_16777216", 16777216)]:
             self.register_buffer(name, torch.tensor([val], dtype=torch.int32).view(1, 1, 1, 1, -1))
 
-    def _quantize_block(self, x: torch.Tensor, dim: int):
+    def _quantize_block(self, x, dim):
         """Per-block min-max quantization to [0, 255]."""
         block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
         scale = (block_max - block_min) * self.inv_qmax
@@ -278,9 +261,7 @@ class KVQuantizer(torch.nn.Module):
             block_min = block_min.half()
         return x_packed, scale, block_min
 
-    def pack_q8_cuda(
-        self, x: torch.Tensor, dim: int, batch_size, num_kv_heads: int, head_dim_quarter: int
-    ) -> torch.Tensor:
+    def pack_q8_cuda(self, x, dim, batch_size, num_kv_heads, head_dim_quarter):
         """Pack 4 uint8 values into a single int32 for CUDA-friendly storage."""
         x_i32 = x.to(torch.int32)
         if dim != -1:
@@ -290,9 +271,7 @@ class KVQuantizer(torch.nn.Module):
         x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
         return x0 + x1 * self._256 + x2 * self._65536 + (x3 - self._128) * self._16777216
 
-    def unpack_q8_cuda(
-        self, x_i32: torch.Tensor, dim: int, batch_size, num_kv_heads: int, head_dim: int
-    ) -> torch.Tensor:
+    def unpack_q8_cuda(self, x_i32, dim, batch_size, num_kv_heads, head_dim):
         """Unpack int32 back into 4 uint8 channels."""
         r3 = x_i32 % self._16777216
         x3 = ((x_i32 - r3) // self._16777216) + self._128
@@ -305,7 +284,7 @@ class KVQuantizer(torch.nn.Module):
             return unpacked.reshape(batch_size, num_kv_heads, 1, head_dim, -1)
         return unpacked.reshape(batch_size, num_kv_heads, 1, -1, head_dim)
 
-    def forward(self, keys: torch.Tensor, values: torch.Tensor, batch_size, num_kv_heads: int, head_dim_quarter: int):
+    def forward(self, keys, values, batch_size, num_kv_heads, head_dim_quarter):
         k_packed, k_scale, k_bias = self._quantize_block(keys, dim=-2)
         v_packed, v_scale, v_bias = self._quantize_block(values, dim=-1)
         if KV_QUANT_DTYPE == "Q8_CUDA":
@@ -313,10 +292,10 @@ class KVQuantizer(torch.nn.Module):
             v_packed = self.pack_q8_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
         return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Main Transformer Module
 # ══════════════════════════════════════════════════════════════════════════════
-
 class LLM_MAIN(torch.nn.Module):
     """
     Main transformer module that processes hidden states through all decoder layers.
@@ -360,13 +339,13 @@ class LLM_MAIN(torch.nn.Module):
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
 
         # ── Per-layer output buffers ─────────────────────────────────────
-        self.save_key = [None] * num_layers
+        self.save_key   = [None] * num_layers
         self.save_value = [None] * num_layers
         if self.kv_quantized:
             self.save_k_scale = [None] * num_layers
-            self.save_k_bias = [None] * num_layers
+            self.save_k_bias  = [None] * num_layers
             self.save_v_scale = [None] * num_layers
-            self.save_v_bias = [None] * num_layers
+            self.save_v_bias  = [None] * num_layers
 
         # ── Fuse & reshape weights for efficient inference ───────────────
         self._replace_gelu_with_tanh_approximation(self.llm)
@@ -375,8 +354,7 @@ class LLM_MAIN(torch.nn.Module):
     # ══════════════════════════════════════════════════════════════════════
     # Weight Fusion (runs once at init)
     # ══════════════════════════════════════════════════════════════════════
-
-    def _fuse_weights(self, hidden_size: int):
+    def _fuse_weights(self, hidden_size):
         """
         Merge separate Q/K/V projections into a single QKV linear,
         absorb RMSNorm weights into projection matrices, and fuse
@@ -396,8 +374,8 @@ class LLM_MAIN(torch.nn.Module):
             self.llm.lm_head.weight.mul_(final_norm_weight)
             del self.llm.model.norm
 
-    def _fuse_qkv_projection(self, layer, scale_factor: float, norm_factor: float, norm_factor_qk: float):
-        """Fuse Q, K, V projections and absorb input layernorm + QK norms."""
+    def _fuse_qkv_projection(self, layer, scale_factor, norm_factor, norm_factor_qk):
+        """Fuse Q, K, V projections and absorb input LayerNorm + QK norms."""
         attn = layer.self_attn
         q_proj, k_proj, v_proj = attn.q_proj, attn.k_proj, attn.v_proj
 
@@ -410,9 +388,10 @@ class LLM_MAIN(torch.nn.Module):
         qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
 
         if has_bias:
-            dtype = qkv.weight.dtype
+
             def _get_bias(proj):
-                return proj.bias if proj.bias is not None else torch.zeros(proj.out_features, dtype=dtype)
+                return proj.bias if proj.bias is not None else torch.zeros(proj.out_features, dtype=qkv.weight.dtype)
+
             qkv.bias.copy_(torch.cat([_get_bias(q_proj), _get_bias(k_proj), _get_bias(v_proj)], dim=0))
 
         # Store split dimensions for later use
@@ -433,14 +412,14 @@ class LLM_MAIN(torch.nn.Module):
         attn.qk_norm_weight = torch.nn.Parameter(torch.cat([q_norm_repeated, k_norm_repeated], dim=0).view(1, 1, 1, -1, self.head_dim))
         del attn.q_norm, attn.k_norm
 
-        # ── Absorb input layernorm into QKV weights ─────────────────
+        # ── Absorb input LayerNorm into QKV weights ─────────────────
         input_norm_weight = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
         qkv.weight.mul_(input_norm_weight)
         attn.qkv = qkv
         del layer.input_layernorm
 
-    def _fuse_gate_up_projection(self, layer, norm_factor: float):
-        """Fuse gate and up projections, absorbing post-attention layernorm."""
+    def _fuse_gate_up_projection(self, layer, norm_factor):
+        """Fuse gate and up projections, absorbing post-attention LayerNorm."""
         post_norm_weight = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
         gate, up = layer.mlp.gate_proj, layer.mlp.up_proj
 
@@ -456,7 +435,6 @@ class LLM_MAIN(torch.nn.Module):
     # ══════════════════════════════════════════════════════════════════════
     # Utility Methods
     # ══════════════════════════════════════════════════════════════════════
-
     @staticmethod
     def _replace_gelu_with_tanh_approximation(module):
         """Recursively replace exact GELU with tanh-approximated GELU for ONNX compatibility."""
@@ -467,13 +445,13 @@ class LLM_MAIN(torch.nn.Module):
             else:
                 LLM_MAIN._replace_gelu_with_tanh_approximation(child)
 
-    def _rms_norm(self, x: torch.Tensor) -> torch.Tensor:
+    def _rms_norm(self, x):
         """Apply RMS normalization (with optional overflow scaling)."""
         if PREVENT_F16_OVERFLOW:
             x = x * self.overflow_scale
         return x * torch.rsqrt(x.square().sum(-1, keepdim=True))
 
-    def _rotate_half(self, x: torch.Tensor, batch_size: torch.Tensor) -> torch.Tensor:
+    def _rotate_half(self, x, batch_size):
         """Rotate the last dimension by swapping and negating halves (for RoPE)."""
         x = x.view(batch_size, -1, 1, self.qk_heads, 2, self.head_dim_half)
         x = x.flip(-2)
@@ -550,7 +528,7 @@ class LLM_MAIN(torch.nn.Module):
                 attn_raw        = torch.matmul(q, k.float())
                 attn_bias       = q.sum(dim=-1, keepdim=True) * k_b + attention_mask
                 attn            = torch.addcmul(attn_bias, attn_raw, k_s)
-                attn            = torch.nn.functional.softmax(attn, dim=-1)
+                attn            = torch.softmax(attn, dim=-1)
                 v_dequant       = torch.addcmul(v_b, v.float(), v_s)
                 attn            = torch.matmul(attn, v_dequant)
 
@@ -566,7 +544,7 @@ class LLM_MAIN(torch.nn.Module):
                     v = v.float()
 
                 attn = torch.matmul(q, k) + attention_mask
-                attn = torch.nn.functional.softmax(attn, dim=-1)
+                attn = torch.softmax(attn, dim=-1)
                 attn = torch.matmul(attn, v)
 
             # Output projection & residual
@@ -597,11 +575,7 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Load Model & Extract Config
         # ══════════════════════════════════════════════════════════════════
-
-        model = AutoModelForCausalLM.from_pretrained(
-            download_path, dtype=torch.float32, device_map='cpu',
-            trust_remote_code=True, low_cpu_mem_usage=True
-        ).eval()
+        model = AutoModelForCausalLM.from_pretrained(download_path, dtype=torch.float32, device_map='cpu', trust_remote_code=True, low_cpu_mem_usage=True).eval()
 
         num_layers   = model.config.num_hidden_layers
         num_heads    = model.config.num_attention_heads
@@ -614,7 +588,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Build Dummy Tensors for Tracing
         # ══════════════════════════════════════════════════════════════════
-
         batch_size  = BEAM_SIZE
         ids_len     = torch.tensor([10], dtype=torch.int64)
         history_len = torch.tensor([0], dtype=torch.int64)
@@ -659,7 +632,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Helper: Build KV I/O names, tensors, and dynamic axes
         # ══════════════════════════════════════════════════════════════════
-
         def get_kv_io(tensors_dict, batch_axis='batch_size',
                       seq_axis='history_len', out_seq_axis='kv_seq_len'):
             inputs, in_names, out_names, axes = [], [], [], {}
@@ -678,7 +650,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: LLM_Embed
         # ══════════════════════════════════════════════════════════════════
-
         input_ids = torch.ones((1, ids_len), dtype=torch.int32)
         torch.onnx.export(
             LLM_EMBED(model),
@@ -698,7 +669,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Rotary + Mask (Prefill)
         # ══════════════════════════════════════════════════════════════════
-
         torch.onnx.export(
             ROTARY_MASK_PREFILL(model, MAX_SEQ_LEN),
             (ids_len, history_len),
@@ -717,7 +687,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Rotary + Mask (Decode)
         # ══════════════════════════════════════════════════════════════════
-
         torch.onnx.export(
             ROTARY_MASK_DECODE(model, MAX_SEQ_LEN),
             (kv_seq_len,),
@@ -732,7 +701,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: LLM_Main (Transformer Layers)
         # ══════════════════════════════════════════════════════════════════
-
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors)
 
         hidden_states  = torch.ones((batch_size, ids_len, hidden_size), dtype=torch.float32)
@@ -772,9 +740,8 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Greedy Search
         # ══════════════════════════════════════════════════════════════════
-
         save_id_in = torch.zeros((BEAM_SIZE, 10), dtype=torch.int32)
-
+        
         torch.onnx.export(
             GREEDY_SEARCH(),
             (logits, save_id_in),
@@ -793,15 +760,13 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: First Beam Search
         # ══════════════════════════════════════════════════════════════════
-
         num_layers_beam = num_layers * len(kv_specs)
-
         # First beam uses single-batch KV (batch dim = 1)
         kv_tensors_Greedy = {k: v[[0]] for k, v in kv_tensors.items()}
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_Greedy)
         # Remove output axes — first beam outputs have variable batch, not tracked here
         kv_input_only_axes = {k: v for k, v in kv_axes.items() if k not in kv_out_names}
-
+        
         torch.onnx.export(
             FIRST_BEAM_SEARCH(num_layers_beam),
             tuple(kv_ins + [logits[[0]], save_id_in, beam_size]),
@@ -827,11 +792,10 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Second Beam Search
         # ══════════════════════════════════════════════════════════════════
-
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors)
         previous_prob = torch.zeros((BEAM_SIZE, 1), dtype=torch.float32)
         topK = torch.tensor([TOP_K], dtype=torch.int64)
-
+        
         torch.onnx.export(
             SECOND_BEAM_SEARCH(num_layers_beam),
             tuple(kv_ins + [logits, save_id_in, previous_prob, beam_size, topK]),
@@ -856,7 +820,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Apply Penalty
         # ══════════════════════════════════════════════════════════════════
-
         penalty_value  = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
         penality_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
 
@@ -879,7 +842,6 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Argmax
         # ══════════════════════════════════════════════════════════════════
-
         torch.onnx.export(
             ARGMAX(),
             (logits,),
@@ -906,50 +868,37 @@ if DO_EXPORT:
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
-
-def bind_ort_in(binding, names, values, num=0):
-    """Bind OrtValue inputs by name. If num>0, only bind the first `num` pairs."""
-    pairs = zip(names[:num], values[:num]) if num else zip(names, values)
-    for name, val in pairs:
+def bind_ort_in_ortvalue(binding, names, values):
+    """Bind OrtValue inputs by name."""
+    for name, val in zip(names, values):
         binding.bind_ortvalue_input(name, val)
 
 
-def bind_ort_out(binding, names, device):
+def bind_ort_out_names(binding, names, device):
     """Bind outputs by name, letting ORT allocate on `device`."""
     for name in names:
         binding._iobinding.bind_output(name, device)
 
 
-def bind_ort_out_ortvalue(binding, names, ortvalues):
-    """Bind outputs to pre-allocated OrtValues (zero-copy reuse)."""
-    for name, val in zip(names, ortvalues):
-        binding.bind_ortvalue_output(name, val)
-
-
-def create_ortvalue(data, dtype, device, device_id):
+def create_ort_with_data(data, dtype, device, device_id):
     """Create an OrtValue from a Python list/scalar."""
-    return onnxruntime.OrtValue.ortvalue_from_numpy(
-        np.array(data, dtype=dtype), device, device_id
-    )
+    return onnxruntime.OrtValue.ortvalue_from_numpy(np.array(data, dtype=dtype), device, device_id)
 
 
-def make_ortvalue(shape, dtype, device, device_id):
+def create_ort_with_shape(shape, dtype, device, device_id):
     """Create a zero-filled OrtValue with the given shape."""
-    return onnxruntime.OrtValue.ortvalue_from_numpy(
-        np.zeros(shape, dtype=dtype), device, device_id
-    )
+    return onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(shape, dtype=dtype), device, device_id)
 
 
-def make_session(model_path):
+def create_session(model_path, _session_opts, _providers, _provider_options, _run_options, _disabled_optimizers):
     """Create an ORT InferenceSession with standard options."""
     return onnxruntime.InferenceSession(
         model_path,
-        sess_options=session_opts,
-        providers=ORT_Accelerate_Providers,
-        provider_options=provider_options,
-        run_options=run_options,
-        disabled_optimizers=disabled_optimizers,
-    )
+        sess_options=_session_opts,
+        providers=_providers,
+        provider_options=_provider_options,
+        run_options=_run_options,
+        disabled_optimizers=_disabled_optimizers)
 
 
 def get_in_names(session):
@@ -967,17 +916,15 @@ def run(session, binding):
 # ══════════════════════════════════════════════════════════════════════════════
 # ORT SESSION & RUNTIME OPTIONS
 # ══════════════════════════════════════════════════════════════════════════════
-
 session_opts = onnxruntime.SessionOptions()
 run_options  = onnxruntime.RunOptions()
 
-for obj in (session_opts, run_options):
-    obj.log_severity_level  = 4
-    obj.log_verbosity_level = 4
+for opt in (session_opts, run_options):
+    opt.log_severity_level  = 0 if ORT_LOG else 4
+    opt.log_verbosity_level = 4
 
 session_opts.inter_op_num_threads     = MAX_THREADS
 session_opts.intra_op_num_threads     = MAX_THREADS
-session_opts.enable_cpu_mem_arena     = True
 session_opts.execution_mode           = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
 session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
@@ -993,28 +940,23 @@ _session_configs = {
     'optimization.minimal_build_optimizations':      '',
     'optimization.enable_cast_chain_elimination':    '1',
     'optimization.disable_specified_optimizers':
-        'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer'
-        if ORT_FP16 else '',
+        'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else '',
 }
 for k, v in _session_configs.items():
     session_opts.add_session_config_entry(k, v)
 
 run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
 
-disabled_optimizers = (
-    ['CastFloat16Transformer', 'FuseFp16InitializerToFp32NodeTransformer']
-    if ORT_FP16 else None
-)
+disabled_optimizers = ['CastFloat16Transformer', 'FuseFp16InitializerToFp32NodeTransformer'] if ORT_FP16 else None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # EXECUTION PROVIDER CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════════════
-
 if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [{
-        'device_type':              'CPU',
-        'precision':                'ACCURACY',
+        'device_type':              'CPU',          # [CPU, GPU, NPU, GPU.0, GPU.1]
+        'precision':                'ACCURACY',     # [FP32, FP16, ACCURACY]
         'num_of_threads':           MAX_THREADS if MAX_THREADS != 0 else 8,
         'num_streams':              1,
         'enable_opencl_throttling': False,
@@ -1027,19 +969,19 @@ if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
 elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [{
         'device_id':                          DEVICE_ID,
-        'gpu_mem_limit':                      24 * 1024 * 1024 * 1024,
+        'gpu_mem_limit':                      24 * 1024 * 1024 * 1024,  # 24GB
         'arena_extend_strategy':              'kNextPowerOfTwo',
         'cudnn_conv_algo_search':             'EXHAUSTIVE',
         'sdpa_kernel':                        '2',
         'use_tf32':                           '1',
-        'fuse_conv_bias':                     '0',
+        'fuse_conv_bias':                     '0',      # Disable to avoid loading error with some models; can be re-enabled if not an issue
         'cudnn_conv_use_max_workspace':       '1',
         'cudnn_conv1d_pad_to_nc1d':           '0',
         'tunable_op_enable':                  '0',
         'tunable_op_tuning_enable':           '0',
         'tunable_op_max_tuning_duration_ms':  10,
         'do_copy_in_default_stream':          '0',
-        'enable_cuda_graph':                  '0',
+        'enable_cuda_graph':                  '0',      # Disable to avoid loading error with some models; can be re-enabled if not an issue
         'prefer_nhwc':                        '0',
         'enable_skip_layer_norm_strict_mode': '0',
         'use_ep_level_unified_stream':        '0',
@@ -1049,9 +991,12 @@ elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
 
 elif "DmlExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [{
-        'device_id':              DEVICE_ID,
-        'performance_preference': 'high_performance',
-        'device_filter':          'any',
+        'device_id':                  DEVICE_ID,
+        'performance_preference':     'high_performance',   # ["default", "high_performance", "minimum_power"] ; Default (Gpus first), HighPerformance (GPUs first), LowPower (NPUs first)
+        'device_filter':              'gpu',                # [gpu, npu, any],
+        'disable_metacommands':       'false',              # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'enable_graph_capture':       'false',              # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'enable_graph_serialization': 'false'               # Disable to avoid loading error with some models; can be re-enabled if not an issue
     }]
     device_type      = 'dml'
     _ort_device_type = C.OrtDevice.dml()
@@ -1061,42 +1006,41 @@ else:
     device_type      = 'cpu'
     _ort_device_type = C.OrtDevice.cpu()
 
+packed_settings = {
+    "_session_opts":        session_opts,
+    "_providers":           ORT_Accelerate_Providers,
+    "_provider_options":    provider_options,
+    "_run_options":         run_options,
+    "_disabled_optimizers": disabled_optimizers,
+}
+
 _ort_device_type = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
 kv_device = 'cpu' if 'dml' in device_type else device_type
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TOKENIZER & STOP TOKENS
-# ══════════════════════════════════════════════════════════════════════════════
-
-tokenizer      = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
-STOP_TOKEN_SET = set(STOP_TOKEN)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # LOAD ONNX SESSIONS
 # ══════════════════════════════════════════════════════════════════════════════
-
 # --- Embed ---
-ort_session_Embed = make_session(onnx_model_Embed)
+ort_session_Embed = create_session(onnx_model_Embed, **packed_settings)
 binding_Embed     = ort_session_Embed.io_binding()
 in_name_Embed     = get_in_names(ort_session_Embed)[0]
 out_name_Embed    = get_out_names(ort_session_Embed)[0]
 
 # --- Rotary + Mask (Prefill) ---
-ort_session_Rotary_Mask_Prefill = make_session(onnx_model_Rotary_Mask_Prefill)
+ort_session_Rotary_Mask_Prefill = create_session(onnx_model_Rotary_Mask_Prefill, **packed_settings)
 binding_Rotary_Mask_Prefill     = ort_session_Rotary_Mask_Prefill.io_binding()
 in_name_Rotary_Mask_Prefill     = get_in_names(ort_session_Rotary_Mask_Prefill)
 out_name_Rotary_Mask_Prefill    = get_out_names(ort_session_Rotary_Mask_Prefill)
 
 # --- Rotary + Mask (Decode) ---
-ort_session_Rotary_Mask_Decode = make_session(onnx_model_Rotary_Mask_Decode)
+ort_session_Rotary_Mask_Decode = create_session(onnx_model_Rotary_Mask_Decode, **packed_settings)
 binding_Rotary_Mask_Decode     = ort_session_Rotary_Mask_Decode.io_binding()
 in_name_Rotary_Mask_Decode     = get_in_names(ort_session_Rotary_Mask_Decode)[0]
 out_name_Rotary_Mask_Decode    = get_out_names(ort_session_Rotary_Mask_Decode)
 
 # --- Main ---
-ort_session_Main = make_session(onnx_model_Main)
+ort_session_Main = create_session(onnx_model_Main, **packed_settings)
 binding_Main     = ort_session_Main.io_binding()
 print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
 
@@ -1104,7 +1048,6 @@ print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN MODEL METADATA & INDEX OFFSETS
 # ══════════════════════════════════════════════════════════════════════════════
-
 in_name_Main           = get_in_names(ort_session_Main)
 out_name_Main          = get_out_names(ort_session_Main)
 amount_of_outputs_Main = len(out_name_Main)
@@ -1133,30 +1076,28 @@ _logits_out_dtype = np.float16 if 'float16' in _logits_out_meta.type else np.flo
 # ══════════════════════════════════════════════════════════════════════════════
 # KV CACHE SETUP
 # ══════════════════════════════════════════════════════════════════════════════
-
 _meta = ort_session_Main._inputs_meta
 
 if 'uint8' in kv_dtype_str or 'int32' in kv_dtype_str:
     kv_dtype_Main = np.int32 if 'int32' in kv_dtype_str else np.uint8
     num_layers    = num_keys_values // 6
     scale_dtype   = np.float16 if 'float16' in _meta[num_layers * 2].type else np.float32
-    k_scales      = make_ortvalue((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    k_biases      = make_ortvalue((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    v_scales      = make_ortvalue((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
-    v_biases      = make_ortvalue((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    k_scales      = create_ort_with_shape((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    k_biases      = create_ort_with_shape((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    v_scales      = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    v_biases      = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
 else:
     kv_dtype_Main = np.float16 if 'float16' in kv_dtype_str else np.float32
     num_layers    = num_keys_values // 2
     k_scales      = None
 
-past_keys_Main   = make_ortvalue((1, _meta[0].shape[1],          1, _meta[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
-past_values_Main = make_ortvalue((1, _meta[num_layers].shape[1], 1, 0, _meta[num_layers].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
+past_keys_Main   = create_ort_with_shape((1, _meta[0].shape[1],          1, _meta[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
+past_values_Main = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, _meta[num_layers].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DECODING STRATEGY VALIDATION
 # ══════════════════════════════════════════════════════════════════════════════
-
 if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
     TOP_K = BEAM_SIZE
 
@@ -1171,8 +1112,11 @@ USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PROMPT TOKENIZATION
+# TOKENIZER & STOP TOKENS & PROMPT
 # ══════════════════════════════════════════════════════════════════════════════
+tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
+
+STOP_TOKEN_SET = set(STOP_TOKEN)
 
 prompt = (
     f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
@@ -1187,39 +1131,37 @@ num_prefill = tokens.shape[-1]
 # ══════════════════════════════════════════════════════════════════════════════
 # SHARED ORTVALUE BUFFERS
 # ══════════════════════════════════════════════════════════════════════════════
-
 _rotary_meta = ort_session_Rotary_Mask_Decode._outputs_meta
 
 # --- Input OrtValues ---
 input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len          = create_ortvalue([num_prefill], np.int64,  device_type, DEVICE_ID)
-init_ids_len_1   = create_ortvalue([1],           np.int64,  device_type, DEVICE_ID)
-init_history_len = create_ortvalue([0],           np.int64,  device_type, DEVICE_ID)
-topK             = create_ortvalue([TOP_K],       np.int64,  device_type, DEVICE_ID)
-beam_size        = create_ortvalue([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
+ids_len          = create_ort_with_data([num_prefill], np.int64,  device_type, DEVICE_ID)
+init_ids_len_1   = create_ort_with_data([1],           np.int64,  device_type, DEVICE_ID)
+init_history_len = create_ort_with_data([0],           np.int64,  device_type, DEVICE_ID)
+topK             = create_ort_with_data([TOP_K],       np.int64,  device_type, DEVICE_ID)
+beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
 
 # --- Decode-phase placeholder buffers (reused every step) ---
-init_attention_mask = make_ortvalue((1, 1, 1, 1, 1),                                  hidden_states_dtype_Main, device_type, DEVICE_ID)
-init_rotary_cos     = make_ortvalue((1, 1, 1, 1, _rotary_meta[0].shape[4]),           hidden_states_dtype_Main, device_type, DEVICE_ID)
-init_rotary_sin     = make_ortvalue((1, 1, 1, 1, _rotary_meta[1].shape[4]),           hidden_states_dtype_Main, device_type, DEVICE_ID)
-init_hidden_states  = make_ortvalue((BEAM_SIZE, 1, _meta[num_keys_values].shape[2]),  hidden_states_dtype_Main, device_type, DEVICE_ID)
-init_save_id        = make_ortvalue((BEAM_SIZE, 0),                                   np.int32,                 device_type, DEVICE_ID)
+init_attention_mask = create_ort_with_shape((1, 1, 1, 1, 1),                                  hidden_states_dtype_Main, device_type, DEVICE_ID)
+init_rotary_cos     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[0].shape[4]),           hidden_states_dtype_Main, device_type, DEVICE_ID)
+init_rotary_sin     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[1].shape[4]),           hidden_states_dtype_Main, device_type, DEVICE_ID)
+init_hidden_states  = create_ort_with_shape((BEAM_SIZE, 1, _meta[num_keys_values].shape[2]),  hidden_states_dtype_Main, device_type, DEVICE_ID)
+init_save_id        = create_ort_with_shape((BEAM_SIZE, 0),                                   np.int32,                 device_type, DEVICE_ID)
 
 # --- Logits & token-index buffers ---
-prefill_logits_buf = make_ortvalue((1, vocab_size),         _logits_out_dtype, device_type, DEVICE_ID)
-decode_logits_buf  = make_ortvalue((BEAM_SIZE, vocab_size), _logits_out_dtype, device_type, DEVICE_ID)
-max_idx_buf        = make_ortvalue((1, 1),                  np.int32,          device_type, DEVICE_ID)
+prefill_logits_buf = create_ort_with_shape((1, vocab_size),         _logits_out_dtype, device_type, DEVICE_ID)
+decode_logits_buf  = create_ort_with_shape((BEAM_SIZE, vocab_size), _logits_out_dtype, device_type, DEVICE_ID)
+max_idx_buf        = create_ort_with_shape((1, 1),                  np.int32,          device_type, DEVICE_ID)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DECODE HEAD SESSIONS (Beam Search OR Greedy/Argmax)
 # ══════════════════════════════════════════════════════════════════════════════
-
 if USE_BEAM_SEARCH:
     print("\nBeam Search does not display immediate decoding results...")
 
     # --- First Beam ---
-    ort_session_First_Beam    = make_session(onnx_model_First_Beam)
+    ort_session_First_Beam    = create_session(onnx_model_First_Beam, **packed_settings)
     binding_First_Beam        = ort_session_First_Beam.io_binding()
     in_name_First_Beam        = get_in_names(ort_session_First_Beam)
     out_name_First_Beam       = get_out_names(ort_session_First_Beam)
@@ -1227,7 +1169,7 @@ if USE_BEAM_SEARCH:
     out_name_First_Beam_parts = out_name_First_Beam[:num_keys_values_plus_1]
 
     # --- Second Beam ---
-    ort_session_Second_Beam    = make_session(onnx_model_Second_Beam)
+    ort_session_Second_Beam    = create_session(onnx_model_Second_Beam, **packed_settings)
     binding_Second_Beam        = ort_session_Second_Beam.io_binding()
     in_name_Second_Beam        = get_in_names(ort_session_Second_Beam)
     out_name_Second_Beam       = get_out_names(ort_session_Second_Beam)
@@ -1235,8 +1177,8 @@ if USE_BEAM_SEARCH:
     out_name_Second_Beam_parts = out_name_Second_Beam[:num_keys_values_plus_1]
 
     # --- Beam-specific buffers ---
-    beam_embed_input_buf = make_ortvalue((BEAM_SIZE, 1), np.int32,                 device_type, DEVICE_ID)
-    beam_score_buf       = make_ortvalue((BEAM_SIZE, 1), hidden_states_dtype_Main, device_type, DEVICE_ID)
+    beam_embed_input_buf = create_ort_with_shape((BEAM_SIZE, 1), np.int32,                 device_type, DEVICE_ID)
+    beam_score_buf       = create_ort_with_shape((BEAM_SIZE, 1), hidden_states_dtype_Main, device_type, DEVICE_ID)
 
     # --- Static beam bindings ---
     binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_1], init_save_id)
@@ -1246,14 +1188,14 @@ if USE_BEAM_SEARCH:
 
 else:
     # --- Greedy ---
-    ort_session_Greedy = make_session(onnx_model_Greedy)
+    ort_session_Greedy = create_session(onnx_model_Greedy, **packed_settings)
     binding_Greedy     = ort_session_Greedy.io_binding()
     in_name_Greedy     = get_in_names(ort_session_Greedy)
     out_name_Greedy    = get_out_names(ort_session_Greedy)
     binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], init_save_id)
 
     # --- Argmax ---
-    ort_session_Argmax = make_session(onnx_model_Argmax)
+    ort_session_Argmax = create_session(onnx_model_Argmax, **packed_settings)
     binding_Argmax     = ort_session_Argmax.io_binding()
     in_name_Argmax     = get_in_names(ort_session_Argmax)[0]
     out_name_Argmax    = get_out_names(ort_session_Argmax)[0]
@@ -1263,16 +1205,15 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # PENALTY SESSION (optional)
 # ══════════════════════════════════════════════════════════════════════════════
-
 if USE_PENALTY:
-    ort_session_Penalty = make_session(onnx_model_Penalty)
+    ort_session_Penalty = create_session(onnx_model_Penalty, **packed_settings)
     binding_Penalty     = ort_session_Penalty.io_binding()
     in_name_Penalty     = get_in_names(ort_session_Penalty)
     out_name_Penalty    = get_out_names(ort_session_Penalty)[0]
 
     penalty_dtype = np.float16 if 'float16' in ort_session_Penalty._inputs_meta[2].type else np.float32
-    penalty_value = create_ortvalue([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
-    penalty_range = create_ortvalue([PENALTY_RANGE],  np.int64,      device_type, DEVICE_ID)
+    penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
+    penalty_range = create_ort_with_data([PENALTY_RANGE],  np.int64,      device_type, DEVICE_ID)
 
     binding_Penalty.bind_ortvalue_input(in_name_Penalty[2], penalty_value)
     binding_Penalty.bind_ortvalue_input(in_name_Penalty[3], penalty_range)
@@ -1281,13 +1222,12 @@ if USE_PENALTY:
 # ══════════════════════════════════════════════════════════════════════════════
 # PREFILL PHASE
 # ══════════════════════════════════════════════════════════════════════════════
-
 is_prefill_step = True
 prefill_start_time = time.time()
 
 # --- Step 1: Embed the input tokens ---
 binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
-bind_ort_out(binding_Embed, [out_name_Embed], _ort_device_type)
+bind_ort_out_names(binding_Embed, [out_name_Embed], _ort_device_type)
 run(ort_session_Embed, binding_Embed)
 outputs_Embed = binding_Embed.get_outputs()[0]
 
@@ -1297,7 +1237,7 @@ binding_Embed.bind_ortvalue_input(in_name_Embed, max_idx_buf)
 # --- Step 2: Compute rotary embeddings & causal mask (prefill) ---
 binding_Rotary_Mask_Prefill.bind_ortvalue_input(in_name_Rotary_Mask_Prefill[0], ids_len)
 binding_Rotary_Mask_Prefill.bind_ortvalue_input(in_name_Rotary_Mask_Prefill[1], init_history_len)
-bind_ort_out(binding_Rotary_Mask_Prefill, out_name_Rotary_Mask_Prefill, _ort_device_type)
+bind_ort_out_names(binding_Rotary_Mask_Prefill, out_name_Rotary_Mask_Prefill, _ort_device_type)
 run(ort_session_Rotary_Mask_Prefill, binding_Rotary_Mask_Prefill)
 rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Mask_Prefill.get_outputs()
 
@@ -1328,7 +1268,7 @@ if k_scales is not None:
             i += 1
 
 # --- Step 6: Bind Main model outputs ---
-bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
+bind_ort_out_names(binding_Main, out_name_Main_kv, _ort_device_type)
 binding_Main.bind_ortvalue_output(out_name_Main_logits, prefill_logits_buf)
 
 # --- Step 7: Bind penalty inputs/outputs to prefill logits buffer ---
@@ -1350,7 +1290,6 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # DECODE LOOP
 # ══════════════════════════════════════════════════════════════════════════════
-
 print(f'\nTest Question: {TEST_QUERY}\nLLM Answering:')
 
 num_decode     = 0
@@ -1372,8 +1311,8 @@ while num_decode < generate_limit:
         # ── 3a. Beam Search ─────────────────────────────────────────────
         if is_prefill_step:
             # First beam step: expand single-beam KV into BEAM_SIZE beams
-            bind_ort_in(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
-            bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
+            bind_ort_in_ortvalue(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
+            bind_ort_out_names(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
             binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_1], beam_score_buf)
             binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_2], beam_embed_input_buf)
             binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_3], max_idx_buf)
@@ -1381,8 +1320,8 @@ while num_decode < generate_limit:
             outputs_Beam = binding_First_Beam.get_outputs()
         else:
             # Subsequent beam steps: prune + expand
-            bind_ort_in(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
-            bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
+            bind_ort_in_ortvalue(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
+            bind_ort_out_names(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
             if num_decode < 2:
                 binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_2],   beam_score_buf)
                 binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_1], beam_score_buf)
@@ -1398,7 +1337,7 @@ while num_decode < generate_limit:
 
         # Feed beam KV + save_id back into Main for next step
         save_id = outputs_Beam[num_keys_values]
-        bind_ort_in(binding_Main, in_name_Main_parts, outputs_Beam)
+        bind_ort_in_ortvalue(binding_Main, in_name_Main_parts, outputs_Beam)
         binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_1], save_id)
 
     else:
@@ -1422,13 +1361,13 @@ while num_decode < generate_limit:
             save_id_numpy[num_decode] = max_logits_idx
 
         # Feed greedy KV outputs back into Main
-        bind_ort_in(binding_Main, in_name_Main_parts, outputs_Main)
+        bind_ort_in_ortvalue(binding_Main, in_name_Main_parts, outputs_Main)
 
         # Streaming print
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
 
     # ── 4. Re-bind Main KV outputs (ORT allocates fresh each step) ───────
-    bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
+    bind_ort_out_names(binding_Main, out_name_Main_kv, _ort_device_type)
 
     # ── 5. Transition: prefill → decode (executes once) ──────────────────
     if is_prefill_step:
@@ -1445,7 +1384,7 @@ while num_decode < generate_limit:
 
         # Switch Penalty to decode logits buffer
         if USE_PENALTY:
-            binding_Penalty.bind_ortvalue_input(in_name_Penalty[0],   decode_logits_buf)
+            binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], decode_logits_buf)
             binding_Penalty.bind_ortvalue_output(out_name_Penalty, decode_logits_buf)
 
         # Switch decode head to decode logits buffer
@@ -1458,10 +1397,10 @@ while num_decode < generate_limit:
             binding_Argmax.bind_ortvalue_input(in_name_Argmax, decode_logits_buf)
 
         is_prefill_step = False
+        
         # Record prefill time and start decode timer
         decode_start_time = time.time()
         prefill_elapsed = decode_start_time - prefill_start_time
-
 
     # ── 6. Prepare next step: Embed + Rotary ─────────────────────────────
     run(ort_session_Embed, binding_Embed)
@@ -1472,7 +1411,6 @@ while num_decode < generate_limit:
 # ══════════════════════════════════════════════════════════════════════════════
 # RESULTS
 # ══════════════════════════════════════════════════════════════════════════════
-
 decode_end_time = time.time()
 
 # Handle edge case where generation stopped at prefill (0 decode tokens after first)
@@ -1481,10 +1419,8 @@ if num_decode <= 1:
     if not hasattr(locals(), 'prefill_elapsed') or 'prefill_elapsed' not in dir():
         prefill_elapsed = decode_end_time - prefill_start_time
     decode_elapsed = 0.0
-    num_pure_decode = 0
 else:
-    decode_elapsed  = decode_end_time - decode_start_time
-    num_pure_decode = num_decode  # First token is from prefill step. However, the last token is not counted.
+    decode_elapsed = decode_end_time - decode_start_time
 
 total_elapsed = decode_end_time - prefill_start_time
 
@@ -1492,7 +1428,7 @@ total_elapsed = decode_end_time - prefill_start_time
 prefill_tokens_per_second = num_prefill / prefill_elapsed if prefill_elapsed > 0 else 0.0
 
 # Decode speed: tokens generated per second (excluding the first token from prefill)
-decode_tokens_per_second = num_pure_decode / decode_elapsed if decode_elapsed > 0 else 0.0
+decode_tokens_per_second = num_decode / decode_elapsed if decode_elapsed > 0 else 0.0
 
 # Overall speed
 overall_tokens_per_second = (num_decode + 1) / total_elapsed if total_elapsed > 0 else 0.0
@@ -1501,7 +1437,6 @@ if USE_PENALTY or USE_BEAM_SEARCH:
     result = tokenizer.decode(save_id.numpy()[0, :num_decode], skip_special_tokens=True)
 else:
     result = tokenizer.decode(save_id_numpy[:num_decode], skip_special_tokens=True)
-
 
 print(
     f"\n\n{'─' * 56}\n"
@@ -1514,9 +1449,8 @@ print(
     f"  {'Phase':<12} {'Speed':>14} {'Tokens':>8} {'Time':>10}\n"
     f"  {'─' * 48}\n"
     f"  {'Prefill':<12} {prefill_tokens_per_second:>10.2f} t/s {num_prefill:>8d} {prefill_elapsed:>8.3f}s\n"
-    f"  {'Decode':<12} {decode_tokens_per_second:>10.2f} t/s {num_pure_decode:>8d} {decode_elapsed:>8.3f}s\n"
+    f"  {'Decode':<12} {decode_tokens_per_second:>10.2f} t/s {num_decode:>8d} {decode_elapsed:>8.3f}s\n"
     f"  {'─' * 48}\n"
     f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
     f"{'─' * 56}\n"
 )
-
