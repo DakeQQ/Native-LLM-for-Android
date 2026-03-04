@@ -852,7 +852,7 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False,
         )
-        del kv_tensors, kv_tensors_Greedy, previous_prob, topK
+        del kv_tensors_Greedy, previous_prob, topK
 
         # ══════════════════════════════════════════════════════════════════
         # Export: Apply Penalty
