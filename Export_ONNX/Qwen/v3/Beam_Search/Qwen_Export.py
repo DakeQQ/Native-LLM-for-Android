@@ -501,7 +501,7 @@ class LLM_MAIN(torch.nn.Module):
         rotary_pos_emb_cos = all_inputs[-3]
         rotary_pos_emb_sin = all_inputs[-2]
         attention_mask     = all_inputs[-1]
-        batch_size         = hidden_states.shape[0].unsqueeze(0)
+        batch_size         = hidden_states.shape[0]
 
         for i, layer in enumerate(self.llm.model.layers):
 
