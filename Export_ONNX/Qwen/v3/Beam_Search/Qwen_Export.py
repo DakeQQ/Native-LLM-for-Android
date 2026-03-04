@@ -491,7 +491,9 @@ class LLM_MAIN(torch.nn.Module):
         return x * torch.rsqrt(x.square().sum(-1, keepdim=True))
 
     def _rotate_half(self, x, batch_size):
-        """Rotate the last dimension by swapping and negating halves (for RoPE)."""
+        """Rotate the last dimension by swapping and negating halves (for RoPE).
+           Using flip() is more efficient than split() + concat() in ONNX Runtime.
+        """
         x = x.view(batch_size, -1, 1, self.qk_heads, 2, self.head_dim_half)
         x = x.flip(-2)
         return x.view(batch_size, -1, 1, self.qk_heads, self.head_dim)
