@@ -777,17 +777,18 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Greedy Search
         # ══════════════════════════════════════════════════════════════════
-        save_id_in = torch.zeros((BEAM_SIZE, 10), dtype=torch.int32)
+        save_id_in = torch.zeros((BEAM_SIZE, 10), dtype=torch.int32)  # 10 is a dummy value.
         
         torch.onnx.export(
             GREEDY_SEARCH(),
             (logits, save_id_in),
             onnx_model_Greedy,
             input_names=['logits', 'save_id_in'],
-            output_names=['max_logits_idx'],
+            output_names=['max_logits_idx', 'save_id_out'],
             dynamic_axes={
                 'logits':         {0: 'batch'},
                 'save_id_in':     {0: 'batch', 1: 'history_len'},
+                'save_id_out':    {0: 'batch', 1: 'history_len'},
                 'max_logits_idx': {0: 'batch'}
             },
             opset_version=OPSET,
@@ -900,7 +901,7 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, batch_axis='batch_size', seq_axis='history_len', out_seq_axis='sliced_len')
         slice_start = torch.tensor([0], dtype=torch.int64)
-        slice_end   = torch.tensor([5], dtype=torch.int64)
+        slice_end   = torch.tensor([5], dtype=torch.int64)  # 5 is a dummy value.
 
         torch.onnx.export(
             KV_SLICE(num_layers),
