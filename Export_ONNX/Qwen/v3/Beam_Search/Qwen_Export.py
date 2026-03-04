@@ -858,13 +858,13 @@ if DO_EXPORT:
         # Export: Apply Penalty
         # ══════════════════════════════════════════════════════════════════
         penalty_value  = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
-        penality_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
+        penalty_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
 
         torch.onnx.export(
             APPLY_PENALTY(),
-            (logits, save_id_in, penalty_value, penality_range),
+            (logits, save_id_in, penalty_value, penalty_range),
             onnx_model_Penalty,
-            input_names=['logits_in', 'save_id_in', 'penalty_value', 'penality_range'],
+            input_names=['logits_in', 'save_id_in', 'penalty_value', 'penalty_range'],
             output_names=['logits_out'],
             dynamic_axes={
                 'logits_in':  {0: 'batch'},
@@ -874,7 +874,7 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False,
         )
-        del save_id_in, penalty_value, penality_range
+        del save_id_in, penalty_value, penalty_range
 
         # ══════════════════════════════════════════════════════════════════
         # Export: Argmax
@@ -1473,8 +1473,7 @@ decode_end_time = time.time()
 # Handle edge case where generation stopped at prefill (0 decode tokens after first)
 if num_decode <= 1:
     # Only prefill happened (or single token generated during prefill step)
-    if not hasattr(locals(), 'prefill_elapsed') or 'prefill_elapsed' not in dir():
-        prefill_elapsed = decode_end_time - prefill_start_time
+    prefill_elapsed = 0.0
     decode_elapsed = 0.0
 else:
     decode_elapsed = decode_end_time - decode_start_time
