@@ -955,12 +955,12 @@ disabled_optimizers = ['CastFloat16Transformer', 'FuseFp16InitializerToFp32NodeT
 # ══════════════════════════════════════════════════════════════════════════════
 if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [{
-        'device_type':              'CPU',          # [CPU, GPU, NPU, GPU.0, GPU.1]
-        'precision':                'ACCURACY',     # [FP32, FP16, ACCURACY]
+        'device_type':              'CPU',                 # [CPU, GPU, NPU, GPU.0, GPU.1]
+        'precision':                'ACCURACY',            # [FP32, FP16, ACCURACY]
         'num_of_threads':           MAX_THREADS if MAX_THREADS != 0 else 8,
         'num_streams':              1,
         'enable_opencl_throttling': False,
-        'enable_qdq_optimizer':     False,
+        'enable_qdq_optimizer':     False,                 # Disable to avoid loading error with some models; can be re-enabled if not an issue
         'disable_dynamic_shapes':   False,
     }]
     device_type      = 'cpu'
@@ -969,19 +969,19 @@ if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
 elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
     provider_options = [{
         'device_id':                          DEVICE_ID,
-        'gpu_mem_limit':                      24 * 1024 * 1024 * 1024,  # 24GB
-        'arena_extend_strategy':              'kNextPowerOfTwo',
-        'cudnn_conv_algo_search':             'EXHAUSTIVE',
-        'sdpa_kernel':                        '2',
+        'gpu_mem_limit':                      24 * (1024 **3),    # 24GB
+        'arena_extend_strategy':              'kNextPowerOfTwo',  # ["DEFAULT", "HEURISTIC", "EXHAUSTIVE"]
+        'cudnn_conv_algo_search':             'EXHAUSTIVE',       # ["kNextPowerOfTwo", "kSameAsRequested"]
+        'sdpa_kernel':                        '2',                # ["0", "1", "2"]
         'use_tf32':                           '1',
-        'fuse_conv_bias':                     '0',      # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'fuse_conv_bias':                     '0',          # Disable to avoid loading error with some models; can be re-enabled if not an issue
         'cudnn_conv_use_max_workspace':       '1',
         'cudnn_conv1d_pad_to_nc1d':           '0',
         'tunable_op_enable':                  '0',
         'tunable_op_tuning_enable':           '0',
         'tunable_op_max_tuning_duration_ms':  10,
         'do_copy_in_default_stream':          '0',
-        'enable_cuda_graph':                  '0',      # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'enable_cuda_graph':                  '0',          # Disable to avoid loading error with some models; can be re-enabled if not an issue
         'prefer_nhwc':                        '0',
         'enable_skip_layer_norm_strict_mode': '0',
         'use_ep_level_unified_stream':        '0',
@@ -1454,3 +1454,4 @@ print(
     f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
     f"{'─' * 56}\n"
 )
+
