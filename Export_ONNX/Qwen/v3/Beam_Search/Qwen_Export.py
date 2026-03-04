@@ -187,25 +187,25 @@ class KV_SLICE(torch.nn.Module):
         self.num_layers_3 = num_layers * 3
         self.num_layers_4 = num_layers * 4
         self.num_layers_5 = num_layers * 5
-        self.save_key = [None] * num_layers
+        self.save_key   = [None] * num_layers
         self.save_value = [None] * num_layers
         if self.kv_quantized:
             self.save_k_scale = [None] * num_layers
-            self.save_k_bias = [None] * num_layers
+            self.save_k_bias  = [None] * num_layers
             self.save_v_scale = [None] * num_layers
-            self.save_v_bias = [None] * num_layers
+            self.save_v_bias  = [None] * num_layers
 
     def forward(self, *all_inputs):
         slice_start = all_inputs[-2]
         slice_end = all_inputs[-1]
         for i in range(self.num_layers):
-            self.save_key[i] = all_inputs[i][..., slice_start: slice_end]
+            self.save_key[i]   = all_inputs[i][..., slice_start: slice_end]
             self.save_value[i] = all_inputs[i + self.num_layers][..., slice_start: slice_end, :]
             if self.kv_quantized:
                 self.save_k_scale[i] = all_inputs[i + self.num_layers_2][..., slice_start: slice_end]
-                self.save_k_bias[i] = all_inputs[i + self.num_layers_3][..., slice_start: slice_end]
+                self.save_k_bias[i]  = all_inputs[i + self.num_layers_3][..., slice_start: slice_end]
                 self.save_v_scale[i] = all_inputs[i + self.num_layers_4][..., slice_start: slice_end, :]
-                self.save_v_bias[i] =all_inputs[i + self.num_layers_5][..., slice_start: slice_end, :]
+                self.save_v_bias[i]  = all_inputs[i + self.num_layers_5][..., slice_start: slice_end, :]
         if self.kv_quantized:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias
         return *self.save_key, *self.save_value
