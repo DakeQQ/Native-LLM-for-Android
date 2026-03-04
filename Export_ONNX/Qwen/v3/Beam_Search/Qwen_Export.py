@@ -465,7 +465,7 @@ class LLM_MAIN(torch.nn.Module):
         gate_up = torch.nn.Linear(gate.in_features, gate.out_features + up.out_features, bias=False)
         gate_up.weight.copy_(torch.cat([
             gate.weight * post_norm_weight,
-            up.weight * post_norm_weight,
+            up.weight * post_norm_weight
         ], dim=0))
 
         layer.mlp.gate_up_proj = gate_up
@@ -642,7 +642,7 @@ if DO_EXPORT:
         elif KV_QUANT_DTYPE in ("Q8", "Q8_CUDA"):
             kv_specs.extend([
                 ('key_scale', 4), ('key_bias', 4),
-                ('value_scale', 3), ('value_bias', 3),
+                ('value_scale', 3), ('value_bias', 3)
             ])
             kv_dtype = torch.int32 if KV_QUANT_DTYPE == "Q8_CUDA" else torch.uint8
         else:
@@ -658,14 +658,14 @@ if DO_EXPORT:
 
         kv_tensors = {
             'key':   torch.zeros((batch_size, num_kv_heads, 1, k_head, history_len), dtype=kv_dtype),
-            'value': torch.zeros((batch_size, num_kv_heads, 1, history_len, v_head), dtype=kv_dtype),
+            'value': torch.zeros((batch_size, num_kv_heads, 1, history_len, v_head), dtype=kv_dtype)
         }
         if KV_QUANT_DTYPE in ("Q8", "Q8_CUDA"):
             kv_tensors.update({
                 'key_scale':   torch.ones((batch_size, num_kv_heads, 1, 1, history_len), dtype=scale_dtype),
                 'key_bias':    torch.ones((batch_size, num_kv_heads, 1, 1, history_len), dtype=scale_dtype),
                 'value_scale': torch.ones((batch_size, num_kv_heads, 1, history_len, 1), dtype=scale_dtype),
-                'value_bias':  torch.ones((batch_size, num_kv_heads, 1, history_len, 1), dtype=scale_dtype),
+                'value_bias':  torch.ones((batch_size, num_kv_heads, 1, history_len, 1), dtype=scale_dtype)
             })
 
         # ══════════════════════════════════════════════════════════════════
@@ -697,10 +697,10 @@ if DO_EXPORT:
             output_names=['hidden_states'],
             dynamic_axes={
                 'input_ids':     {0: 'batch', 1: 'ids_len'},
-                'hidden_states': {0: 'batch', 1: 'ids_len'},
+                'hidden_states': {0: 'batch', 1: 'ids_len'}
             },
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
         del input_ids
 
@@ -716,10 +716,10 @@ if DO_EXPORT:
             dynamic_axes={
                 'rotary_cos':     {1: 'ids_len'},
                 'rotary_sin':     {1: 'ids_len'},
-                'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'},
+                'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'}
             },
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
 
         # ══════════════════════════════════════════════════════════════════
@@ -733,7 +733,7 @@ if DO_EXPORT:
             output_names=['rotary_cos', 'rotary_sin', 'kv_seq_len'],
             dynamic_axes=None,
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
 
         # ══════════════════════════════════════════════════════════════════
@@ -755,7 +755,7 @@ if DO_EXPORT:
             'logits':         {0: 'batch'},
             'rotary_cos':     {1: 'ids_len'},
             'rotary_sin':     {1: 'ids_len'},
-            'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'},
+            'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'}
         }
 
         model_Main = LLM_MAIN(model, num_heads, num_kv_heads, head_dim, num_layers, hidden_size)
@@ -769,7 +769,7 @@ if DO_EXPORT:
             output_names=output_names,
             dynamic_axes=dynamic_axes,
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
         del model_Main, hidden_states, attention_mask, all_inputs
         gc.collect()
@@ -788,10 +788,10 @@ if DO_EXPORT:
             dynamic_axes={
                 'logits':         {0: 'batch'},
                 'save_id_in':     {0: 'batch', 1: 'history_len'},
-                'max_logits_idx': {0: 'batch'},
+                'max_logits_idx': {0: 'batch'}
             },
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
 
         # ══════════════════════════════════════════════════════════════════
@@ -820,10 +820,10 @@ if DO_EXPORT:
                 'top_beam_indices': {0: 'batch'},
                 'max_logits_idx':   {0: 'batch'},
                 'batch_indices':    {0: 'batch'},
-                'save_id_out':      {0: 'batch', 1: 'history_len'},
+                'save_id_out':      {0: 'batch', 1: 'history_len'}
             },
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
 
         # ══════════════════════════════════════════════════════════════════
@@ -847,10 +847,10 @@ if DO_EXPORT:
                 'save_id_out':      {0: 'batch', 1: 'history_len'},
                 'top_beam_prob':    {0: 'batch'},
                 'top_beam_indices': {0: 'batch'},
-                'max_logits_idx':   {0: 'batch'},
+                'max_logits_idx':   {0: 'batch'}
             },
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
         del kv_tensors_Greedy, previous_prob, topK
 
@@ -869,10 +869,10 @@ if DO_EXPORT:
             dynamic_axes={
                 'logits_in':  {0: 'batch'},
                 'save_id_in': {0: 'batch', 1: 'history_len'},
-                'logits_out': {0: 'batch'},
+                'logits_out': {0: 'batch'}
             },
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
         del save_id_in, penalty_value, penalty_range
 
@@ -887,10 +887,10 @@ if DO_EXPORT:
             output_names=['max_logits_idx'],
             dynamic_axes={
                 'logits':         {0: 'batch'},
-                'max_logits_idx': {0: 'batch'},
+                'max_logits_idx': {0: 'batch'}
             },
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
         del logits
         gc.collect()
@@ -910,7 +910,7 @@ if DO_EXPORT:
             output_names=kv_out_names,
             dynamic_axes=kv_axes,
             opset_version=OPSET,
-            dynamo=False,
+            dynamo=False
         )
         del slice_start, slice_end, kv_ins, kv_in_names, kv_out_names, kv_axes, kv_tensors
         gc.collect()
@@ -947,14 +947,13 @@ def create_ort_with_shape(shape, dtype, device, device_id):
     return onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(shape, dtype=dtype), device, device_id)
 
 
-def create_session(model_path, _session_opts, _providers, _provider_options, _run_options, _disabled_optimizers):
+def create_session(model_path, _session_opts, _providers, _provider_options, _disabled_optimizers):
     """Create an ORT InferenceSession with standard options."""
     return onnxruntime.InferenceSession(
         model_path,
         sess_options=_session_opts,
         providers=_providers,
         provider_options=_provider_options,
-        run_options=_run_options,
         disabled_optimizers=_disabled_optimizers)
 
 
@@ -997,7 +996,7 @@ _session_configs = {
     'optimization.minimal_build_optimizations':      '',
     'optimization.enable_cast_chain_elimination':    '1',
     'optimization.disable_specified_optimizers':
-        'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else '',
+        'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else ''
 }
 for k, v in _session_configs.items():
     session_opts.add_session_config_entry(k, v)
@@ -1018,7 +1017,7 @@ if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
         'num_streams':              1,
         'enable_opencl_throttling': False,
         'enable_qdq_optimizer':     False,                 # Disable to avoid loading error with some models; can be re-enabled if not an issue
-        'disable_dynamic_shapes':   False,
+        'disable_dynamic_shapes':   False
     }]
     device_type      = 'cpu'
     _ort_device_type = C.OrtDevice.cpu()
@@ -1041,7 +1040,7 @@ elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
         'enable_cuda_graph':                  '0',          # Disable to avoid loading error with some models; can be re-enabled if not an issue
         'prefer_nhwc':                        '0',
         'enable_skip_layer_norm_strict_mode': '0',
-        'use_ep_level_unified_stream':        '0',
+        'use_ep_level_unified_stream':        '0'
     }]
     device_type      = 'cuda'
     _ort_device_type = C.OrtDevice.cuda()
@@ -1067,8 +1066,7 @@ packed_settings = {
     "_session_opts":        session_opts,
     "_providers":           ORT_Accelerate_Providers,
     "_provider_options":    provider_options,
-    "_run_options":         run_options,
-    "_disabled_optimizers": disabled_optimizers,
+    "_disabled_optimizers": disabled_optimizers
 }
 
 _ort_device_type = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
