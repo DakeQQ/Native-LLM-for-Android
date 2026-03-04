@@ -17,6 +17,7 @@ onnx_model_First_Beam           = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_
 onnx_model_Second_Beam          = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
 onnx_model_Penalty              = r'/home/DakeQQ/Downloads/Qwen_ONNX/Apply_Penalty.onnx'
 onnx_model_Argmax               = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
+onnx_model_KV_Slice             = r'/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.onnx'
 
 
 # Test input
@@ -173,65 +174,41 @@ class ARGMAX(torch.nn.Module):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Embedding Module
+# KV Cache Slice
 # ══════════════════════════════════════════════════════════════════════════════
-class LLM_EMBED(torch.nn.Module):
-    """Extract and apply the token embedding layer in float32."""
+class KV_SLICE(torch.nn.Module):
+    """Apply slice to KV cache tensors."""
 
-    def __init__(self, llm):
+    def __init__(self, num_layers):
         super().__init__()
-        self.embed_tokens = llm.model.embed_tokens.float()
+        self.kv_quantized = (KV_QUANT_DTYPE == "Q8") or (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.num_layers = num_layers
+        self.num_layers_2 = num_layers * 2
+        self.num_layers_3 = num_layers * 3
+        self.num_layers_4 = num_layers * 4
+        self.num_layers_5 = num_layers * 5
+        self.save_key = [None] * num_layers
+        self.save_value = [None] * num_layers
+        if self.kv_quantized:
+            self.save_k_scale = [None] * num_layers
+            self.save_k_bias = [None] * num_layers
+            self.save_v_scale = [None] * num_layers
+            self.save_v_bias = [None] * num_layers
 
-    def forward(self, input_ids):
-        return self.embed_tokens(input_ids)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Rotary Positional Embedding & Attention Mask
-# ══════════════════════════════════════════════════════════════════════════════
-class ROTARY_MASK_PREFILL(torch.nn.Module):
-    """Precompute rotary embeddings and causal mask for the prefill phase."""
-
-    def __init__(self, llm, max_seq_len):
-        super().__init__()
-
-        # Causal attention mask: upper triangle → -128
-        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, max_seq_len, max_seq_len, dtype=torch.int8))) * -128
-
-        # Precompute rotary embeddings
-        cos, sin = self._build_rotary_table(llm, max_seq_len)
-        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half(), persistent=False)
-        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half(), persistent=False)
-
-    @staticmethod
-    def _build_rotary_table(llm, max_seq_len):
-        position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
-        inv_freq = llm.model.rotary_emb.inv_freq
-        idx_theta = (position_ids * inv_freq).unsqueeze(1).unsqueeze(1).unsqueeze(0)
-        return torch.cos(idx_theta), torch.sin(idx_theta)
-
-    def forward(self, ids_len, history_len):
-        kv_seq_len = ids_len + history_len
-        rotary_cos = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
-        rotary_sin = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
-        attention_mask = self.attention_mask[..., :ids_len, :kv_seq_len].float()
-        return rotary_cos, rotary_sin, attention_mask, kv_seq_len
-
-
-class ROTARY_MASK_DECODE(torch.nn.Module):
-    """Provide rotary embeddings for a single decode step."""
-
-    def __init__(self, llm, max_seq_len):
-        super().__init__()
-        cos, sin = ROTARY_MASK_PREFILL._build_rotary_table(llm, max_seq_len)
-        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half(), persistent=False)
-        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half(), persistent=False)
-
-    def forward(self, kv_seq_len):
-        kv_seq_len_next = kv_seq_len + 1
-        rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len_next].float()
-        rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len_next].float()
-        return rotary_cos, rotary_sin, kv_seq_len_next
+    def forward(self, *all_inputs):
+        slice_start = all_inputs[-2]
+        slice_end = all_inputs[-1]
+        for i in range(self.num_layers):
+            self.save_key[i] = all_inputs[i][..., slice_start: slice_end]
+            self.save_value[i] = all_inputs[i + self.num_layers][..., slice_start: slice_end, :]
+            if self.kv_quantized:
+                self.save_k_scale[i] = all_inputs[i + self.num_layers_2][..., slice_start: slice_end]
+                self.save_k_bias[i] = all_inputs[i + self.num_layers_3][..., slice_start: slice_end]
+                self.save_v_scale[i] = all_inputs[i + self.num_layers_4][..., slice_start: slice_end, :]
+                self.save_v_bias[i] =all_inputs[i + self.num_layers_5][..., slice_start: slice_end, :]
+        if self.kv_quantized:
+            return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias
+        return *self.save_key, *self.save_value
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -291,6 +268,68 @@ class KVQuantizer(torch.nn.Module):
             k_packed = self.pack_q8_cuda(k_packed, -2, batch_size, num_kv_heads, head_dim_quarter)
             v_packed = self.pack_q8_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
         return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Embedding Module
+# ══════════════════════════════════════════════════════════════════════════════
+class LLM_EMBED(torch.nn.Module):
+    """Extract and apply the token embedding layer in float32."""
+
+    def __init__(self, llm):
+        super().__init__()
+        self.embed_tokens = llm.model.embed_tokens.float()
+
+    def forward(self, input_ids):
+        return self.embed_tokens(input_ids)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Rotary Positional Embedding & Attention Mask
+# ══════════════════════════════════════════════════════════════════════════════
+class ROTARY_MASK_PREFILL(torch.nn.Module):
+    """Precompute rotary embeddings and causal mask for the prefill phase."""
+
+    def __init__(self, llm, max_seq_len):
+        super().__init__()
+
+        # Causal attention mask: upper triangle → -128
+        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, max_seq_len, max_seq_len, dtype=torch.int8))) * -128
+
+        # Precompute rotary embeddings
+        cos, sin = self._build_rotary_table(llm, max_seq_len)
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half(), persistent=False)
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half(), persistent=False)
+
+    @staticmethod
+    def _build_rotary_table(llm, max_seq_len):
+        position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
+        inv_freq = llm.model.rotary_emb.inv_freq
+        idx_theta = (position_ids * inv_freq).unsqueeze(1).unsqueeze(1).unsqueeze(0)
+        return torch.cos(idx_theta), torch.sin(idx_theta)
+
+    def forward(self, ids_len, history_len):
+        kv_seq_len = ids_len + history_len
+        rotary_cos = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        attention_mask = self.attention_mask[..., :ids_len, :kv_seq_len].float()
+        return rotary_cos, rotary_sin, attention_mask, kv_seq_len
+
+
+class ROTARY_MASK_DECODE(torch.nn.Module):
+    """Provide rotary embeddings for a single decode step."""
+
+    def __init__(self, llm, max_seq_len):
+        super().__init__()
+        cos, sin = ROTARY_MASK_PREFILL._build_rotary_table(llm, max_seq_len)
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half(), persistent=False)
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half(), persistent=False)
+
+    def forward(self, kv_seq_len):
+        kv_seq_len_next = kv_seq_len + 1
+        rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len_next].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len_next].float()
+        return rotary_cos, rotary_sin, kv_seq_len_next
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -632,8 +671,7 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Helper: Build KV I/O names, tensors, and dynamic axes
         # ══════════════════════════════════════════════════════════════════
-        def get_kv_io(tensors_dict, batch_axis='batch_size',
-                      seq_axis='history_len', out_seq_axis='kv_seq_len'):
+        def get_kv_io(tensors_dict, batch_axis='batch_size', seq_axis='history_len', out_seq_axis='kv_seq_len'):
             inputs, in_names, out_names, axes = [], [], [], {}
             for name, dim in kv_specs:
                 tensor = tensors_dict[name]
@@ -730,7 +768,6 @@ if DO_EXPORT:
             input_names=input_names,
             output_names=output_names,
             dynamic_axes=dynamic_axes,
-            do_constant_folding=True,
             opset_version=OPSET,
             dynamo=False,
         )
@@ -857,6 +894,26 @@ if DO_EXPORT:
         )
         del logits
         gc.collect()
+        
+        # ══════════════════════════════════════════════════════════════════
+        # Export: KV Slice
+        # ══════════════════════════════════════════════════════════════════
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, batch_axis='batch_size', seq_axis='history_len', out_seq_axis='sliced_len')
+        slice_start = torch.tensor([0], dtype=torch.int64)
+        slice_end   = torch.tensor([5], dtype=torch.int64)
+
+        torch.onnx.export(
+            KV_SLICE(num_layers),
+            tuple(kv_ins + [slice_start, slice_end]),
+            onnx_model_KV_Slice,
+            input_names=kv_in_names + ['slice_start', 'slice_end'],
+            output_names=kv_out_names,
+            dynamic_axes=kv_axes,
+            opset_version=OPSET,
+            dynamo=False,
+        )
+        del slice_start, slice_end, kv_ins, kv_in_names, kv_out_names, kv_axes, kv_tensors
+        gc.collect()
 
     print(
         '\nExport done!\n\n'
@@ -868,13 +925,13 @@ if DO_EXPORT:
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
-def bind_ort_in_ortvalue(binding, names, values):
+def bind_ort_in(binding, names, values):
     """Bind OrtValue inputs by name."""
     for name, val in zip(names, values):
         binding.bind_ortvalue_input(name, val)
 
 
-def bind_ort_out_names(binding, names, device):
+def bind_ort_out(binding, names, device):
     """Bind outputs by name, letting ORT allocate on `device`."""
     for name in names:
         binding._iobinding.bind_output(name, device)
@@ -1227,7 +1284,7 @@ prefill_start_time = time.time()
 
 # --- Step 1: Embed the input tokens ---
 binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
-bind_ort_out_names(binding_Embed, [out_name_Embed], _ort_device_type)
+bind_ort_out(binding_Embed, [out_name_Embed], _ort_device_type)
 run(ort_session_Embed, binding_Embed)
 outputs_Embed = binding_Embed.get_outputs()[0]
 
@@ -1237,7 +1294,7 @@ binding_Embed.bind_ortvalue_input(in_name_Embed, max_idx_buf)
 # --- Step 2: Compute rotary embeddings & causal mask (prefill) ---
 binding_Rotary_Mask_Prefill.bind_ortvalue_input(in_name_Rotary_Mask_Prefill[0], ids_len)
 binding_Rotary_Mask_Prefill.bind_ortvalue_input(in_name_Rotary_Mask_Prefill[1], init_history_len)
-bind_ort_out_names(binding_Rotary_Mask_Prefill, out_name_Rotary_Mask_Prefill, _ort_device_type)
+bind_ort_out(binding_Rotary_Mask_Prefill, out_name_Rotary_Mask_Prefill, _ort_device_type)
 run(ort_session_Rotary_Mask_Prefill, binding_Rotary_Mask_Prefill)
 rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Mask_Prefill.get_outputs()
 
@@ -1268,7 +1325,7 @@ if k_scales is not None:
             i += 1
 
 # --- Step 6: Bind Main model outputs ---
-bind_ort_out_names(binding_Main, out_name_Main_kv, _ort_device_type)
+bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
 binding_Main.bind_ortvalue_output(out_name_Main_logits, prefill_logits_buf)
 
 # --- Step 7: Bind penalty inputs/outputs to prefill logits buffer ---
@@ -1311,8 +1368,8 @@ while num_decode < generate_limit:
         # ── 3a. Beam Search ─────────────────────────────────────────────
         if is_prefill_step:
             # First beam step: expand single-beam KV into BEAM_SIZE beams
-            bind_ort_in_ortvalue(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
-            bind_ort_out_names(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
+            bind_ort_in(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
+            bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
             binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_1], beam_score_buf)
             binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_2], beam_embed_input_buf)
             binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_3], max_idx_buf)
@@ -1320,8 +1377,8 @@ while num_decode < generate_limit:
             outputs_Beam = binding_First_Beam.get_outputs()
         else:
             # Subsequent beam steps: prune + expand
-            bind_ort_in_ortvalue(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
-            bind_ort_out_names(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
+            bind_ort_in(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
+            bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
             if num_decode < 2:
                 binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_2],   beam_score_buf)
                 binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_1], beam_score_buf)
@@ -1337,7 +1394,7 @@ while num_decode < generate_limit:
 
         # Feed beam KV + save_id back into Main for next step
         save_id = outputs_Beam[num_keys_values]
-        bind_ort_in_ortvalue(binding_Main, in_name_Main_parts, outputs_Beam)
+        bind_ort_in(binding_Main, in_name_Main_parts, outputs_Beam)
         binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_1], save_id)
 
     else:
@@ -1361,13 +1418,13 @@ while num_decode < generate_limit:
             save_id_numpy[num_decode] = max_logits_idx
 
         # Feed greedy KV outputs back into Main
-        bind_ort_in_ortvalue(binding_Main, in_name_Main_parts, outputs_Main)
+        bind_ort_in(binding_Main, in_name_Main_parts, outputs_Main)
 
         # Streaming print
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
 
     # ── 4. Re-bind Main KV outputs (ORT allocates fresh each step) ───────
-    bind_ort_out_names(binding_Main, out_name_Main_kv, _ort_device_type)
+    bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
 
     # ── 5. Transition: prefill → decode (executes once) ──────────────────
     if is_prefill_step:
@@ -1454,4 +1511,3 @@ print(
     f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
     f"{'─' * 56}\n"
 )
-
