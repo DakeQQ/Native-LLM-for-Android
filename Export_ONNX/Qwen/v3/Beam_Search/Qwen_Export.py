@@ -485,10 +485,10 @@ class LLM_MAIN(torch.nn.Module):
                 LLM_MAIN._replace_gelu_with_tanh_approximation(child)
 
     def _rms_norm(self, x):
-        """Apply RMS normalization (with optional overflow scaling)."""
+        """Apply modified RMS normalization (with optional overflow scaling)."""
         if PREVENT_F16_OVERFLOW:
             x = x * self.overflow_scale
-        return x * torch.rsqrt(x.square().sum(-1, keepdim=True))
+        return x * torch.rsqrt(x.square().sum(-1, keepdim=True)) # Note, not the .mean()
 
     def _rotate_half(self, x, batch_size):
         """Rotate the last dimension by swapping and negating halves (for RoPE).
@@ -1511,3 +1511,4 @@ print(
     f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
     f"{'─' * 56}\n"
 )
+
