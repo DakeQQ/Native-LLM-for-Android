@@ -30,7 +30,7 @@ from onnxruntime.quantization import (
 # File Paths
 ORIGINAL_FOLDER_PATH = r"/home/DakeQQ/Downloads/Qwen_ONNX"
 QUANTED_FOLDER_PATH = r"/home/DakeQQ/Downloads/Qwen_Optimized"
-DOWNLOAD_PATH = r"/home/DakeQQ/Downloads/Qwen3-1.7B"
+DOWNLOAD_PATH = r"/home/iamj/Downloads/Qwen3-VL-2B-Instruct"
 
 # Model List
 MODEL_NAMES = [
@@ -41,19 +41,21 @@ MODEL_NAMES = [
     "Second_Beam_Search",
     "Apply_Penalty",
     "Argmax",
-
-    "Rotary_Mask_Prefill",
-    "Rotary_Mask_Decode",
     "KV_Slice",
+    # "Rotary_Mask_Prefill",
+    # "Rotary_Mask_Decode",
+
 
     # -------------
     # Vision Models
     # -------------
 
-    # "LLM_Vision",
-    # "LLM_Concat",
-    # "LLM_Rotary_Vision",
-    # "LLM_Rotary_Text",
+    "LLM_Vision",
+    "LLM_Concat",
+    "Rotary_Mask_Vision_Prefill",
+    "Rotary_Mask_Vision_Decode",
+    "Rotary_Mask_Text_Prefill",
+    "Rotary_Mask_Text_Decode"
 ]
 
 # Quantization Settings
@@ -452,3 +454,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
