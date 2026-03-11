@@ -139,9 +139,6 @@ def _patch_optimizer_file(disable_transpose: bool) -> None:
             f.write(content)
         print(f"Patched {optimizer_path}")
 
-    import onnxruntime
-    importlib.reload(onnxruntime.transformers.optimizer)
-
 
 def optimize_onnx_model(
     model_path: str,
@@ -450,5 +447,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
