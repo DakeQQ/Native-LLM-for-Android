@@ -10,57 +10,70 @@ from transformers import Qwen3VLForConditionalGeneration, Qwen3VLVisionModel, Au
 from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLTextRotaryEmbedding
 
 
-download_path               = r'/home/DakeQQ/Downloads/Qwen3-VL-2B-Instruct'          # Set the folder path where the Qwen3-VL whole project downloaded.
-onnx_model_Embed            = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'      # Assign a path where the exported QwenVL model stored.
-onnx_model_Vision           = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Vision.onnx'
-onnx_model_Concat           = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat.onnx'
-onnx_model_Rotary_Vision    = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Rotary_Vision.onnx'
-onnx_model_Rotary_Text      = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Rotary_Text.onnx'
-onnx_model_Main             = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
-onnx_model_Greedy           = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
-onnx_model_First_Beam       = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
-onnx_model_Second_Beam      = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
-onnx_model_Penalty          = r'/home/DakeQQ/Downloads/Qwen_ONNX/Apply_Penalty.onnx'
-onnx_model_Argmax           = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
+download_path                          = r'/home/DakeQQ/Downloads/Qwen3-VL-2B-Instruct'          # Set the folder path where the Qwen3-VL whole project downloaded.
+onnx_model_Embed                       = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'      # Assign a path where the exported QwenVL model stored.
+onnx_model_Vision                      = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Vision.onnx'
+onnx_model_Concat                      = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat.onnx'
+onnx_model_Rotary_Vision_Prefill       = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Mask_Vision_Prefill.onnx'
+onnx_model_Rotary_Vision_Decode        = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Mask_Vision_Decode.onnx'
+onnx_model_Rotary_Text_Prefill         = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Mask_Text_Prefill.onnx'
+onnx_model_Rotary_Text_Decode          = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Mask_Text_Decode.onnx'
+onnx_model_Main                        = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
+onnx_model_Greedy                      = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
+onnx_model_First_Beam                  = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
+onnx_model_Second_Beam                 = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
+onnx_model_Penalty                     = r'/home/DakeQQ/Downloads/Qwen_ONNX/Apply_Penalty.onnx'
+onnx_model_Argmax                      = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
+onnx_model_KV_Slice                    = r'/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.onnx'
 
 # Test Input
-TEST_IMAGE = r"../psyduck.png"                                      # Test image for the exported onnx model.
-TEST_QUERY = "Describe this image."                                 # Test query for the exported onnx model.
+TEST_IMAGE = r"../psyduck.png"                             # Test image for the exported onnx model.
+TEST_QUERY = "Describe this image."                        # Test query for the exported onnx model.
 
-DO_EXPORT = True                                                    # Whether to export the ONNX models
+# Model Config
+DO_EXPORT = True                                           # Whether to export the ONNX models
+PREVENT_F16_OVERFLOW = False                               # Prevent float16 overflow. Set True for Q4F16 or Q8F16 or F16 quantization.
+STOP_TOKEN = [151643, 151645]                              # Qwen stop token ids
+MAX_SEQ_LEN = 4096                                         # Max context length. Can not edit after export.
 
-KV_QUANT_DTYPE = "F16"                                              # "Q8" | "Q8_CUDA" | "F16" | "F32"
-USE_FLOAT16_SCALE_BIAS = True                                       # If choose Q8, whether to use float16 for scale and bias.
-PREVENT_F16_OVERFLOW = False                                        # Prevent float16 overflow. Set True for Q4F16 or Q8F16 or F16 quantization.
+# Vision Config
+HEIGHT_FACTOR = 15                                         # Adjust this value to determine the resize shape and vision resolution.
+WIDTH_FACTOR = 15                                          # Adjust this value to determine the resize shape and vision resolution.
+IMAGE_RESIZE = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]     # 32 = self.patch_size * self.merge_size
+INPUT_IMAGE_SIZE = [960, 960]                              # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
+VISION_BATCH_SIZE = 1                                      # Set the number of images for the vision LLM, whether DYNAMIC_IMAGE_SHAPE is True or False.
+DYNAMIC_IMAGE_SHAPE = False                                # Allow for a dynamic number of image inputs.
+INPUT_IMAGE_DIM = 5                                        # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
 
-MAX_SEQ_LEN = 4096                                                  # The max token length. Note, this value include inputs and generated.
-STOP_TOKEN = [151643, 151645]                                       # The stop_id in Qwen is "151643" & "151645"
+# KV cache quantization
+KV_QUANT_DTYPE = "F16"                                     # "Q8" | "Q8_CUDA" | "F16" | "F32"
+USE_FLOAT16_SCALE_BIAS = True                              # If choose Q8, whether to use float16 for scale and bias.
 
-HEIGHT_FACTOR = 15                                                  # Adjust this value to determine the resize shape and vision resolution.
-WIDTH_FACTOR = 15                                                   # Adjust this value to determine the resize shape and vision resolution.
-IMAGE_RESIZE = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]              # 32 = self.patch_size * self.merge_size
-INPUT_IMAGE_SIZE = [960, 960]                                       # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
+# Decoding strategy
+USE_BEAM_SEARCH = False                                    # Use beam search or greedy search
+REPEAT_PENALTY = 1.0                                       # 0.0 ~ 1.0; No penalty = 1.0
+PENALTY_RANGE = 20                                         # Recent-token window to apply penalty
+MAX_BEAM_SIZE = 10                                         # Max beam size for beam search. Can not edit after export.
+TOP_K = 3                                                  # Top-K for beam search
+BEAM_SIZE = 3                                              # Beam size for beam search. Must be <= MAX_BEAM_SIZE
 
-VISION_BATCH_SIZE = 1                                               # Set the number of images for the vision LLM, whether DYNAMIC_IMAGE_SHAPE is True or False.
-DYNAMIC_IMAGE_SHAPE = False                                         # Allow for a dynamic number of image inputs.
-INPUT_IMAGE_DIM = 5                                                 # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
-
-USE_BEAM_SEARCH = False                                             # Use beam search or greedy search.
-TOP_K = 3                                                           # The top k candidate in decoding.
-BEAM_SIZE = 3                                                       # Number of beams in searching.
-MAX_BEAM_SIZE = 10                                                  # Max beams for exported model.
-REPEAT_PENALITY = 1.0                                               # Range from 0.0 to 1.0; "1.0" means no penality.
-PENALTY_RANGE = 20                                                  # Penalizes the most recent output. "10" means the last 10 tokens.
-
-ORT_Accelerate_Providers = []                                       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
-MAX_THREADS = 0                                                     # 0 = auto
-DEVICE_ID = 0                                                       # Device ID for GPU
-OPSET = 17                                                          # ONNX opset version
+# Runtime config
+ORT_LOG = False                                            # Enable ONNX Runtime logging for debugging. Set to False for best performance.
+ORT_FP16 = False                                           # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
+ORT_Accelerate_Providers = []                              # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+MAX_THREADS = 0                                            # 0 = auto
+DEVICE_ID = 0                                              # Device ID for GPU
+OPSET = 17                                                 # ONNX opset version
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Decoding Strategy Modules
+# ══════════════════════════════════════════════════════════════════════════════
 class GREEDY_SEARCH(torch.nn.Module):
+    """Greedy decoding: select the token with the highest logit."""
+
     def __init__(self):
-        super(GREEDY_SEARCH, self).__init__()
+        super().__init__()
 
     def forward(self, logits, save_id):
         max_logits_idx = torch.argmax(logits, dim=-1, keepdim=True).int()
@@ -69,30 +82,47 @@ class GREEDY_SEARCH(torch.nn.Module):
 
 
 class FIRST_BEAM_SEARCH(torch.nn.Module):
+    """First beam-search step: expand a single hypothesis into `beam_size` beams."""
+
     def __init__(self, total_layers):
-        super(FIRST_BEAM_SEARCH, self).__init__()
+        super().__init__()
         self.total_layers = total_layers
         self.save_keys_values = [None] * self.total_layers
+        self.kv_q8_cuda = (KV_QUANT_DTYPE == "Q8_CUDA")
 
     def forward(self, *all_inputs):
         logits = all_inputs[-3]
         save_id = all_inputs[-2]
         beam_size = all_inputs[-1]
+
+        # Compute log-probabilities for the top-k beams
         row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
         top_beam_logits, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=False, largest=True)
         top_beam_prob = top_beam_logits - row_logsumexp
+
+        # Replicate KV caches across all beams
         for i in range(self.total_layers):
-            self.save_keys_values[i] = all_inputs[i].repeat(beam_size, *([1] * (all_inputs[i].dim() - 1)))
-        top_beam_indices = top_beam_indices.transpose(0, 1)
-        top_beam_indices = top_beam_indices.int()
+            kv = all_inputs[i]
+            self.save_keys_values[i] = kv.repeat(beam_size, *([1] * (kv.dim() - 1)))
+
+        top_beam_indices = top_beam_indices.transpose(0, 1).int()
         save_id = torch.cat([save_id, top_beam_indices], dim=-1)
-        max_logits_idx = top_beam_indices[0]
-        return *self.save_keys_values, top_beam_indices, save_id, top_beam_prob.transpose(0, 1), max_logits_idx
+        max_logits_idx = top_beam_indices[[0]]
+
+        return (
+            *self.save_keys_values,
+            save_id,
+            top_beam_prob.transpose(0, 1),
+            top_beam_indices,
+            max_logits_idx
+        )
 
 
 class SECOND_BEAM_SEARCH(torch.nn.Module):
+    """Subsequent beam-search steps: prune and re-expand beams."""
+
     def __init__(self, total_layers):
-        super(SECOND_BEAM_SEARCH, self).__init__()
+        super().__init__()
         self.total_layers = total_layers
         self.save_keys_values = [None] * self.total_layers
 
@@ -101,56 +131,180 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         save_id = all_inputs[-4]
         previous_prob = all_inputs[-3]
         beam_size = all_inputs[-2]
-        topK = all_inputs[-1]
+        top_k = all_inputs[-1]
+
+        # Compute log-probabilities and accumulate with previous scores
         row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_k_logits, top_k_indices = torch.topk(logits, k=topK, dim=-1, largest=True, sorted=False)
+        top_k_logits, top_k_indices = torch.topk(logits, k=top_k, dim=-1, largest=True, sorted=False)
         top_k_prob = top_k_logits - row_logsumexp
         current_prob = (top_k_prob + previous_prob).view(-1)
-        top_beam_prob, top_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=False)
-        beam_index = top_beam_indices // topK
-        top_beam_indices = top_k_indices.view(-1)[top_beam_indices]
+
+        # Select the top beams from all candidates
+        top_beam_prob, flat_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=False)
+        beam_index = flat_beam_indices // top_k
+        top_beam_indices = top_k_indices.view(-1)[flat_beam_indices]
+
+        # Gather KV caches for surviving beams
         for i in range(self.total_layers):
             self.save_keys_values[i] = torch.index_select(all_inputs[i], dim=0, index=beam_index)
+
         gathered_save_id = torch.index_select(save_id, dim=0, index=beam_index)
-        top_beam_indices = top_beam_indices.unsqueeze(-1)
-        top_beam_indices = top_beam_indices.int()
-        max_logits_idx = top_beam_indices[0]
+        top_beam_indices = top_beam_indices.unsqueeze(-1).int()
+        max_logits_idx = top_beam_indices[[0]]
         save_id = torch.cat([gathered_save_id, top_beam_indices], dim=-1)
-        return *self.save_keys_values, top_beam_indices, save_id, top_beam_prob.unsqueeze(-1), max_logits_idx
+
+        return (
+            *self.save_keys_values,
+            save_id,
+            top_beam_prob.unsqueeze(-1),
+            top_beam_indices,
+            max_logits_idx
+        )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Penalty & Utility Modules
+# ══════════════════════════════════════════════════════════════════════════════
 class APPLY_PENALTY(torch.nn.Module):
-    def __init__(self):
-        super(APPLY_PENALTY, self).__init__()
+    """Apply repetition penalty to recently generated token logits."""
 
-    def forward(self, logits, save_id, penalty_value, penality_range):
-        target_indices = save_id[:, -penality_range:].long()
-        logits = logits.scatter(1, target_indices, logits.gather(1, target_indices) * penalty_value)
-        return logits
-    
-    
-class ARGMAX(torch.nn.Module):
     def __init__(self):
-        super(ARGMAX, self).__init__()
-        pass
+        super().__init__()
+
+    def forward(self, logits, save_id, penalty_value, penalty_range):
+        target_indices = save_id[:, -penalty_range:].long()
+        penalized = logits.gather(1, target_indices) * penalty_value
+        logits = logits.scatter(1, target_indices, penalized)
+        return logits
+
+
+class ARGMAX(torch.nn.Module):
+    """Simple argmax over the vocabulary dimension."""
+
+    def __init__(self):
+        super().__init__()
 
     def forward(self, logits):
-        max_logits_idx = torch.argmax(logits, dim=-1, keepdim=True)
-        return max_logits_idx.int()
+        return torch.argmax(logits, dim=-1, keepdim=True).int()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# KV Cache Slice
+# ══════════════════════════════════════════════════════════════════════════════
+class KV_SLICE(torch.nn.Module):
+    """Apply slice to KV cache tensors."""
+
+    def __init__(self, num_layers):
+        super().__init__()
+        self.kv_quantized = (KV_QUANT_DTYPE == "Q8") or (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.num_layers   = num_layers
+        self.num_layers_2 = num_layers * 2
+        self.num_layers_3 = num_layers * 3
+        self.num_layers_4 = num_layers * 4
+        self.num_layers_5 = num_layers * 5
+        self.save_key     = [None] * num_layers
+        self.save_value   = [None] * num_layers
+        if self.kv_quantized:
+            self.save_k_scale = [None] * num_layers
+            self.save_k_bias  = [None] * num_layers
+            self.save_v_scale = [None] * num_layers
+            self.save_v_bias  = [None] * num_layers
+
+    def forward(self, *all_inputs):
+        slice_start = all_inputs[-2]
+        slice_end = all_inputs[-1]
+        for i in range(self.num_layers):
+            self.save_key[i]   = all_inputs[i][..., slice_start: slice_end]
+            self.save_value[i] = all_inputs[i + self.num_layers][..., slice_start: slice_end, :]
+            if self.kv_quantized:
+                self.save_k_scale[i] = all_inputs[i + self.num_layers_2][..., slice_start: slice_end]
+                self.save_k_bias[i]  = all_inputs[i + self.num_layers_3][..., slice_start: slice_end]
+                self.save_v_scale[i] = all_inputs[i + self.num_layers_4][..., slice_start: slice_end, :]
+                self.save_v_bias[i]  = all_inputs[i + self.num_layers_5][..., slice_start: slice_end, :]
+        if self.kv_quantized:
+            return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias
+        return *self.save_key, *self.save_value
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KV Cache Quantization
+# ══════════════════════════════════════════════════════════════════════════════
+class KVQuantizer(torch.nn.Module):
+    """Quantize key/value tensors to Q8 or Q8_CUDA packed formats."""
+
+    def __init__(self):
+        super().__init__()
+        self.QMAX = 255.0
+        self.register_buffer("inv_qmax", torch.tensor([1.0 / self.QMAX]).view(1, 1, 1, 1, -1))
+        # Constants for Q8_CUDA int32 packing/unpacking
+        for name, val in [("_256", 256), ("_128", 128), ("_65536", 65536), ("_16777216", 16777216)]:
+            self.register_buffer(name, torch.tensor([val], dtype=torch.int32).view(1, 1, 1, 1, -1))
+
+    def _quantize_block(self, x, dim):
+        """Per-block min-max quantization to [0, 255]."""
+        block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
+        scale = (block_max - block_min) * self.inv_qmax
+        x_normalized = (x - block_min) / scale
+        x_packed = torch.round(x_normalized)
+        if KV_QUANT_DTYPE == "Q8":
+            x_packed = x_packed.to(torch.uint8)
+        if USE_FLOAT16_SCALE_BIAS:
+            scale = scale.half()
+            block_min = block_min.half()
+        return x_packed, scale, block_min
+
+    def pack_q8_cuda(self, x, dim, batch_size, num_kv_heads, head_dim_quarter):
+        """Pack 4 uint8 values into a single int32 for CUDA-friendly storage."""
+        x_i32 = x.to(torch.int32)
+        if dim != -1:
+            x_i32 = x_i32.reshape(batch_size, num_kv_heads, 1, head_dim_quarter, 4, -1)
+        else:
+            x_i32 = x_i32.reshape(batch_size, num_kv_heads, 1, -1, head_dim_quarter, 4)
+        x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
+        return x0 + x1 * self._256 + x2 * self._65536 + (x3 - self._128) * self._16777216
+
+    def unpack_q8_cuda(self, x_i32, dim, batch_size, num_kv_heads, head_dim):
+        """Unpack int32 back into 4 uint8 channels."""
+        r3 = x_i32 % self._16777216
+        x3 = ((x_i32 - r3) // self._16777216) + self._128
+        x2 = r3 // self._65536
+        r2 = r3 % self._65536
+        x1 = r2 // self._256
+        x0 = r2 % self._256
+        unpacked = torch.stack([x0, x1, x2, x3], dim=dim)
+        if dim != -1:
+            return unpacked.reshape(batch_size, num_kv_heads, 1, head_dim, -1)
+        return unpacked.reshape(batch_size, num_kv_heads, 1, -1, head_dim)
+
+    def forward(self, keys, values, batch_size, num_kv_heads, head_dim_quarter):
+        k_packed, k_scale, k_bias = self._quantize_block(keys, dim=-2)
+        v_packed, v_scale, v_bias = self._quantize_block(values, dim=-1)
+        if KV_QUANT_DTYPE == "Q8_CUDA":
+            k_packed = self.pack_q8_cuda(k_packed, -2, batch_size, num_kv_heads, head_dim_quarter)
+            v_packed = self.pack_q8_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
+        return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Embedding Module
+# ══════════════════════════════════════════════════════════════════════════════
 class LLM_EMBED(torch.nn.Module):
+    """Extract and apply the token embedding layer in float32."""
+
     def __init__(self, llm):
-        super(LLM_EMBED, self).__init__()
-        self.llm = llm
+        super().__init__()
+        self.embed_tokens = llm.model.language_model.embed_tokens.float()
 
     def forward(self, input_ids):
-        return self.llm.model.language_model.embed_tokens(input_ids)
+        return self.embed_tokens(input_ids)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Vision Encoder Module
+# ══════════════════════════════════════════════════════════════════════════════
 class LLM_VISION(torch.nn.Module):
     def __init__(self, llm):
-        super(LLM_VISION, self).__init__()
+        super().__init__()
         self.llm = llm
         self._replace_gelu_with_tanh_approximation(self.llm)
         visual_model = self.llm.model.visual
@@ -225,7 +379,7 @@ class LLM_VISION(torch.nn.Module):
             pixel_values = pixel_values.squeeze(1)
             pixel_values = torch.nn.functional.interpolate(
                 pixel_values,
-                size=IMAGE_RESIZE,  # Ensure IMAGE_RESIZE is a tuple of ints
+                size=IMAGE_RESIZE,
                 mode='bilinear',
                 align_corners=False
             )
@@ -241,9 +395,9 @@ class LLM_VISION(torch.nn.Module):
         vision_hidden_states = self.llm.model.visual.patch_embed.proj(pixel_values)
         vision_hidden_states = vision_hidden_states.view(1, -1, self.llm.model.visual.patch_embed.embed_dim)
         if batch_size != 1:
-             vision_hidden_states = vision_hidden_states + self.pos_embeds.expand(batch_size, -1, -1)
+            vision_hidden_states = vision_hidden_states + self.pos_embeds.expand(batch_size, -1, -1)
         else:
-             vision_hidden_states = vision_hidden_states + self.pos_embeds
+            vision_hidden_states = vision_hidden_states + self.pos_embeds
         deepstack_features = []
         deepstack_indices = self.llm.model.visual.deepstack_visual_indexes
         deepstack_modules = self.llm.model.visual.deepstack_merger_list
@@ -256,7 +410,7 @@ class LLM_VISION(torch.nn.Module):
             qk_rot = qk * self.rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * self.rotary_pos_emb_sin
             q_rot, k_rot = qk_rot.split([1, 1], dim=0)
             attn = torch.matmul(q_rot, k_rot.transpose(-1, -2))
-            attn = torch.nn.functional.softmax(attn, dim=-1)
+            attn = torch.softmax(attn, dim=-1)
             attn = torch.matmul(attn, v)
             attn_out = attn.transpose(2, 3).reshape(batch_size, -1, blk.attn.proj.in_features)
             vision_hidden_states = vision_hidden_states + blk.attn.proj(attn_out)
@@ -281,9 +435,12 @@ class LLM_VISION(torch.nn.Module):
         return tuple(deepstack_features), vision_hidden_states
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Vision-Text Concatenation Module
+# ══════════════════════════════════════════════════════════════════════════════
 class LLM_CONCAT(torch.nn.Module):
     def __init__(self, max_seq_len, prompt_head_len, hidden_size, deepstack_features_len):
-        super(LLM_CONCAT, self).__init__()
+        super().__init__()
         self.prompt_head_len = prompt_head_len
         self.zeros_A = torch.zeros([1, prompt_head_len, hidden_size], dtype=torch.float32)
         self.zeros_B = torch.zeros([1, max_seq_len, hidden_size], dtype=torch.int8)
@@ -301,296 +458,406 @@ class LLM_CONCAT(torch.nn.Module):
         return deepstack_features, concat_hidden_states
 
 
-class LLM_ROTARY_VISION(torch.nn.Module):
+# ══════════════════════════════════════════════════════════════════════════════
+# Rotary Positional Embedding & Attention Mask (Vision Context)
+# ══════════════════════════════════════════════════════════════════════════════
+class ROTARY_VISION_PREFILL(torch.nn.Module):
+    """Precompute mRoPE rotary embeddings and causal mask for the vision+text prefill phase."""
+
     def __init__(self, llm, width_factor, height_factor, prompt_head_len, max_seq_len):
-        super(LLM_ROTARY_VISION, self).__init__()
-        self.vision_embed_size = width_factor * height_factor
-        self.prompt_head_len = prompt_head_len
-        self.image_factor_plus = self.vision_embed_size + self.prompt_head_len
-        position_ids = torch.arange(self.image_factor_plus, dtype=torch.float32).repeat(3, 1, 1)
-        position_ids[0, :, self.prompt_head_len: self.image_factor_plus] = self.prompt_head_len
-        j = self.prompt_head_len
-        for i in range(self.prompt_head_len, self.image_factor_plus, width_factor):
+        super().__init__()
+        total_max = max_seq_len + width_factor * height_factor + prompt_head_len
+        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, total_max, total_max, dtype=torch.int8))) * -128
+
+        cos, sin = self._build_rotary_table(llm, width_factor, height_factor, prompt_head_len, max_seq_len)
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
+
+    @staticmethod
+    def _build_rotary_table(llm, width_factor, height_factor, prompt_head_len, max_seq_len):
+        """Build vision-aware mRoPE position table with 3D (temporal, height, width) encoding."""
+        vision_embed_size = width_factor * height_factor
+        image_factor_plus = vision_embed_size + prompt_head_len
+
+        position_ids = torch.arange(image_factor_plus, dtype=torch.float32).repeat(3, 1, 1)
+        position_ids[0, :, prompt_head_len: image_factor_plus] = prompt_head_len
+        j = prompt_head_len
+        for i in range(prompt_head_len, image_factor_plus, width_factor):
             position_ids[1, :, i: i + width_factor] = j
             j += 1
-        self.start_id = self.prompt_head_len + width_factor
-        fill_id = torch.arange(self.prompt_head_len, self.start_id, dtype=torch.float32)
-        for i in range(self.start_id, self.image_factor_plus, width_factor):
+        start_id = prompt_head_len + width_factor
+        fill_id = torch.arange(prompt_head_len, start_id, dtype=torch.float32)
+        for i in range(start_id, image_factor_plus, width_factor):
             position_ids[2, :, i: i + width_factor] = fill_id
-        fill_tail_position = torch.arange(self.start_id, max_seq_len + self.start_id, dtype=torch.float32).repeat(3, 1, 1)
-        position_ids = torch.cat([position_ids[:, :, :self.image_factor_plus], fill_tail_position], dim=-1)
-        self.inv_freq_expanded = llm.model.language_model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
-        freqs = (self.inv_freq_expanded @ position_ids)
+        fill_tail_position = torch.arange(start_id, max_seq_len + start_id, dtype=torch.float32).repeat(3, 1, 1)
+        position_ids = torch.cat([position_ids[:, :, :image_factor_plus], fill_tail_position], dim=-1)
+
+        inv_freq_expanded = llm.model.language_model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
+        freqs = (inv_freq_expanded @ position_ids)
         freqs = freqs.transpose(-1, -2).unsqueeze(1)
-        freqs = Qwen3VLTextRotaryEmbedding.apply_interleaved_mrope(llm.model.language_model.rotary_emb, freqs, llm.model.language_model.rotary_emb.mrope_section)
-        cos = freqs.cos()
-        sin = freqs.sin()
-        self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2)
-        self.rotary_pos_emb_sin = torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2)
-        
+        freqs = Qwen3VLTextRotaryEmbedding.apply_interleaved_mrope(
+            llm.model.language_model.rotary_emb, freqs, llm.model.language_model.rotary_emb.mrope_section
+        )
+        return freqs.cos(), freqs.sin()
+
     def forward(self, ids_len, history_len):
         kv_seq_len = ids_len + history_len
-        rotary_pos_emb_cos = self.rotary_pos_emb_cos[:, history_len:kv_seq_len].float()
-        rotary_pos_emb_sin = self.rotary_pos_emb_sin[:, history_len:kv_seq_len].float()
-        return rotary_pos_emb_cos, rotary_pos_emb_sin, kv_seq_len
-    
-
-class LLM_ROTARY_TEXT(torch.nn.Module):
-    def __init__(self, llm, max_seq_len):
-        super(LLM_ROTARY_TEXT, self).__init__()
-        position_ids = torch.arange(max_seq_len, dtype=torch.float32).repeat(3, 1, 1)
-        self.inv_freq_expanded = llm.model.language_model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
-        freqs = (self.inv_freq_expanded @ position_ids)
-        freqs = freqs.transpose(-1, -2).unsqueeze(1)
-        freqs = Qwen3VLTextRotaryEmbedding.apply_interleaved_mrope(llm.model.language_model.rotary_emb, freqs, llm.model.language_model.rotary_emb.mrope_section)
-        cos = freqs.cos()
-        sin = freqs.sin()
-        self.rotary_pos_emb_cos = torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2)
-        self.rotary_pos_emb_sin = torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2)
-        
-    def forward(self, ids_len, history_len):
-        kv_seq_len = ids_len + history_len
-        rotary_pos_emb_cos = self.rotary_pos_emb_cos[:, history_len:kv_seq_len].float()
-        rotary_pos_emb_sin = self.rotary_pos_emb_sin[:, history_len:kv_seq_len].float()
-        return rotary_pos_emb_cos, rotary_pos_emb_sin, kv_seq_len
+        rotary_cos = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        attention_mask = self.attention_mask[..., :ids_len, :kv_seq_len].float()
+        return rotary_cos, rotary_sin, attention_mask, kv_seq_len
 
 
-class KVQuantizer(torch.nn.Module):
-    def __init__(self):
+class ROTARY_VISION_DECODE(torch.nn.Module):
+    """Provide mRoPE rotary embeddings for a single decode step (vision context)."""
+
+    def __init__(self, llm, width_factor, height_factor, prompt_head_len, max_seq_len):
         super().__init__()
-        self.qmax = 255.0
-        self.register_buffer("inv_qmax", torch.tensor([1.0 / self.qmax], dtype=torch.float32).view(1, 1, 1, 1, -1))
-        self.register_buffer("mul_256", torch.tensor([256], dtype=torch.int32))
-        self.register_buffer("offset_128", torch.tensor([128], dtype=torch.int32))
-        self.register_buffer("mul_65536", torch.tensor([65536], dtype=torch.int32))
-        self.register_buffer("pack_mul", torch.tensor([16777216], dtype=torch.int32))
+        cos, sin = ROTARY_VISION_PREFILL._build_rotary_table(llm, width_factor, height_factor, prompt_head_len, max_seq_len)
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
 
-    def _quantize_block(self, x, dim):
-        block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
-        scale = (block_max - block_min) * self.inv_qmax
-        x_normalized = (x - block_min) / scale
-        x_packed = torch.round(x_normalized)
-        if KV_QUANT_DTYPE == "Q8":
-            x_packed = x_packed.to(torch.uint8)
-        if USE_FLOAT16_SCALE_BIAS:
-            scale = scale.half()
-            block_min = block_min.half()
-        return x_packed, scale, block_min
-
-    def pack_q8_cuda(self, x, dim, batch_size, num_key_value_heads, head_dim_quarter):
-        x_i32 = x.to(torch.int32)
-        if dim != -1:
-            x_i32 = x_i32.reshape(batch_size, num_key_value_heads, 1, head_dim_quarter, 4, -1)
-        else:
-            x_i32 = x_i32.reshape(batch_size, num_key_value_heads, 1, -1, head_dim_quarter, 4)
-        x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
-        packed = x0 + x1 * self.mul_256 + x2 * self.mul_65536 + (x3 - self.offset_128) * self.pack_mul
-        return packed
-
-    def unpack_q8_cuda(self, x_i32, dim, batch_size, num_key_value_heads, head_dim):
-        r3 = x_i32 % self.pack_mul
-        x3 = ((x_i32 - r3) // self.pack_mul) + self.offset_128
-        x2 = r3 // self.mul_65536
-        r2 = r3 % self.mul_65536
-        x1 = r2 // self.mul_256
-        x0 = r2 % self.mul_256
-        unpacked = torch.stack([x0, x1, x2, x3], dim=dim)
-        if dim != -1:
-            return unpacked.reshape(batch_size, num_key_value_heads, 1, head_dim, -1)
-        return unpacked.reshape(batch_size, num_key_value_heads, 1, -1, head_dim)
-
-    def forward(self, keys, values, batch_size, num_key_value_heads, head_dim_quarter):
-        k_packed, k_scale, k_bias = self._quantize_block(keys, -2)
-        v_packed, v_scale, v_bias = self._quantize_block(values, -1)
-        if KV_QUANT_DTYPE == "Q8_CUDA":
-            k_packed = self.pack_q8_cuda(k_packed, -2, batch_size, num_key_value_heads, head_dim_quarter)
-            v_packed = self.pack_q8_cuda(v_packed, -1, batch_size, num_key_value_heads, head_dim_quarter)
-        return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
+    def forward(self, kv_seq_len):
+        kv_seq_len_next = kv_seq_len + 1
+        rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len_next].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len_next].float()
+        return rotary_cos, rotary_sin, kv_seq_len_next
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Rotary Positional Embedding & Attention Mask (Text-Only Context)
+# ══════════════════════════════════════════════════════════════════════════════
+class ROTARY_TEXT_PREFILL(torch.nn.Module):
+    """Precompute mRoPE rotary embeddings and causal mask for the text-only prefill phase."""
+
+    def __init__(self, llm, max_seq_len):
+        super().__init__()
+        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, max_seq_len, max_seq_len, dtype=torch.int8))) * -128
+
+        cos, sin = self._build_rotary_table(llm, max_seq_len)
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
+
+    @staticmethod
+    def _build_rotary_table(llm, max_seq_len):
+        """Build text-only mRoPE position table (all 3 channels use linear positions)."""
+        position_ids = torch.arange(max_seq_len, dtype=torch.float32).repeat(3, 1, 1)
+        inv_freq_expanded = llm.model.language_model.rotary_emb.inv_freq[None, :, None].float().expand(3, -1, 1)
+        freqs = (inv_freq_expanded @ position_ids)
+        freqs = freqs.transpose(-1, -2).unsqueeze(1)
+        freqs = Qwen3VLTextRotaryEmbedding.apply_interleaved_mrope(
+            llm.model.language_model.rotary_emb, freqs, llm.model.language_model.rotary_emb.mrope_section
+        )
+        return freqs.cos(), freqs.sin()
+
+    def forward(self, ids_len, history_len):
+        kv_seq_len = ids_len + history_len
+        rotary_cos = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        attention_mask = self.attention_mask[..., :ids_len, :kv_seq_len].float()
+        return rotary_cos, rotary_sin, attention_mask, kv_seq_len
+
+
+class ROTARY_TEXT_DECODE(torch.nn.Module):
+    """Provide mRoPE rotary embeddings for a single decode step (text-only context)."""
+
+    def __init__(self, llm, max_seq_len):
+        super().__init__()
+        cos, sin = ROTARY_TEXT_PREFILL._build_rotary_table(llm, max_seq_len)
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
+
+    def forward(self, kv_seq_len):
+        kv_seq_len_next = kv_seq_len + 1
+        rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len_next].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len_next].float()
+        return rotary_cos, rotary_sin, kv_seq_len_next
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Main Transformer Module
+# ══════════════════════════════════════════════════════════════════════════════
 class LLM_MAIN(torch.nn.Module):
-    def __init__(self, llm, head_dim, num_heads, num_layers, num_key_value_heads, hidden_size, max_seq_len, deepstack_features_len, height_factor, width_factor):
-        super(LLM_MAIN, self).__init__()
+    """
+    Main transformer module for QwenVL that processes hidden states through all decoder layers.
+
+    Handles:
+      - Fused QKV projection with pre-merged layer norms
+      - Rotary positional embeddings (mRoPE)
+      - KV cache management with optional Q8/Q8_CUDA quantization
+      - Grouped-query attention (GQA)
+      - Fused gate-up MLP projection
+      - Deepstack feature injection from the vision encoder
+    """
+
+    def __init__(self, llm, num_heads, num_key_value_heads, head_dim, num_layers, hidden_size, deepstack_features_len):
+        super().__init__()
         self.llm = llm
-        self._replace_gelu_with_tanh_approximation(self.llm)
+
+        # ── Attention geometry ───────────────────────────────────────────
         self.head_dim = head_dim
         self.head_dim_half = head_dim // 2
         self.head_dim_quarter = head_dim // 4
         self.num_heads = num_heads
+        self.num_key_value_heads = num_key_value_heads
+        self.num_key_value_groups = num_heads // num_key_value_heads
+        self.qk_heads = num_heads + num_key_value_heads
+
+        # ── Layer count multipliers (for indexing into flat KV input list) ──
         self.num_layers = num_layers
         self.num_layers_2 = num_layers * 2
         self.num_layers_3 = num_layers * 3
         self.num_layers_4 = num_layers * 4
         self.num_layers_5 = num_layers * 5
-        self.num_key_value_heads = num_key_value_heads
-        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
-        self.qk_heads = self.num_heads + self.num_key_value_heads
-        max_seq_len += height_factor * width_factor
-        self.attention_mask = (1 - torch.tril(torch.ones([1, 1, 1, max_seq_len, max_seq_len], dtype=torch.int8))) * -128
+
+        # ── Deepstack features ───────────────────────────────────────────
         self.deepstack_features_len = deepstack_features_len
+        self._ds_offset = 3 + deepstack_features_len  # 3 trailing args: cos, sin, attention_mask
+
+        # ── KV cache dtype flags ─────────────────────────────────────────
         self.kv_f16 = (KV_QUANT_DTYPE == "F16")
         self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
         self.kv_q8_cuda = (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.kv_quantized = self.kv_q8 or self.kv_q8_cuda
+
+        # ── Quantizer & overflow guard ───────────────────────────────────
         self.quantizer = KVQuantizer().eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
-        norm_factor = hidden_size ** 0.5
-        norm_factor_qk = head_dim ** 0.5
-        scale_factor = head_dim ** -0.25
-        self.save_key = [None] * num_layers
+
+        # ── Per-layer output buffers ─────────────────────────────────────
+        self.save_key   = [None] * num_layers
         self.save_value = [None] * num_layers
-        if self.kv_q8 or self.kv_q8_cuda:
+        if self.kv_quantized:
             self.save_k_scale = [None] * num_layers
-            self.save_k_bias = [None] * num_layers
+            self.save_k_bias  = [None] * num_layers
             self.save_v_scale = [None] * num_layers
-            self.save_v_bias = [None] * num_layers
+            self.save_v_bias  = [None] * num_layers
+
+        # ── Fuse & reshape weights for efficient inference ───────────────
+        self._replace_gelu_with_tanh_approximation(self.llm)
+        self._fuse_weights(hidden_size)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Weight Fusion (runs once at init)
+    # ══════════════════════════════════════════════════════════════════════
+    def _fuse_weights(self, hidden_size):
+        """
+        Merge separate Q/K/V projections into a single QKV linear,
+        absorb RMSNorm weights into projection matrices, and fuse
+        gate/up projections for the MLP.
+        """
+        scale_factor = self.head_dim ** -0.25
+        norm_factor = hidden_size ** 0.5
+        norm_factor_qk = self.head_dim ** 0.5
 
         with torch.no_grad():
             for layer in self.llm.model.language_model.layers:
-                q_proj = layer.self_attn.q_proj
-                k_proj = layer.self_attn.k_proj
-                v_proj = layer.self_attn.v_proj
-                layer.self_attn.q_out_features = int(q_proj.out_features)
-                layer.self_attn.k_out_features = int(k_proj.out_features)
-                layer.self_attn.v_out_features = int(v_proj.out_features)
-                has_bias = (q_proj.bias is not None)
-                qkv = torch.nn.Linear(q_proj.in_features, q_proj.out_features + k_proj.out_features + v_proj.out_features, bias=has_bias)
-                qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
-                if has_bias:
-                    qkv.bias.copy_(torch.cat([q_proj.bias, k_proj.bias, v_proj.bias], dim=0))
-                w = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
-                qkv.weight.mul_(w)
-                layer.self_attn.qkv = qkv
-                del layer.self_attn.q_proj
-                del layer.self_attn.k_proj
-                del layer.self_attn.v_proj
-                del layer.input_layernorm
+                self._fuse_qkv_projection(layer, scale_factor, norm_factor, norm_factor_qk)
+                self._fuse_gate_up_projection(layer, norm_factor)
 
-                layer.self_attn.q_norm.weight.mul_(scale_factor * norm_factor_qk)
-                layer.self_attn.k_norm.weight.mul_(scale_factor * norm_factor_qk)
-                q_norm_w = layer.self_attn.q_norm.weight.repeat(self.num_heads)
-                k_norm_w = layer.self_attn.k_norm.weight.repeat(self.num_key_value_heads)
-                layer.self_attn.qk_norm_weight = torch.nn.Parameter(torch.cat([q_norm_w, k_norm_w], dim=0).view(1, 1, 1, -1, self.head_dim))
-                del layer.self_attn.q_norm
-                del layer.self_attn.k_norm
-
-                gate = layer.mlp.gate_proj
-                up = layer.mlp.up_proj
-                gate_up = torch.nn.Linear(gate.in_features, gate.out_features + up.out_features, bias=False)
-                w = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
-                gate_weight = gate.weight * w
-                up_weight = up.weight * w
-                gate_up.weight.copy_(torch.cat([gate_weight, up_weight], dim=0))
-                layer.mlp.gate_up_proj = gate_up
-                del layer.mlp.gate_proj
-                del layer.mlp.up_proj
-                del layer.post_attention_layernorm
-
-            w = self.llm.model.language_model.norm.weight.unsqueeze(0) * norm_factor
-            self.llm.lm_head.weight.mul_(w)
+            # Absorb final RMSNorm into lm_head
+            final_norm_weight = self.llm.model.language_model.norm.weight.unsqueeze(0) * norm_factor
+            self.llm.lm_head.weight.mul_(final_norm_weight)
             del self.llm.model.language_model.norm
 
-    def _replace_gelu_with_tanh_approximation(self, module):
+    def _fuse_qkv_projection(self, layer, scale_factor, norm_factor, norm_factor_qk):
+        """Fuse Q, K, V projections and absorb input LayerNorm + QK norms."""
+        attn = layer.self_attn
+        q_proj, k_proj, v_proj = attn.q_proj, attn.k_proj, attn.v_proj
+
+        # ── Create merged QKV linear ─────────────────────────────────
+        in_features = int(q_proj.in_features)
+        out_features = int(q_proj.out_features + k_proj.out_features + v_proj.out_features)
+        has_bias = any(p.bias is not None for p in (q_proj, k_proj, v_proj))
+
+        qkv = torch.nn.Linear(in_features, out_features, bias=has_bias)
+        qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
+
+        if has_bias:
+
+            def _get_bias(proj):
+                return proj.bias if proj.bias is not None else torch.zeros(proj.out_features, dtype=qkv.weight.dtype)
+
+            qkv.bias.copy_(torch.cat([_get_bias(q_proj), _get_bias(k_proj), _get_bias(v_proj)], dim=0))
+
+        # Store split dimensions for later use
+        attn.q_out_features = int(q_proj.out_features)
+        attn.k_out_features = int(k_proj.out_features)
+        attn.v_out_features = int(v_proj.out_features)
+
+        del attn.q_proj, attn.k_proj, attn.v_proj
+
+        # ── Fuse QK norms (absorb scale factors) ────────────────────
+        combined_scale = scale_factor * norm_factor_qk
+        attn.q_norm.weight.mul_(combined_scale)
+        attn.k_norm.weight.mul_(combined_scale)
+
+        q_norm_repeated = attn.q_norm.weight.repeat(self.num_heads)
+        k_norm_repeated = attn.k_norm.weight.repeat(self.num_key_value_heads)
+        attn.qk_norm_weight = torch.nn.Parameter(
+            torch.cat([q_norm_repeated, k_norm_repeated], dim=0).view(1, 1, 1, -1, self.head_dim)
+        )
+        del attn.q_norm, attn.k_norm
+
+        # ── Absorb input LayerNorm into QKV weights ─────────────────
+        input_norm_weight = layer.input_layernorm.weight.unsqueeze(0) * norm_factor
+        qkv.weight.mul_(input_norm_weight)
+        attn.qkv = qkv
+        del layer.input_layernorm
+
+    def _fuse_gate_up_projection(self, layer, norm_factor):
+        """Fuse gate and up projections, absorbing post-attention LayerNorm."""
+        post_norm_weight = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
+        gate, up = layer.mlp.gate_proj, layer.mlp.up_proj
+
+        gate_up = torch.nn.Linear(gate.in_features, gate.out_features + up.out_features, bias=False)
+        gate_up.weight.copy_(torch.cat([
+            gate.weight * post_norm_weight,
+            up.weight * post_norm_weight
+        ], dim=0))
+
+        layer.mlp.gate_up_proj = gate_up
+        del layer.mlp.gate_proj, layer.mlp.up_proj, layer.post_attention_layernorm
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Utility Methods
+    # ══════════════════════════════════════════════════════════════════════
+    @staticmethod
+    def _replace_gelu_with_tanh_approximation(module):
+        """Recursively replace exact GELU with tanh-approximated GELU for ONNX compatibility."""
         for name, child in module.named_children():
             if isinstance(child, torch.nn.GELU):
                 setattr(module, name, torch.nn.GELU(approximate='tanh'))
                 print(f"Replaced GELU at: {name}")
             else:
-                self._replace_gelu_with_tanh_approximation(child)
+                LLM_MAIN._replace_gelu_with_tanh_approximation(child)
 
-    def rotate_half(self, x, batch_size):
+    def _rms_norm(self, x):
+        """Apply modified RMS normalization (with optional overflow scaling)."""
+        if PREVENT_F16_OVERFLOW:
+            x = x * self.overflow_scale
+        return x * torch.rsqrt(x.square().sum(-1, keepdim=True))  # Note, not the .mean()
+
+    def _rotate_half(self, x, batch_size):
+        """Rotate the last dimension by swapping and negating halves (for RoPE).
+           Using flip() is more efficient than split() + concat() in ONNX Runtime.
+        """
         x = x.view(batch_size, -1, 1, self.qk_heads, 2, self.head_dim_half)
         x = x.flip(-2)
         return x.view(batch_size, -1, 1, self.qk_heads, self.head_dim)
 
     def forward(self, *all_inputs):
-        hidden_states = all_inputs[-9]
-        rotary_pos_emb_cos = all_inputs[-5]
-        rotary_pos_emb_sin = all_inputs[-4]
-        kv_seq_len = all_inputs[-3]
-        ids_len = all_inputs[-2]
-        mask = all_inputs[-1]
-        attention_mask = (self.attention_mask[..., :ids_len, :kv_seq_len] * mask).float()
-        batch_size = hidden_states.shape[0].unsqueeze(0)
+        # Input layout: [kv_caches..., hidden_states, ds_feat_0..N, rotary_cos, rotary_sin, attention_mask]
+        hidden_states      = all_inputs[-(self._ds_offset + 1)]
+        rotary_pos_emb_cos = all_inputs[-3]
+        rotary_pos_emb_sin = all_inputs[-2]
+        attention_mask     = all_inputs[-1]
+        batch_size         = hidden_states.shape[0]
+
         for i, layer in enumerate(self.llm.model.language_model.layers):
+
+            # ── Self-Attention ───────────────────────────────────────
             residual = hidden_states
-            if PREVENT_F16_OVERFLOW:
-                hidden_states = hidden_states * self.overflow_scale
-            hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
+            hidden_states = self._rms_norm(hidden_states)
+
+            # Fused QKV projection & reshape
             qkv = layer.self_attn.qkv(hidden_states)
             qkv = qkv.reshape(batch_size, -1, 1, self.qk_heads + self.num_key_value_heads, self.head_dim)
             qk, v = torch.split(qkv, [self.qk_heads, self.num_key_value_heads], dim=-2)
-            if PREVENT_F16_OVERFLOW:
-                qk = qk * self.overflow_scale
-            qk = qk * torch.rsqrt(qk.square().sum(dim=-1, keepdim=True)) * layer.self_attn.qk_norm_weight
-            qk_rot = qk * rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * rotary_pos_emb_sin
+
+            # QK normalization & rotary embedding
+            qk = self._rms_norm(qk) * layer.self_attn.qk_norm_weight
+            qk_rot = qk * rotary_pos_emb_cos + self._rotate_half(qk, batch_size) * rotary_pos_emb_sin
+
+            # Split into query and key, reshape query for GQA
             q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=-2)
             q = q.reshape(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             q = q.permute(0, 2, 3, 1, 4)
+
+            # Optional FP16 cast for KV
             if self.kv_f16:
                 k = k.half()
                 v = v.half()
+
+            # Transpose K and V into cache layout
             k = k.permute(0, 3, 2, 4, 1)
             v = v.transpose(1, 3)
-            if self.kv_q8 or self.kv_q8_cuda:
+
+            # ── KV Cache Update & Attention Compute ──────────────────
+            if self.kv_quantized:
+                # Quantize current K/V and concatenate with cached values
                 packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.head_dim_quarter)
-                k = torch.cat([all_inputs[i], packed_k], dim=-1)
-                k_s = torch.cat([all_inputs[i + self.num_layers_2], scale_k], dim=-1)
-                k_b = torch.cat([all_inputs[i + self.num_layers_3], bias_k], dim=-1)
-                v = torch.cat([all_inputs[i + self.num_layers], packed_v], dim=-2)
-                v_s = torch.cat([all_inputs[i + self.num_layers_4], scale_v], dim=-2)
-                v_b = torch.cat([all_inputs[i + self.num_layers_5], bias_v], dim=-2)
+                k   = torch.cat([all_inputs[i],                        packed_k], dim=-1)
+                v   = torch.cat([all_inputs[i + self.num_layers],      packed_v], dim=-2)
+                k_s = torch.cat([all_inputs[i + self.num_layers_2],    scale_k],  dim=-1)
+                k_b = torch.cat([all_inputs[i + self.num_layers_3],    bias_k],   dim=-1)
+                v_s = torch.cat([all_inputs[i + self.num_layers_4],    scale_v],  dim=-2)
+                v_b = torch.cat([all_inputs[i + self.num_layers_5],    bias_v],   dim=-2)
+
+                # Save updated caches
+                self.save_key[i]     = k
+                self.save_value[i]   = v
                 self.save_k_scale[i] = k_s
-                self.save_k_bias[i] = k_b
+                self.save_k_bias[i]  = k_b
                 self.save_v_scale[i] = v_s
-                self.save_v_bias[i] = v_b
-                self.save_key[i] = k
-                self.save_value[i] = v
+                self.save_v_bias[i]  = v_b
+
+                # Upcast scale/bias if stored as FP16
                 if USE_FLOAT16_SCALE_BIAS:
                     k_s = k_s.float()
                     k_b = k_b.float()
                     v_s = v_s.float()
                     v_b = v_b.float()
+
+                # Unpack int32-packed Q8 for CUDA path
                 if self.kv_q8_cuda:
                     k = self.quantizer.unpack_q8_cuda(k, -2, batch_size, self.num_key_value_heads, self.head_dim)
                     v = self.quantizer.unpack_q8_cuda(v, -1, batch_size, self.num_key_value_heads, self.head_dim)
-                attn_Main = torch.matmul(q, k.float())
-                q_sum = q.sum(dim=-1, keepdim=True)
-                attn_bias = q_sum * k_b
-                fused_bias_mask = attn_bias + attention_mask
-                attn = torch.addcmul(fused_bias_mask, attn_Main, k_s)
-                attn = torch.nn.functional.softmax(attn, dim=-1)
+
+                # Dequantized attention: attn = softmax((Q @ K) * k_scale + Q_sum * k_bias + mask) @ (V * v_scale + v_bias)
+                attn_raw  = torch.matmul(q, k.float())
+                attn_bias = q.sum(dim=-1, keepdim=True) * k_b + attention_mask
+                attn      = torch.addcmul(attn_bias, attn_raw, k_s)
+                attn      = torch.softmax(attn, dim=-1)
                 v_dequant = torch.addcmul(v_b, v.float(), v_s)
-                attn = torch.matmul(attn, v_dequant)
+                attn      = torch.matmul(attn, v_dequant)
+
             else:
+                # Concatenate with cached K/V (F16 or F32)
                 k = torch.cat((all_inputs[i], k), dim=-1)
                 v = torch.cat((all_inputs[i + self.num_layers], v), dim=-2)
-                self.save_key[i] = k
+                self.save_key[i]   = k
                 self.save_value[i] = v
+
                 if self.kv_f16:
                     k = k.float()
                     v = v.float()
+
                 attn = torch.matmul(q, k) + attention_mask
-                attn = torch.nn.functional.softmax(attn, dim=-1)
+                attn = torch.softmax(attn, dim=-1)
                 attn = torch.matmul(attn, v)
+
+            # Output projection & residual
             attn = attn.permute(0, 3, 1, 2, 4).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
-            attn_out = layer.self_attn.o_proj(attn)
-            hidden_states = residual + attn_out
+            hidden_states = residual + layer.self_attn.o_proj(attn)
+
+            # ── Feed-Forward Network ─────────────────────────────────
             residual = hidden_states
-            if PREVENT_F16_OVERFLOW:
-                hidden_states = hidden_states * self.overflow_scale
-            hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
+            hidden_states = self._rms_norm(hidden_states)
+
             gate_up = layer.mlp.gate_up_proj(hidden_states)
             gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
-            hidden_states = layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
-            hidden_states = residual + hidden_states
+            hidden_states = residual + layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
+
+            # ── Apply deepstack features from vision encoder ─────────
             if i < self.deepstack_features_len:
-                hidden_states = all_inputs[i - 8] + hidden_states
-        hidden_states = hidden_states[:, -1]
-        if PREVENT_F16_OVERFLOW:
-            hidden_states = hidden_states * self.overflow_scale
-        hidden_states = hidden_states * torch.rsqrt(hidden_states.square().sum(-1, keepdim=True))
+                hidden_states = all_inputs[i - self._ds_offset] + hidden_states
+
+        # ── Final Projection ─────────────────────────────────────────
+        hidden_states = self._rms_norm(hidden_states[:, -1])
         logits = self.llm.lm_head(hidden_states)
-        if self.kv_q8 or self.kv_q8_cuda:
+
+        if self.kv_quantized:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits
         return *self.save_key, *self.save_value, logits
 
@@ -598,21 +865,85 @@ class LLM_MAIN(torch.nn.Module):
 if DO_EXPORT:
     print('Export start ...')
     with torch.inference_mode():
+
+        # ══════════════════════════════════════════════════════════════════
+        # Load Model & Extract Config
+        # ══════════════════════════════════════════════════════════════════
         model = Qwen3VLForConditionalGeneration.from_pretrained(download_path, dtype=torch.float32, device_map="cpu", low_cpu_mem_usage=True).eval()
-        num_heads = model.config.text_config.num_attention_heads
-        num_key_value_heads = model.config.text_config.num_key_value_heads
-        head_dim = model.config.text_config.head_dim
-        num_layers = model.config.text_config.num_hidden_layers
-        hidden_size = model.config.text_config.hidden_size
-        vocab_size = model.model.language_model.vocab_size
+
+        num_heads              = model.config.text_config.num_attention_heads
+        num_key_value_heads    = model.config.text_config.num_key_value_heads
+        head_dim               = model.config.text_config.head_dim
+        num_layers             = model.config.text_config.num_hidden_layers
+        hidden_size            = model.config.text_config.hidden_size
+        vocab_size             = model.model.language_model.vocab_size
         deepstack_features_len = len(model.model.visual.deepstack_visual_indexes)
+        scale_dtype            = torch.float16 if USE_FLOAT16_SCALE_BIAS else torch.float32
 
-        if USE_FLOAT16_SCALE_BIAS:
-            scale_dtype = torch.float16
+        # ══════════════════════════════════════════════════════════════════
+        # Build Dummy Tensors for Tracing
+        # ══════════════════════════════════════════════════════════════════
+        batch_size  = BEAM_SIZE
+        ids_len     = torch.tensor([10], dtype=torch.int64)
+        history_len = torch.tensor([0], dtype=torch.int64)
+        kv_seq_len  = ids_len + history_len
+        beam_size   = torch.tensor([BEAM_SIZE], dtype=torch.int64)
+        logits      = torch.ones((BEAM_SIZE, vocab_size), dtype=torch.float32)
+
+        # KV cache spec: list of (name, concat_dim)
+        kv_specs = [('key', 4), ('value', 3)]
+
+        if KV_QUANT_DTYPE == "F16":
+            kv_dtype = torch.float16
+        elif KV_QUANT_DTYPE in ("Q8", "Q8_CUDA"):
+            kv_specs.extend([
+                ('key_scale', 4), ('key_bias', 4),
+                ('value_scale', 3), ('value_bias', 3)
+            ])
+            kv_dtype = torch.int32 if KV_QUANT_DTYPE == "Q8_CUDA" else torch.uint8
         else:
-            scale_dtype = torch.float32
+            kv_dtype = torch.float32
 
-        ids_len = torch.tensor([10], dtype=torch.int64)
+        # Determine KV tensor shapes based on quantization mode
+        if KV_QUANT_DTYPE == "Q8_CUDA":
+            k_head = head_dim // 4
+            v_head = head_dim // 4
+        else:
+            k_head = head_dim
+            v_head = head_dim
+
+        kv_tensors = {
+            'key':   torch.zeros((batch_size, num_key_value_heads, 1, k_head, history_len), dtype=kv_dtype),
+            'value': torch.zeros((batch_size, num_key_value_heads, 1, history_len, v_head), dtype=kv_dtype)
+        }
+        if KV_QUANT_DTYPE in ("Q8", "Q8_CUDA"):
+            kv_tensors.update({
+                'key_scale':   torch.ones((batch_size, num_key_value_heads, 1, 1, history_len), dtype=scale_dtype),
+                'key_bias':    torch.ones((batch_size, num_key_value_heads, 1, 1, history_len), dtype=scale_dtype),
+                'value_scale': torch.ones((batch_size, num_key_value_heads, 1, history_len, 1), dtype=scale_dtype),
+                'value_bias':  torch.ones((batch_size, num_key_value_heads, 1, history_len, 1), dtype=scale_dtype)
+            })
+
+        # ══════════════════════════════════════════════════════════════════
+        # Helper: Build KV I/O names, tensors, and dynamic axes
+        # ══════════════════════════════════════════════════════════════════
+        def get_kv_io(tensors_dict, batch_axis='batch_size', seq_axis='history_len', out_seq_axis='kv_seq_len'):
+            inputs, in_names, out_names, axes = [], [], [], {}
+            for name, dim in kv_specs:
+                tensor = tensors_dict[name]
+                for i in range(num_layers):
+                    in_n  = f'in_{name}_{i}'
+                    out_n = f'out_{name}_{i}'
+                    inputs.append(tensor)
+                    in_names.append(in_n)
+                    out_names.append(out_n)
+                    axes[in_n]  = {0: batch_axis, dim: seq_axis}
+                    axes[out_n] = {0: batch_axis, dim: out_seq_axis}
+            return inputs, in_names, out_names, axes
+
+        # ══════════════════════════════════════════════════════════════════
+        # Export: LLM_Embed
+        # ══════════════════════════════════════════════════════════════════
         input_ids = torch.ones((1, ids_len), dtype=torch.int32)
         torch.onnx.export(
             LLM_EMBED(model),
@@ -621,8 +952,8 @@ if DO_EXPORT:
             input_names=['input_ids'],
             output_names=['text_hidden_states'],
             dynamic_axes={
-                'input_ids': {0: 'batch', 1: 'ids_len'},
-                'text_hidden_states': {0: 'batch', 1: 'ids_len'}
+                'input_ids':            {0: 'batch', 1: 'ids_len'},
+                'text_hidden_states':   {0: 'batch', 1: 'ids_len'}
             },
             opset_version=OPSET,
             dynamo=False
@@ -630,175 +961,185 @@ if DO_EXPORT:
         del input_ids
         gc.collect()
 
-        pixel_values = torch.randint(low=0, high=255, size=[VISION_BATCH_SIZE, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]).to(torch.uint8)
+        # ══════════════════════════════════════════════════════════════════
+        # Export: LLM_Vision
+        # ══════════════════════════════════════════════════════════════════
+        pixel_values = torch.randint(
+            low=0, high=255,
+            size=[VISION_BATCH_SIZE, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]]
+        ).to(torch.uint8)
         if INPUT_IMAGE_DIM != 4:
             pixel_values = pixel_values.unsqueeze(1)
-        
-        dynamic_axes = {
-            'pixel_values': {0: 'batch_size', -2: 'width', -1: 'height'},
-            'vision_hidden_states': {1: 'vision_embed_len'}
+
+        vision_dynamic_axes = {
+            'pixel_values':          {0: 'batch_size', -2: 'width', -1: 'height'},
+            'vision_hidden_states':  {1: 'vision_embed_len'}
         }
-        output_names = []
+        vision_output_names = []
         for i in range(deepstack_features_len):
             name = f'deepstack_feature_{i}'
-            output_names.append(name)
-            dynamic_axes[name] = {1: 'vision_embed_len'}
-        output_names.append('vision_hidden_states')
+            vision_output_names.append(name)
+            vision_dynamic_axes[name] = {1: 'vision_embed_len'}
+        vision_output_names.append('vision_hidden_states')
 
         torch.onnx.export(
             LLM_VISION(model),
             (pixel_values,),
             onnx_model_Vision,
             input_names=['pixel_values'],
-            output_names=output_names,
-            dynamic_axes=dynamic_axes if DYNAMIC_IMAGE_SHAPE else None,
+            output_names=vision_output_names,
+            dynamic_axes=vision_dynamic_axes if DYNAMIC_IMAGE_SHAPE else None,
             opset_version=OPSET,
             dynamo=False
         )
         del pixel_values
         gc.collect()
 
-        prompt_head_len = 4
-        text_hidden_states = torch.ones((1, ids_len, hidden_size), dtype=torch.float32)
-        vision_embed_size = WIDTH_FACTOR * HEIGHT_FACTOR * VISION_BATCH_SIZE
+        # ══════════════════════════════════════════════════════════════════
+        # Export: LLM_Concat
+        # ══════════════════════════════════════════════════════════════════
+        prompt_head_len      = 4  # <|im_start|>user\n<|vision_start|>
+        vision_embed_size    = WIDTH_FACTOR * HEIGHT_FACTOR * VISION_BATCH_SIZE
+        text_hidden_states   = torch.ones((1, ids_len, hidden_size), dtype=torch.float32)
         vision_hidden_states = torch.ones((1, vision_embed_size, hidden_size), dtype=torch.float32)
-        deepstack_features = torch.ones((1, vision_embed_size, hidden_size), dtype=torch.float32)
-        
-        all_inputs = []
-        input_names = []
-        output_names = []
-        dynamic_axes = {
-            'text_hidden_states': {0: 'batch_size', 1: 'ids_len'},
+        deepstack_features   = torch.ones((1, vision_embed_size, hidden_size), dtype=torch.float32)
+
+        concat_all_inputs  = []
+        concat_input_names = []
+        concat_output_names = []
+        concat_dynamic_axes = {
+            'text_hidden_states':   {0: 'batch_size', 1: 'ids_len'},
             'concat_hidden_states': {0: 'batch_size', 1: 'total_len'}
         }
         if DYNAMIC_IMAGE_SHAPE:
-            dynamic_axes['vision_hidden_states'] = {1: 'vision_embed_len'}
+            concat_dynamic_axes['vision_hidden_states'] = {1: 'vision_embed_len'}
         for i in range(deepstack_features_len):
-            name = f'in_deepstack_feature_{i}'
-            input_names.append(name)
-            all_inputs.append(deepstack_features)
+            in_name  = f'in_deepstack_feature_{i}'
+            out_name = f'out_deepstack_feature_{i}'
+            concat_input_names.append(in_name)
+            concat_all_inputs.append(deepstack_features)
             if DYNAMIC_IMAGE_SHAPE:
-                dynamic_axes[name] = {1: 'vision_embed_len'}
-            name = f'out_deepstack_feature_{i}'
-            dynamic_axes[name] = {1: 'total_len'}
-            output_names.append(name)
-        input_names.append("text_hidden_states")
-        input_names.append("vision_hidden_states")
-        all_inputs.append(text_hidden_states)
-        all_inputs.append(vision_hidden_states)
-        output_names.append("concat_hidden_states")
+                concat_dynamic_axes[in_name] = {1: 'vision_embed_len'}
+            concat_dynamic_axes[out_name] = {1: 'total_len'}
+            concat_output_names.append(out_name)
+        concat_input_names.extend(['text_hidden_states', 'vision_hidden_states'])
+        concat_all_inputs.extend([text_hidden_states, vision_hidden_states])
+        concat_output_names.append('concat_hidden_states')
 
         torch.onnx.export(
             LLM_CONCAT(MAX_SEQ_LEN, prompt_head_len, hidden_size, deepstack_features_len),
-            tuple(all_inputs),
+            tuple(concat_all_inputs),
             onnx_model_Concat,
-            input_names=input_names,
-            output_names=output_names,
-            dynamic_axes=dynamic_axes,
+            input_names=concat_input_names,
+            output_names=concat_output_names,
+            dynamic_axes=concat_dynamic_axes,
             opset_version=OPSET,
             dynamo=False
         )
-        del text_hidden_states, vision_hidden_states, deepstack_features, all_inputs
+        del text_hidden_states, vision_hidden_states, deepstack_features, concat_all_inputs
         gc.collect()
 
-        history_len = torch.tensor([0], dtype=torch.int64)
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Rotary Vision Prefill
+        # ══════════════════════════════════════════════════════════════════
         torch.onnx.export(
-            LLM_ROTARY_VISION(model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, MAX_SEQ_LEN),
+            ROTARY_VISION_PREFILL(model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, MAX_SEQ_LEN),
             (ids_len, history_len),
-            onnx_model_Rotary_Vision,
+            onnx_model_Rotary_Vision_Prefill,
             input_names=['ids_len', 'history_len'],
-            output_names=['rotary_pos_emb_cos', 'rotary_pos_emb_sin', 'kv_seq_len'],
+            output_names=['rotary_cos', 'rotary_sin', 'attention_mask', 'kv_seq_len'],
             dynamic_axes={
-                'rotary_pos_emb_cos': {1: 'ids_len'},
-                'rotary_pos_emb_sin': {1: 'ids_len'}
+                'rotary_cos':     {1: 'ids_len'},
+                'rotary_sin':     {1: 'ids_len'},
+                'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'}
             },
             opset_version=OPSET,
             dynamo=False
         )
 
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Rotary Vision Decode
+        # ══════════════════════════════════════════════════════════════════
         torch.onnx.export(
-            LLM_ROTARY_TEXT(model, MAX_SEQ_LEN),
+            ROTARY_VISION_DECODE(model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, MAX_SEQ_LEN),
+            (kv_seq_len,),
+            onnx_model_Rotary_Vision_Decode,
+            input_names=['kv_seq_len'],
+            output_names=['rotary_cos', 'rotary_sin', 'kv_seq_len_next'],
+            dynamic_axes=None,
+            opset_version=OPSET,
+            dynamo=False
+        )
+
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Rotary Text Prefill
+        # ══════════════════════════════════════════════════════════════════
+        torch.onnx.export(
+            ROTARY_TEXT_PREFILL(model, MAX_SEQ_LEN),
             (ids_len, history_len),
-            onnx_model_Rotary_Text,
+            onnx_model_Rotary_Text_Prefill,
             input_names=['ids_len', 'history_len'],
-            output_names=['rotary_pos_emb_cos', 'rotary_pos_emb_sin', 'kv_seq_len'],
+            output_names=['rotary_cos', 'rotary_sin', 'attention_mask', 'kv_seq_len'],
             dynamic_axes={
-                'rotary_pos_emb_cos': {1: 'ids_len'},
-                'rotary_pos_emb_sin': {1: 'ids_len'}
+                'rotary_cos':     {1: 'ids_len'},
+                'rotary_sin':     {1: 'ids_len'},
+                'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'}
             },
             opset_version=OPSET,
             dynamo=False
         )
-        
-        batch_size = BEAM_SIZE
-        ids_len = ids_len + vision_embed_size
-        kv_tensors = {}
-        kv_specs = [('key', 4), ('value', 3)]
-        if KV_QUANT_DTYPE == "F16":
-            kv_dtype = torch.float16
-        elif KV_QUANT_DTYPE == "Q8":
-            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 3), ('value_bias', 3)])
-            kv_dtype = torch.uint8
-        elif KV_QUANT_DTYPE == "Q8_CUDA":
-            kv_specs.extend([('key_scale', 4), ('key_bias', 4), ('value_scale', 3), ('value_bias', 3)])
-            kv_dtype = torch.int32
-        else:
-            kv_dtype = torch.float32
 
-        if KV_QUANT_DTYPE == "Q8_CUDA":
-            kv_tensors['key'] = torch.zeros((batch_size, num_key_value_heads, 1, head_dim // 4, history_len), dtype=kv_dtype)
-            kv_tensors['value'] = torch.zeros((batch_size, num_key_value_heads, 1, history_len, head_dim // 4), dtype=kv_dtype)
-        else:
-            kv_tensors['key'] = torch.zeros((batch_size, num_key_value_heads, 1, head_dim, history_len), dtype=kv_dtype)
-            kv_tensors['value'] = torch.zeros((batch_size, num_key_value_heads, 1, history_len, head_dim), dtype=kv_dtype)
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Rotary Text Decode
+        # ══════════════════════════════════════════════════════════════════
+        torch.onnx.export(
+            ROTARY_TEXT_DECODE(model, MAX_SEQ_LEN),
+            (kv_seq_len,),
+            onnx_model_Rotary_Text_Decode,
+            input_names=['kv_seq_len'],
+            output_names=['rotary_cos', 'rotary_sin', 'kv_seq_len_next'],
+            dynamic_axes=None,
+            opset_version=OPSET,
+            dynamo=False
+        )
 
-        if KV_QUANT_DTYPE in ["Q8", "Q8_CUDA"]:
-            kv_tensors['key_scale'] = torch.ones([batch_size, num_key_value_heads, 1, 1, history_len], dtype=scale_dtype)
-            kv_tensors['key_bias'] = torch.ones([batch_size, num_key_value_heads, 1, 1, history_len], dtype=scale_dtype)
-            kv_tensors['value_scale'] = torch.ones([batch_size, num_key_value_heads, 1, history_len, 1], dtype=scale_dtype)
-            kv_tensors['value_bias'] = torch.ones([batch_size, num_key_value_heads, 1, history_len, 1], dtype=scale_dtype)
+        # ══════════════════════════════════════════════════════════════════
+        # Export: LLM_Main (Transformer Layers)
+        # ══════════════════════════════════════════════════════════════════
+        ids_len_main = ids_len + vision_embed_size
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors)
 
-        def get_kv_io(tensors_dict, batch_axis='batch', seq_axis='history_len', out_seq_axis='kv_seq_len'):
-            inputs, in_names, out_names, axes = [], [], [], {}
-            for name, dim in kv_specs:
-                t = tensors_dict[name]
-                for i in range(num_layers):
-                    in_n, out_n = f'in_{name}_{i}', f'out_{name}_{i}'
-                    inputs.append(t)
-                    in_names.append(in_n)
-                    out_names.append(out_n)
-                    axes[in_n] = {0: batch_axis, dim: seq_axis}
-                    axes[out_n] = {0: batch_axis, dim: out_seq_axis}
-            return inputs, in_names, out_names, axes
+        hidden_states      = torch.ones((batch_size, ids_len_main, hidden_size), dtype=torch.float32)
+        ds_features_dummy  = torch.ones((1, ids_len_main, hidden_size), dtype=torch.float32)
+        rotary_cos         = torch.zeros((1, ids_len_main, 1, 1, head_dim), dtype=torch.float32)
+        rotary_sin         = rotary_cos
+        attention_mask     = torch.zeros((1, 1, 1, ids_len_main, kv_seq_len + vision_embed_size), dtype=torch.float32)
 
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch', 'history_len', 'kv_seq_len')
-        hidden_states = torch.ones((batch_size, ids_len, hidden_size), dtype=torch.float32)
-        deepstack_features = torch.ones((1, ids_len, hidden_size), dtype=torch.float32)
-        rotary_pos_emb_cos = torch.ones((1, ids_len, 1, 1, head_dim), dtype=torch.float32)
-        rotary_pos_emb_sin = rotary_pos_emb_cos
-        kv_seq_len = history_len.long() + ids_len
-        attention_mask = torch.tensor([1], dtype=torch.int8)
-
-        all_inputs = kv_ins + [hidden_states]
+        all_inputs  = kv_ins + [hidden_states]
         input_names = kv_in_names + ['hidden_states']
         dynamic_axes = {
-            **kv_axes, 'hidden_states': {0: 'batch', 1: 'ids_len'},
-            'rotary_pos_emb_cos': {1: 'ids_len'},
-            'rotary_pos_emb_sin': {1: 'ids_len'},
-            'logits': {0: 'batch'}
+            **kv_axes,
+            'hidden_states':  {0: 'batch', 1: 'ids_len'},
+            'logits':         {0: 'batch'},
+            'rotary_cos':     {1: 'ids_len'},
+            'rotary_sin':     {1: 'ids_len'},
+            'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'}
         }
-        
+
         for i in range(deepstack_features_len):
             name = f'deepstack_features_{i}'
             input_names.append(name)
-            all_inputs.append(deepstack_features)
+            all_inputs.append(ds_features_dummy)
             dynamic_axes[name] = {1: 'total_len'}
-        
-        all_inputs.extend([rotary_pos_emb_cos, rotary_pos_emb_sin, kv_seq_len, ids_len, attention_mask])
-        input_names.extend(['rotary_pos_emb_cos', 'rotary_pos_emb_sin', 'kv_seq_len', 'ids_len', 'attention_mask'])
+
+        all_inputs.extend([rotary_cos, rotary_sin, attention_mask])
+        input_names.extend(['rotary_cos', 'rotary_sin', 'attention_mask'])
         output_names = kv_out_names + ['logits']
 
-        model_Main = LLM_MAIN(model, head_dim, num_heads, num_layers, num_key_value_heads, hidden_size, MAX_SEQ_LEN, deepstack_features_len, HEIGHT_FACTOR, WIDTH_FACTOR)
+        model_Main = LLM_MAIN(
+            model, num_heads, num_key_value_heads, head_dim,
+            num_layers, hidden_size, deepstack_features_len
+        )
         del model
         gc.collect()
 
@@ -812,103 +1153,113 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False
         )
-        del model_Main, hidden_states, deepstack_features, rotary_pos_emb_cos, rotary_pos_emb_sin, attention_mask, all_inputs
+        del model_Main, hidden_states, ds_features_dummy, rotary_cos, rotary_sin, attention_mask, all_inputs
         gc.collect()
 
-        save_id_in = torch.zeros((BEAM_SIZE, 10), dtype=torch.int32)
-        logits = torch.ones((BEAM_SIZE, vocab_size), dtype=torch.float32)
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Greedy Search
+        # ══════════════════════════════════════════════════════════════════
+        save_id_in = torch.zeros((BEAM_SIZE, 10), dtype=torch.int32)  # 10 is a dummy value.
+
         torch.onnx.export(
             GREEDY_SEARCH(),
             (logits, save_id_in),
             onnx_model_Greedy,
             input_names=['logits', 'save_id_in'],
-            output_names=['max_logits_idx'],
+            output_names=['max_logits_idx', 'save_id_out'],
             dynamic_axes={
-                'logits': {0: 'batch'},
-                'save_id_in': {0: 'batch', 1: 'history_len'},
+                'logits':         {0: 'batch'},
+                'save_id_in':     {0: 'batch', 1: 'history_len'},
+                'save_id_out':    {0: 'batch', 1: 'history_len'},
                 'max_logits_idx': {0: 'batch'}
             },
             opset_version=OPSET,
             dynamo=False
         )
 
-        kv_tensors_Greedy = {k: v[[0]] for k, v in kv_tensors.items()}  # Slice batch dim for first beam
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_Greedy, 'batch_size', 'history_len', 'history_len')
-        kv_axes = {k: v for k, v in kv_axes.items() if k not in kv_out_names}
-        beam_size_t = torch.tensor([BEAM_SIZE], dtype=torch.int64)
-        other_inputs = [logits[[0]], save_id_in, beam_size_t]
-        other_names = ['logits', 'save_id_in', 'beam_size']
-        dynamic_axes = {
-            **kv_axes,
-            'logits': {0: 'batch'},
-            'save_id_in': {0: 'batch', 1: 'history_len'},
-            'top_beam_prob': {0: 'batch'},
-            'top_beam_indices': {0: 'batch'},
-            'max_logits_idx': {0: 'batch'},
-            'batch_indices': {0: 'batch'},
-            'save_id_out': {0: 'batch', 1: 'history_len'}
-        }
+        # ══════════════════════════════════════════════════════════════════
+        # Export: First Beam Search
+        # ══════════════════════════════════════════════════════════════════
         num_layers_beam = num_layers * len(kv_specs)
-        kv_ins_names = kv_in_names + other_names
+        # First beam uses single-batch KV (batch dim = 1)
+        kv_tensors_Greedy = {k: v[[0]] for k, v in kv_tensors.items()}
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_Greedy)
+        # Remove output axes — first beam outputs have variable batch, not tracked here
+        kv_input_only_axes = {k: v for k, v in kv_axes.items() if k not in kv_out_names}
 
         torch.onnx.export(
             FIRST_BEAM_SEARCH(num_layers_beam),
-            tuple(kv_ins + other_inputs),
+            tuple(kv_ins + [logits[[0]], save_id_in, beam_size]),
             onnx_model_First_Beam,
-            input_names=kv_ins_names,
-            output_names=['out_' + n[3:] for n in kv_in_names] + ['top_beam_indices', 'save_id_out', 'top_beam_prob', 'max_logits_idx'],
-            dynamic_axes=dynamic_axes,
+            input_names=kv_in_names + ['logits', 'save_id_in', 'beam_size'],
+            output_names=(['out_' + n[3:] for n in kv_in_names] + ['save_id_out', 'top_beam_prob', 'top_beam_indices', 'max_logits_idx']),
+            dynamic_axes={
+                **kv_input_only_axes,
+                'logits':           {0: 'batch'},
+                'save_id_in':       {0: 'batch', 1: 'history_len'},
+                'top_beam_prob':    {0: 'batch'},
+                'top_beam_indices': {0: 'batch'},
+                'max_logits_idx':   {0: 'batch'},
+                'batch_indices':    {0: 'batch'},
+                'save_id_out':      {0: 'batch', 1: 'history_len'}
+            },
             opset_version=OPSET,
             dynamo=False
         )
-        del kv_tensors_Greedy
 
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors, 'batch_size', 'history_len', 'kv_seq_len')
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Second Beam Search
+        # ══════════════════════════════════════════════════════════════════
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors)
         previous_prob = torch.zeros((BEAM_SIZE, 1), dtype=torch.float32)
         topK = torch.tensor([TOP_K], dtype=torch.int64)
-        other_inputs = [logits, save_id_in, previous_prob, beam_size_t, topK]
-        other_names = ['logits', 'save_id_in', 'previous_prob', 'beam_size', 'topK']
-        dynamic_axes = {
-            **kv_axes,
-            'logits': {0: 'batch'},
-            'save_id_in': {0: 'batch', 1: 'history_len'},
-            'previous_prob': {0: 'batch'},
-            'save_id_out': {0: 'batch', 1: 'history_len'},
-            'top_beam_prob': {0: 'batch'},
-            'top_beam_indices': {0: 'batch'},
-            'max_logits_idx': {0: 'batch'}
-        }
 
         torch.onnx.export(
             SECOND_BEAM_SEARCH(num_layers_beam),
-            tuple(kv_ins + other_inputs),
+            tuple(kv_ins + [logits, save_id_in, previous_prob, beam_size, topK]),
             onnx_model_Second_Beam,
-            input_names=kv_in_names + other_names,
-            output_names=kv_out_names + ['top_beam_indices', 'save_id_out', 'top_beam_prob', 'max_logits_idx'],
-            dynamic_axes=dynamic_axes,
+            input_names=kv_in_names + ['logits', 'save_id_in', 'previous_prob', 'beam_size', 'topK'],
+            output_names=kv_out_names + ['save_id_out', 'top_beam_prob', 'top_beam_indices', 'max_logits_idx'],
+            dynamic_axes={
+                **kv_axes,
+                'logits':           {0: 'batch'},
+                'save_id_in':       {0: 'batch', 1: 'history_len'},
+                'previous_prob':    {0: 'batch'},
+                'save_id_out':      {0: 'batch', 1: 'history_len'},
+                'top_beam_prob':    {0: 'batch'},
+                'top_beam_indices': {0: 'batch'},
+                'max_logits_idx':   {0: 'batch'}
+            },
             opset_version=OPSET,
             dynamo=False
         )
-        del kv_tensors, previous_prob, topK, num_layers
+        del kv_tensors_Greedy, previous_prob, topK
 
-        penalty_value = torch.tensor([REPEAT_PENALITY], dtype=torch.float32)
-        penality_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Apply Penalty
+        # ══════════════════════════════════════════════════════════════════
+        penalty_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
+        penalty_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
+
         torch.onnx.export(
             APPLY_PENALTY(),
-            (logits, save_id_in, penalty_value, penality_range),
+            (logits, save_id_in, penalty_value, penalty_range),
             onnx_model_Penalty,
-            input_names=['logits_in', 'save_id_in', 'penalty_value', 'penality_range'],
+            input_names=['logits_in', 'save_id_in', 'penalty_value', 'penalty_range'],
             output_names=['logits_out'],
             dynamic_axes={
-                'logits_in': {0: 'batch'},
+                'logits_in':  {0: 'batch'},
                 'save_id_in': {0: 'batch', 1: 'history_len'},
                 'logits_out': {0: 'batch'}
             },
             opset_version=OPSET,
             dynamo=False
         )
-        del save_id_in, penalty_value, penality_range
+        del save_id_in, penalty_value, penalty_range
 
+        # ══════════════════════════════════════════════════════════════════
+        # Export: Argmax
+        # ══════════════════════════════════════════════════════════════════
         torch.onnx.export(
             ARGMAX(),
             (logits,),
@@ -916,283 +1267,440 @@ if DO_EXPORT:
             input_names=['logits'],
             output_names=['max_logits_idx'],
             dynamic_axes={
-                'logits': {0: 'batch'},
+                'logits':         {0: 'batch'},
                 'max_logits_idx': {0: 'batch'}
             },
             opset_version=OPSET,
             dynamo=False
         )
         del logits
-        del beam_size_t
-        del vocab_size
+        gc.collect()
 
-        print('\nExport Done!\n\nStrat to run QwenVL by ONNX Runtime.')
+        # ══════════════════════════════════════════════════════════════════
+        # Export: KV Slice
+        # ══════════════════════════════════════════════════════════════════
+        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(
+            kv_tensors, batch_axis='batch_size', seq_axis='history_len', out_seq_axis='sliced_len'
+        )
+        slice_start = torch.tensor([0], dtype=torch.int64)
+        slice_end   = torch.tensor([5], dtype=torch.int64)  # 5 is a dummy value.
+
+        torch.onnx.export(
+            KV_SLICE(num_layers),
+            tuple(kv_ins + [slice_start, slice_end]),
+            onnx_model_KV_Slice,
+            input_names=kv_in_names + ['slice_start', 'slice_end'],
+            output_names=kv_out_names,
+            dynamic_axes=kv_axes,
+            opset_version=OPSET,
+            dynamo=False
+        )
+        del slice_start, slice_end, kv_ins, kv_in_names, kv_out_names, kv_axes, kv_tensors
+        gc.collect()
+
+    print(
+        '\nExport done!\n\n'
+        'Start running the QwenVL by ONNX Runtime.\n'
+        'Now loading . . . it could cost minutes.'
+    )
 
 
-# Inference with ONNXRuntime
-# =======================================================#
-def is_valid_image_path(TEST_IMAGE):
-    if TEST_IMAGE is None:
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+def is_valid_image_path(path):
+    if not path or not os.path.exists(path):
         return False
-    elif TEST_IMAGE == "":
-        return False
-    elif not os.path.exists(TEST_IMAGE):
-        return False
-    valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', 'raw'}
-    _, ext = os.path.splitext(TEST_IMAGE)
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.raw'}
+    _, ext = os.path.splitext(path)
     return ext.lower() in valid_extensions
 
 
-def bind_ort_in(binding, names, values, num=0):
-    if num != 0:
-        for i in range(num):
-            binding.bind_ortvalue_input(names[i], values[i])
-    else:
-        for name, val in zip(names, values):
-            binding.bind_ortvalue_input(name, val)
+def bind_ort_in(binding, names, values):
+    """Bind OrtValue inputs by name."""
+    for name, val in zip(names, values):
+        binding.bind_ortvalue_input(name, val)
 
 
-def bind_ort_out(binding, output_names, device_type):
-    for name in output_names:
-        binding._iobinding.bind_output(name, device_type)
+def bind_ort_out(binding, names, device):
+    """Bind outputs by name, letting ORT allocate on `device`."""
+    for name in names:
+        binding._iobinding.bind_output(name, device)
 
 
-def create_ortvalue(data, dtype, device_type, device_id):
-    return onnxruntime.OrtValue.ortvalue_from_numpy(np.array(data, dtype=dtype), device_type, device_id)
+def create_ort_with_data(data, dtype, device, device_id):
+    """Create an OrtValue from a Python list/scalar."""
+    return onnxruntime.OrtValue.ortvalue_from_numpy(np.array(data, dtype=dtype), device, device_id)
 
 
-tokenizer = AutoTokenizer.from_pretrained(download_path)
+def create_ort_with_shape(shape, dtype, device, device_id):
+    """Create a zero-filled OrtValue with the given shape."""
+    return onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(shape, dtype=dtype), device, device_id)
 
+
+def create_session(model_path, _session_opts, _providers, _provider_options, _disabled_optimizers):
+    """Create an ORT InferenceSession with standard options."""
+    return onnxruntime.InferenceSession(
+        model_path,
+        sess_options=_session_opts,
+        providers=_providers,
+        provider_options=_provider_options,
+        disabled_optimizers=_disabled_optimizers)
+
+
+def get_in_names(session):
+    return [x.name for x in session.get_inputs()]
+
+
+def get_out_names(session):
+    return [x.name for x in session.get_outputs()]
+
+
+def run(session, binding):
+    session.run_with_iobinding(binding, run_options=run_options)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ORT SESSION & RUNTIME OPTIONS
+# ══════════════════════════════════════════════════════════════════════════════
 session_opts = onnxruntime.SessionOptions()
-run_options = onnxruntime.RunOptions()
-session_opts.log_severity_level = 4                 # Fatal level, it an adjustable value.
-session_opts.log_verbosity_level = 4                # Fatal level, it an adjustable value.
-run_options.log_severity_level = 4                  # Fatal level, it an adjustable value.
-run_options.log_verbosity_level = 4                 # Fatal level, it an adjustable value.
-session_opts.inter_op_num_threads = MAX_THREADS     # Run different nodes with num_threads. Set 0 for auto.
-session_opts.intra_op_num_threads = MAX_THREADS     # Under the node, execute the operators with num_threads. Set 0 for auto.
-session_opts.enable_cpu_mem_arena = True            # True for execute speed; False for less memory usage.
-session_opts.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
+run_options  = onnxruntime.RunOptions()
+
+for opt in (session_opts, run_options):
+    opt.log_severity_level  = 0 if ORT_LOG else 4
+    opt.log_verbosity_level = 4
+
+session_opts.inter_op_num_threads     = MAX_THREADS
+session_opts.intra_op_num_threads     = MAX_THREADS
+session_opts.execution_mode           = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
 session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
-session_opts.add_session_config_entry('session.set_denormal_as_zero', '1')
-session_opts.add_session_config_entry('session.intra_op.allow_spinning', '1')
-session_opts.add_session_config_entry('session.inter_op.allow_spinning', '1')
-session_opts.add_session_config_entry('session.enable_quant_qdq_cleanup', '1')
-session_opts.add_session_config_entry('session.qdq_matmulnbits_accuracy_level', '4')
-session_opts.add_session_config_entry('session.use_device_allocator_for_initializers', '1')
-session_opts.add_session_config_entry('session.graph_optimizations_loop_level', '2')
-session_opts.add_session_config_entry('optimization.enable_gelu_approximation', '1')
-session_opts.add_session_config_entry('optimization.minimal_build_optimizations', '')
-session_opts.add_session_config_entry('optimization.enable_cast_chain_elimination', '1')
-session_opts.add_session_config_entry('optimization.disable_specified_optimizers', '')
+
+_session_configs = {
+    'session.set_denormal_as_zero':                  '1',
+    'session.intra_op.allow_spinning':               '1',
+    'session.inter_op.allow_spinning':               '1',
+    'session.enable_quant_qdq_cleanup':              '1',
+    'session.qdq_matmulnbits_accuracy_level':        '2' if ORT_FP16 else '4',
+    'session.use_device_allocator_for_initializers': '1',
+    'session.graph_optimizations_loop_level':        '2',
+    'optimization.enable_gelu_approximation':        '1',
+    'optimization.minimal_build_optimizations':      '',
+    'optimization.enable_cast_chain_elimination':    '1',
+    'optimization.disable_specified_optimizers':
+        'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else ''
+}
+for k, v in _session_configs.items():
+    session_opts.add_session_config_entry(k, v)
+
 run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
 
+disabled_optimizers = ['CastFloat16Transformer', 'FuseFp16InitializerToFp32NodeTransformer'] if ORT_FP16 else None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXECUTION PROVIDER CONFIGURATION
+# ══════════════════════════════════════════════════════════════════════════════
 if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
-    provider_options = [
-        {
-            'device_type': 'CPU',                         # [CPU, NPU, GPU, GPU.0, GPU.1]]
-            'precision': 'ACCURACY',                      # [FP32, FP16, ACCURACY]
-            'num_of_threads': MAX_THREADS if MAX_THREADS != 0 else 8,  # The default value is 8. Edit freely.
-            'num_streams': 1,
-            'enable_opencl_throttling': False,
-            'enable_qdq_optimizer': False,                # Enable it carefully
-            'disable_dynamic_shapes': False
-        }
-    ]
-    device_type = 'cpu'
+    provider_options = [{
+        'device_type':              'CPU',                 # [CPU, GPU, NPU, GPU.0, GPU.1]
+        'precision':                'ACCURACY',            # [FP32, FP16, ACCURACY]
+        'num_of_threads':           MAX_THREADS if MAX_THREADS != 0 else 8,
+        'num_streams':              1,
+        'enable_opencl_throttling': False,
+        'enable_qdq_optimizer':     False,                 # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'disable_dynamic_shapes':   False
+    }]
+    device_type      = 'cpu'
     _ort_device_type = C.OrtDevice.cpu()
-elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
-    provider_options = [
-        {
-            'device_id': DEVICE_ID,
-            'gpu_mem_limit': 24 * 1024 * 1024 * 1024,     # 24 GB
-            'arena_extend_strategy': 'kNextPowerOfTwo',   # ["kNextPowerOfTwo", "kSameAsRequested"]
-            'cudnn_conv_algo_search': 'EXHAUSTIVE',       # ["DEFAULT", "HEURISTIC", "EXHAUSTIVE"]
-            'sdpa_kernel': '2',                           # ["0", "1", "2"]
-            'use_tf32': '1',
-            'fuse_conv_bias': '0',                        # Set to '0' to avoid potential errors when enabled.
-            'cudnn_conv_use_max_workspace': '1',
-            'cudnn_conv1d_pad_to_nc1d': '0',
-            'tunable_op_enable': '0',
-            'tunable_op_tuning_enable': '0',
-            'tunable_op_max_tuning_duration_ms': 10,
-            'do_copy_in_default_stream': '0',
-            'enable_cuda_graph': '0',                     # Set to '0' to avoid potential errors when enabled.
-            'prefer_nhwc': '0',
-            'enable_skip_layer_norm_strict_mode': '0',
-            'use_ep_level_unified_stream': '0',
-        }
-    ]
-    device_type = 'cuda'
-    _ort_device_type = C.OrtDevice.cuda()
-elif "DmlExecutionProvider" in ORT_Accelerate_Providers:
-    provider_options = [
-        {
-            'device_id': DEVICE_ID,
-            'performance_preference': 'high_performance',  # [high_performance, default, minimum_power]
-            'device_filter': 'npu'                         # [any, npu, gpu]
-        }
-    ]
-    device_type = 'dml'
-    _ort_device_type = C.OrtDevice.dml()
-else:
-    # Please config by yourself for others providers.
-    device_type = 'cpu'
-    _ort_device_type = C.OrtDevice.cpu()
-    provider_options = None
 
+elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
+    provider_options = [{
+        'device_id':                          DEVICE_ID,
+        'gpu_mem_limit':                      24 * (1024 **3),    # 24GB
+        'arena_extend_strategy':              'kNextPowerOfTwo',  # ["DEFAULT", "HEURISTIC", "EXHAUSTIVE"]
+        'cudnn_conv_algo_search':             'EXHAUSTIVE',       # ["kNextPowerOfTwo", "kSameAsRequested"]
+        'sdpa_kernel':                        '2',                # ["0", "1", "2"]
+        'use_tf32':                           '1',
+        'fuse_conv_bias':                     '0',          # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'cudnn_conv_use_max_workspace':       '1',
+        'cudnn_conv1d_pad_to_nc1d':           '0',
+        'tunable_op_enable':                  '0',
+        'tunable_op_tuning_enable':           '0',
+        'tunable_op_max_tuning_duration_ms':  10,
+        'do_copy_in_default_stream':          '0',
+        'enable_cuda_graph':                  '0',          # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'prefer_nhwc':                        '0',
+        'enable_skip_layer_norm_strict_mode': '0',
+        'use_ep_level_unified_stream':        '0'
+    }]
+    device_type      = 'cuda'
+    _ort_device_type = C.OrtDevice.cuda()
+
+elif "DmlExecutionProvider" in ORT_Accelerate_Providers:
+    provider_options = [{
+        'device_id':                  DEVICE_ID,
+        'performance_preference':     'high_performance',   # ["default", "high_performance", "minimum_power"] ; Default (Gpus first), HighPerformance (GPUs first), LowPower (NPUs first)
+        'device_filter':              'gpu',                # [gpu, npu, any],
+        'disable_metacommands':       'false',              # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'enable_graph_capture':       'false',              # Disable to avoid loading error with some models; can be re-enabled if not an issue
+        'enable_graph_serialization': 'false'               # Disable to avoid loading error with some models; can be re-enabled if not an issue
+    }]
+    device_type      = 'dml'
+    _ort_device_type = C.OrtDevice.dml()
+
+else:
+    provider_options = None
+    device_type      = 'cpu'
+    _ort_device_type = C.OrtDevice.cpu()
+
+packed_settings = {
+    "_session_opts":        session_opts,
+    "_providers":           ORT_Accelerate_Providers,
+    "_provider_options":    provider_options,
+    "_disabled_optimizers": disabled_optimizers
+}
 
 _ort_device_type = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
+kv_device = 'cpu' if 'dml' in device_type else device_type
 
-ort_session_Embed = onnxruntime.InferenceSession(onnx_model_Embed, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-binding_Embed = ort_session_Embed.io_binding()
-in_name_Embed = ort_session_Embed.get_inputs()[0].name
-out_name_Embed = [ort_session_Embed.get_outputs()[0].name]
 
-ort_session_Vision = onnxruntime.InferenceSession(onnx_model_Vision, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-binding_Vision = ort_session_Vision.io_binding()
-in_name_Vision_objs = ort_session_Vision.get_inputs()
-out_name_Vision_objs = ort_session_Vision.get_outputs()
-in_name_Vision = [x.name for x in in_name_Vision_objs]
-out_name_Vision = [x.name for x in out_name_Vision_objs]
+# ══════════════════════════════════════════════════════════════════════════════
+# LOAD ONNX SESSIONS
+# ══════════════════════════════════════════════════════════════════════════════
+# --- Embed ---
+ort_session_Embed = create_session(onnx_model_Embed, **packed_settings)
+binding_Embed     = ort_session_Embed.io_binding()
+in_name_Embed     = get_in_names(ort_session_Embed)[0]
+out_name_Embed    = get_out_names(ort_session_Embed)[0]
+
+# --- Vision ---
+ort_session_Vision = create_session(onnx_model_Vision, **packed_settings)
+binding_Vision     = ort_session_Vision.io_binding()
+in_name_Vision     = get_in_names(ort_session_Vision)
+out_name_Vision    = get_out_names(ort_session_Vision)
 deepstack_features_len = len(out_name_Vision) - 1
-in_name_Vision_parts = in_name_Vision[:deepstack_features_len+1]
 vision_dtype = np.float16 if 'float16' in ort_session_Vision._outputs_meta[0].type else np.float32
 
-ort_session_Concat = onnxruntime.InferenceSession(onnx_model_Concat, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-binding_Concat = ort_session_Concat.io_binding()
-in_name_Concat_objs = ort_session_Concat.get_inputs()
-out_name_Concat_objs = ort_session_Concat.get_outputs()
-amount_of_outputs_Concat = len(out_name_Concat_objs)
-in_name_Concat = [x.name for x in in_name_Concat_objs]
-out_name_Concat = [x.name for x in out_name_Concat_objs]
+# --- Concat ---
+ort_session_Concat = create_session(onnx_model_Concat, **packed_settings)
+binding_Concat     = ort_session_Concat.io_binding()
+in_name_Concat     = get_in_names(ort_session_Concat)
+out_name_Concat    = get_out_names(ort_session_Concat)
+amount_of_outputs_Concat = len(out_name_Concat)
 
-ort_session_Rotary_Vision = onnxruntime.InferenceSession(onnx_model_Rotary_Vision, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-binding_Rotary_Vision = ort_session_Rotary_Vision.io_binding()
-in_name_Rotary_Vision = [x.name for x in ort_session_Rotary_Vision.get_inputs()]
-out_name_Rotary_Vision = [x.name for x in ort_session_Rotary_Vision.get_outputs()]
-rotary_outputs_len = len(out_name_Rotary_Vision)
-rotary_outputs_len_minus = rotary_outputs_len - 1
+# --- Rotary Vision (Prefill + Decode) ---
+ort_session_Rotary_Vision_Prefill = create_session(onnx_model_Rotary_Vision_Prefill, **packed_settings)
+binding_Rotary_Vision_Prefill     = ort_session_Rotary_Vision_Prefill.io_binding()
+in_name_Rotary_Vision_Prefill     = get_in_names(ort_session_Rotary_Vision_Prefill)
+out_name_Rotary_Vision_Prefill    = get_out_names(ort_session_Rotary_Vision_Prefill)
 
-ort_session_Rotary_Text = onnxruntime.InferenceSession(onnx_model_Rotary_Text, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-binding_Rotary_Text = ort_session_Rotary_Text.io_binding()
-in_name_Rotary_Text = [x.name for x in ort_session_Rotary_Text.get_inputs()]
-out_name_Rotary_Text = [x.name for x in ort_session_Rotary_Text.get_outputs()]
+ort_session_Rotary_Vision_Decode = create_session(onnx_model_Rotary_Vision_Decode, **packed_settings)
+binding_Rotary_Vision_Decode     = ort_session_Rotary_Vision_Decode.io_binding()
+in_name_Rotary_Vision_Decode     = get_in_names(ort_session_Rotary_Vision_Decode)[0]
+out_name_Rotary_Vision_Decode    = get_out_names(ort_session_Rotary_Vision_Decode)
 
-ort_session_Main = onnxruntime.InferenceSession(onnx_model_Main, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-binding_Main = ort_session_Main.io_binding()
+# --- Rotary Text (Prefill + Decode) ---
+ort_session_Rotary_Text_Prefill = create_session(onnx_model_Rotary_Text_Prefill, **packed_settings)
+binding_Rotary_Text_Prefill     = ort_session_Rotary_Text_Prefill.io_binding()
+in_name_Rotary_Text_Prefill     = get_in_names(ort_session_Rotary_Text_Prefill)
+out_name_Rotary_Text_Prefill    = get_out_names(ort_session_Rotary_Text_Prefill)
+
+ort_session_Rotary_Text_Decode = create_session(onnx_model_Rotary_Text_Decode, **packed_settings)
+binding_Rotary_Text_Decode     = ort_session_Rotary_Text_Decode.io_binding()
+in_name_Rotary_Text_Decode     = get_in_names(ort_session_Rotary_Text_Decode)[0]
+out_name_Rotary_Text_Decode    = get_out_names(ort_session_Rotary_Text_Decode)
+
+# --- Main ---
+ort_session_Main = create_session(onnx_model_Main, **packed_settings)
+binding_Main     = ort_session_Main.io_binding()
 print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
 
-model_dtype_Main_str = ort_session_Main._inputs_meta[0].type
-in_name_Main_objs = ort_session_Main.get_inputs()
-out_name_Main_objs = ort_session_Main.get_outputs()
-amount_of_outputs_Main = len(out_name_Main_objs)
-in_name_Main = [x.name for x in in_name_Main_objs]
-out_name_Main = [x.name for x in out_name_Main_objs]
 
-if 'dml' in device_type:
-    kv_device = 'cpu'
-else:
-    kv_device = device_type
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN MODEL METADATA & INDEX OFFSETS
+# ══════════════════════════════════════════════════════════════════════════════
+in_name_Main           = get_in_names(ort_session_Main)
+out_name_Main          = get_out_names(ort_session_Main)
+amount_of_outputs_Main = len(out_name_Main)
+num_keys_values        = amount_of_outputs_Main - 1
 
-num_keys_values = amount_of_outputs_Main - 1
-if 'uint8' in model_dtype_Main_str or 'int32' in model_dtype_Main_str:
-    kv_dtype = np.int32 if 'int32' in model_dtype_Main_str else np.uint8
-    num_layers = num_keys_values // 6
-    kv_scale_dtype = np.float16 if 'float16' in ort_session_Main._inputs_meta[num_layers + num_layers].type else np.float32
-    k_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
-    k_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[0].shape[1], 1, 1, 0), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
-    v_scales = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
-    v_biases = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[num_layers].shape[1], 1, 0, 1), dtype=kv_scale_dtype), kv_device, DEVICE_ID)
-else:
-    kv_dtype = np.float16 if 'float16' in model_dtype_Main_str else np.float32
-    num_layers = num_keys_values // 2
-    k_scales = None
-
-vision_embed_size = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
+# Derived index offsets for beam/greedy extra inputs
 num_keys_values_plus_1 = num_keys_values + 1
 num_keys_values_plus_2 = num_keys_values + 2
 num_keys_values_plus_3 = num_keys_values + 3
 num_keys_values_plus_4 = num_keys_values + 4
-num_keys_values_plus_deepstack_plus_rotary = num_keys_values + deepstack_features_len + rotary_outputs_len
-num_keys_values_plus_deepstack_plus_rotary_plus_1 = num_keys_values_plus_deepstack_plus_rotary + 1
-num_keys_values_plus_deepstack_plus_rotary_plus_2 = num_keys_values_plus_deepstack_plus_rotary + 2
-rotary_indices = np.arange(rotary_outputs_len, dtype=np.int32) + num_keys_values + deepstack_features_len + 1
-deepstack_indices = np.arange(deepstack_features_len, dtype=np.int32) + num_keys_values + 1
-rotary_in_name_Main = in_name_Main[rotary_indices[0]:rotary_indices[rotary_outputs_len-1]+1]
-deepstack_in_name_Main = in_name_Main[deepstack_indices[0]:deepstack_indices[deepstack_features_len-1]+1]
-in_name_Main_parts = in_name_Main[:num_keys_values]
-vocab_size = ort_session_Main._outputs_meta[num_keys_values].shape[1]
 
-if USE_BEAM_SEARCH and (TOP_K < BEAM_SIZE):
+# Main model non-KV input indices
+# Layout: [KV_caches..., hidden_states, deepstack_0..N-1, rotary_cos, rotary_sin, attention_mask]
+idx_hidden_states  = num_keys_values
+idx_ds_start       = num_keys_values + 1
+idx_rotary_cos     = num_keys_values + deepstack_features_len + 1
+idx_rotary_sin     = num_keys_values + deepstack_features_len + 2
+idx_attention_mask = num_keys_values + deepstack_features_len + 3
+
+# Partitioned name lists
+in_name_Main_parts     = in_name_Main[:num_keys_values]
+out_name_Main_kv       = out_name_Main[:num_keys_values]
+out_name_Main_logits   = out_name_Main[num_keys_values]
+deepstack_in_name_Main = in_name_Main[idx_ds_start:idx_ds_start + deepstack_features_len]
+
+# Dtype introspection
+kv_dtype_str             = ort_session_Main._inputs_meta[0].type
+hidden_states_dtype_Main = np.float16 if 'float16' in ort_session_Main._inputs_meta[idx_hidden_states].type else np.float32
+vocab_size               = ort_session_Main._outputs_meta[num_keys_values].shape[1]
+
+_logits_out_meta  = ort_session_Main._outputs_meta[num_keys_values]
+_logits_out_dtype = np.float16 if 'float16' in _logits_out_meta.type else np.float32
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KV CACHE SETUP
+# ══════════════════════════════════════════════════════════════════════════════
+_meta = ort_session_Main._inputs_meta
+
+if 'uint8' in kv_dtype_str or 'int32' in kv_dtype_str:
+    kv_dtype_Main = np.int32 if 'int32' in kv_dtype_str else np.uint8
+    num_layers    = num_keys_values // 6
+    scale_dtype   = np.float16 if 'float16' in _meta[num_layers * 2].type else np.float32
+    k_scales      = create_ort_with_shape((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    k_biases      = create_ort_with_shape((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    v_scales      = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    v_biases      = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+else:
+    kv_dtype_Main = np.float16 if 'float16' in kv_dtype_str else np.float32
+    num_layers    = num_keys_values // 2
+    k_scales      = None
+
+past_keys_Main   = create_ort_with_shape((1, _meta[0].shape[1],          1, _meta[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
+past_values_Main = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, _meta[num_layers].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DECODING STRATEGY VALIDATION
+# ══════════════════════════════════════════════════════════════════════════════
+if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
     TOP_K = BEAM_SIZE
 
-if (TOP_K < 2) or (BEAM_SIZE < 2):
+if TOP_K < 2 or BEAM_SIZE < 2:
     USE_BEAM_SEARCH = False
-    print("\nInappropriate Beam Search setting. Falling back to Greedy Search.")
+    print("\nInappropriate Beam Search setting detected. Falling back to Greedy Search.")
 
 if not USE_BEAM_SEARCH:
     BEAM_SIZE = 1
 
+USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
-prompt = f"<|im_start|>user\n<|vision_start|><|vision_end|>{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n"
-tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
-input_ids = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TOKENIZER & STOP TOKENS & PROMPT
+# ══════════════════════════════════════════════════════════════════════════════
+tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
+
+STOP_TOKEN_SET = set(STOP_TOKEN)
+
+prompt  = f"<|im_start|>user\n<|vision_start|><|vision_end|>{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n"
+tokens  = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 num_prefill = tokens.shape[-1]
-ids_len = create_ortvalue([num_prefill], np.int64, device_type, DEVICE_ID)
-init_ids_len_1 = create_ortvalue([1], np.int64, device_type, DEVICE_ID)
-init_history_len = create_ortvalue([0], np.int64, device_type, DEVICE_ID)
-init_attention_mask_0 = create_ortvalue([0], np.int8, device_type, DEVICE_ID)
-init_attention_mask_1 = create_ortvalue([1], np.int8, device_type, DEVICE_ID)
-init_deepstack_features = [onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, 1, ort_session_Concat._inputs_meta[0].shape[2]), dtype=vision_dtype), device_type, DEVICE_ID)] * deepstack_features_len
-init_past_keys_Main = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[0].shape[1], 1, ort_session_Main._inputs_meta[0].shape[3], 0), dtype=kv_dtype), kv_device, DEVICE_ID)
-init_past_values_Main = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((1, ort_session_Main._inputs_meta[num_layers].shape[1], 1, 0, ort_session_Main._inputs_meta[num_layers].shape[4]), dtype=kv_dtype), kv_device, DEVICE_ID)
-init_save_id = onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros((BEAM_SIZE, 0), dtype=np.int32), device_type, DEVICE_ID)
-topK = create_ortvalue([TOP_K], np.int64, device_type, DEVICE_ID)
-beam_size = create_ortvalue([BEAM_SIZE], np.int64, device_type, DEVICE_ID)
 
-USE_PENALTY = (REPEAT_PENALITY != 1.0)
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SHARED ORTVALUE BUFFERS
+# ══════════════════════════════════════════════════════════════════════════════
+vision_embed_size = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
+_rotary_decode_meta = ort_session_Rotary_Text_Decode._outputs_meta
+
+# --- Input OrtValues ---
+input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
+ids_len          = create_ort_with_data([num_prefill], np.int64,  device_type, DEVICE_ID)
+init_ids_len_1   = create_ort_with_data([1],           np.int64,  device_type, DEVICE_ID)
+init_history_len = create_ort_with_data([0],           np.int64,  device_type, DEVICE_ID)
+topK             = create_ort_with_data([TOP_K],       np.int64,  device_type, DEVICE_ID)
+beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
+
+# --- Decode-phase placeholder buffers (reused every step) ---
+attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                   hidden_states_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape(_rotary_decode_meta[0].shape,                            hidden_states_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape(_rotary_decode_meta[1].shape,                            hidden_states_dtype_Main, device_type, DEVICE_ID)
+hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, _meta[idx_hidden_states].shape[2]), hidden_states_dtype_Main, device_type, DEVICE_ID)
+save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                    np.int32,                 device_type, DEVICE_ID)
+
+# --- Init deepstack features (zeros for decode and text-only mode) ---
+init_deepstack_features = [create_ort_with_shape((1, 1, ort_session_Concat._inputs_meta[0].shape[2]), vision_dtype, device_type, DEVICE_ID)] * deepstack_features_len
+
+# --- Logits & token-index buffers ---
+prefill_logits_buf = create_ort_with_shape((1, vocab_size),         _logits_out_dtype, device_type, DEVICE_ID)
+decode_logits_buf  = create_ort_with_shape((BEAM_SIZE, vocab_size), _logits_out_dtype, device_type, DEVICE_ID)
+max_idx_buf        = create_ort_with_shape((1, 1),                  np.int32,          device_type, DEVICE_ID)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DECODE HEAD SESSIONS (Beam Search OR Greedy/Argmax)
+# ══════════════════════════════════════════════════════════════════════════════
 if USE_BEAM_SEARCH:
     print("\nBeam Search does not display immediate decoding results...")
-    ort_session_First_Beam = onnxruntime.InferenceSession(onnx_model_First_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-    binding_First_Beam = ort_session_First_Beam.io_binding()
-    in_name_First_Beam = [x.name for x in ort_session_First_Beam.get_inputs()]
-    out_name_First_Beam = [x.name for x in ort_session_First_Beam.get_outputs()]
-    in_name_First_Beam_parts = in_name_First_Beam[:num_keys_values]
-    ort_session_Second_Beam = onnxruntime.InferenceSession(onnx_model_Second_Beam, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-    binding_Second_Beam = ort_session_Second_Beam.io_binding()
-    in_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_inputs()]
-    out_name_Second_Beam = [x.name for x in ort_session_Second_Beam.get_outputs()]
-    in_name_Second_Beam_parts = in_name_Second_Beam[:num_keys_values]
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_1], init_save_id)
+
+    # --- First Beam ---
+    ort_session_First_Beam    = create_session(onnx_model_First_Beam, **packed_settings)
+    binding_First_Beam        = ort_session_First_Beam.io_binding()
+    in_name_First_Beam        = get_in_names(ort_session_First_Beam)
+    out_name_First_Beam       = get_out_names(ort_session_First_Beam)
+    in_name_First_Beam_parts  = in_name_First_Beam[:num_keys_values_plus_1]
+    out_name_First_Beam_parts = out_name_First_Beam[:num_keys_values_plus_1]
+
+    # --- Second Beam ---
+    ort_session_Second_Beam    = create_session(onnx_model_Second_Beam, **packed_settings)
+    binding_Second_Beam        = ort_session_Second_Beam.io_binding()
+    in_name_Second_Beam        = get_in_names(ort_session_Second_Beam)
+    out_name_Second_Beam       = get_out_names(ort_session_Second_Beam)
+    in_name_Second_Beam_parts  = in_name_Second_Beam[:num_keys_values_plus_1]
+    out_name_Second_Beam_parts = out_name_Second_Beam[:num_keys_values_plus_1]
+
+    # --- Beam-specific buffers ---
+    beam_ids_buf   = create_ort_with_shape((BEAM_SIZE, 1), np.int32,                 device_type, DEVICE_ID)
+    beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_states_dtype_Main, device_type, DEVICE_ID)
+
+    # --- Static beam bindings ---
+    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_1], save_id_buf)
     binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_2], beam_size)
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_3], beam_size)
     binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_4], topK)
+
 else:
-    ort_session_Greedy = onnxruntime.InferenceSession(onnx_model_Greedy, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-    binding_Greedy = ort_session_Greedy.io_binding()
-    in_name_Greedy = [x.name for x in ort_session_Greedy.get_inputs()]
-    out_name_Greedy = [x.name for x in ort_session_Greedy.get_outputs()]
-    binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], init_save_id)
-    ort_session_Argmax = onnxruntime.InferenceSession(onnx_model_Argmax, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-    binding_Argmax = ort_session_Argmax.io_binding()
-    in_name_Argmax = ort_session_Argmax.get_inputs()[0].name
-    out_name_Argmax = [x.name for x in ort_session_Argmax.get_outputs()]
-    save_id_numpy = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
+    # --- Greedy ---
+    ort_session_Greedy = create_session(onnx_model_Greedy, **packed_settings)
+    binding_Greedy     = ort_session_Greedy.io_binding()
+    in_name_Greedy     = get_in_names(ort_session_Greedy)
+    out_name_Greedy    = get_out_names(ort_session_Greedy)
+    binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id_buf)
 
+    # --- Argmax ---
+    ort_session_Argmax = create_session(onnx_model_Argmax, **packed_settings)
+    binding_Argmax     = ort_session_Argmax.io_binding()
+    in_name_Argmax     = get_in_names(ort_session_Argmax)[0]
+    out_name_Argmax    = get_out_names(ort_session_Argmax)[0]
+    save_id_numpy      = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PENALTY SESSION (optional)
+# ══════════════════════════════════════════════════════════════════════════════
 if USE_PENALTY:
-    ort_session_Penalty = onnxruntime.InferenceSession(onnx_model_Penalty, sess_options=session_opts, providers=ORT_Accelerate_Providers, provider_options=provider_options, run_options=run_options)
-    binding_Penalty = ort_session_Penalty.io_binding()
-    in_name_Penalty = [x.name for x in ort_session_Penalty.get_inputs()]
-    out_name_Penalty = [x.name for x in ort_session_Penalty.get_outputs()]
-    penality_dtype = np.float16 if 'float16' in ort_session_Penalty._inputs_meta[2].type else np.float32
-    penalty_value = create_ortvalue([REPEAT_PENALITY], penality_dtype, device_type, DEVICE_ID)
-    penality_range = create_ortvalue([PENALTY_RANGE], np.int64, device_type, DEVICE_ID)
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[2], penalty_value)
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[3], penality_range)
+    ort_session_Penalty = create_session(onnx_model_Penalty, **packed_settings)
+    binding_Penalty     = ort_session_Penalty.io_binding()
+    in_name_Penalty     = get_in_names(ort_session_Penalty)
+    out_name_Penalty    = get_out_names(ort_session_Penalty)[0]
 
+    penalty_dtype = np.float16 if 'float16' in ort_session_Penalty._inputs_meta[2].type else np.float32
+    penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
+    penalty_range = create_ort_with_data([PENALTY_RANGE],  np.int64,      device_type, DEVICE_ID)
+
+    binding_Penalty.bind_ortvalue_input(in_name_Penalty[2], penalty_value)
+    binding_Penalty.bind_ortvalue_input(in_name_Penalty[3], penalty_range)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# IMAGE VALIDATION & VISION PROCESSING
+# ══════════════════════════════════════════════════════════════════════════════
 if is_valid_image_path(TEST_IMAGE):
     image = Image.open(TEST_IMAGE)
     image = image.resize((INPUT_IMAGE_SIZE[1], INPUT_IMAGE_SIZE[0]))
@@ -1210,173 +1718,290 @@ else:
     use_vision = False
     print('\nChat without image.')
 
-binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
-bind_ort_out(binding_Embed, out_name_Embed, _ort_device_type)
-ort_session_Embed.run_with_iobinding(binding_Embed, run_options=run_options)
-outputs_Embed = binding_Embed.get_outputs()[0]
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PREFILL PHASE
+# ══════════════════════════════════════════════════════════════════════════════
+is_prefill_step = True
+prefill_start_time = time.time()
+
+# --- Step 1: Embed the input tokens ---
+binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
+bind_ort_out(binding_Embed, [out_name_Embed], _ort_device_type)
+run(ort_session_Embed, binding_Embed)
+hidden_states = binding_Embed.get_outputs()[0]
+
+# Pre-bind Embed input for decode phase (will read from max_idx_buf)
+binding_Embed.bind_ortvalue_input(in_name_Embed, max_idx_buf)
+
+# --- Step 2: Vision processing & rotary (if applicable) ---
 generate_limit = MAX_SEQ_LEN - num_prefill
 
 if use_vision:
     num_prefill += vision_embed_size
-    ids_len = create_ortvalue([num_prefill], np.int64, device_type, DEVICE_ID)
+    ids_len = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
     generate_limit -= vision_embed_size
-    
+
     print('\nStart to Process the Image...')
-    start_time = time.time()
+    vision_start_time = time.time()
+
+    # Run Vision encoder
     binding_Vision.bind_ortvalue_input(in_name_Vision[0], onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, DEVICE_ID))
     bind_ort_out(binding_Vision, out_name_Vision, _ort_device_type)
-    ort_session_Vision.run_with_iobinding(binding_Vision, run_options=run_options)
+    run(ort_session_Vision, binding_Vision)
     outputs_Vision = binding_Vision.get_outputs()
-    print(f'\nImage Process Complete. Time Cost: {time.time() - start_time:.3f} Seconds')
-    
-    binding_Concat.bind_ortvalue_input(in_name_Concat[deepstack_features_len], outputs_Embed)
+    print(f'\nImage Process Complete. Time Cost: {time.time() - vision_start_time:.3f} Seconds')
+
+    # Run Concat: merge text embeddings + vision features
+    binding_Concat.bind_ortvalue_input(in_name_Concat[deepstack_features_len], hidden_states)
     binding_Concat.bind_ortvalue_input(in_name_Concat[amount_of_outputs_Concat], outputs_Vision[deepstack_features_len])
-    bind_ort_in(binding_Concat, in_name_Concat, outputs_Vision, deepstack_features_len)
+    bind_ort_in(binding_Concat, in_name_Concat[:deepstack_features_len], outputs_Vision[:deepstack_features_len])
     bind_ort_out(binding_Concat, out_name_Concat, _ort_device_type)
-    ort_session_Concat.run_with_iobinding(binding_Concat, run_options=run_options)
+    run(ort_session_Concat, binding_Concat)
     outputs_Concat = binding_Concat.get_outputs()
-    
-    binding_Rotary_Vision.bind_ortvalue_input(in_name_Rotary_Vision[0], ids_len)
-    binding_Rotary_Vision.bind_ortvalue_input(in_name_Rotary_Vision[1], init_history_len)
-    bind_ort_out(binding_Rotary_Vision, out_name_Rotary_Vision, _ort_device_type)
-    ort_session_Rotary_Vision.run_with_iobinding(binding_Rotary_Vision, run_options=run_options)
-    rotary_outputs = binding_Rotary_Vision.get_outputs()
-    
-    binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values], outputs_Concat[deepstack_features_len])
-    bind_ort_in(binding_Main, deepstack_in_name_Main, outputs_Concat)
+
+    # Rotary Vision Prefill
+    binding_Rotary_Vision_Prefill.bind_ortvalue_input(in_name_Rotary_Vision_Prefill[0], ids_len)
+    binding_Rotary_Vision_Prefill.bind_ortvalue_input(in_name_Rotary_Vision_Prefill[1], init_history_len)
+    bind_ort_out(binding_Rotary_Vision_Prefill, out_name_Rotary_Vision_Prefill, _ort_device_type)
+    run(ort_session_Rotary_Vision_Prefill, binding_Rotary_Vision_Prefill)
+    rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Vision_Prefill.get_outputs()
+
+    # Bind Main: concat hidden_states + deepstack features from vision
+    binding_Main.bind_ortvalue_input(in_name_Main[idx_hidden_states], outputs_Concat[deepstack_features_len])
+    bind_ort_in(binding_Main, deepstack_in_name_Main, outputs_Concat[:deepstack_features_len])
+
 else:
-    binding_Rotary_Text.bind_ortvalue_input(in_name_Rotary_Text[0], ids_len)
-    binding_Rotary_Text.bind_ortvalue_input(in_name_Rotary_Text[1], init_history_len)
-    bind_ort_out(binding_Rotary_Text, out_name_Rotary_Text, _ort_device_type)
-    ort_session_Rotary_Text.run_with_iobinding(binding_Rotary_Text, run_options=run_options)
-    rotary_outputs = binding_Rotary_Text.get_outputs()
-    
-    binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values], outputs_Embed)
+    # Rotary Text Prefill
+    binding_Rotary_Text_Prefill.bind_ortvalue_input(in_name_Rotary_Text_Prefill[0], ids_len)
+    binding_Rotary_Text_Prefill.bind_ortvalue_input(in_name_Rotary_Text_Prefill[1], init_history_len)
+    bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_device_type)
+    run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
+    rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
+
+    # Bind Main: text-only hidden_states + zero deepstack features
+    binding_Main.bind_ortvalue_input(in_name_Main[idx_hidden_states], hidden_states)
     bind_ort_in(binding_Main, deepstack_in_name_Main, init_deepstack_features)
 
-binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_plus_deepstack_plus_rotary_plus_1], ids_len)
-binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_plus_deepstack_plus_rotary_plus_2], init_attention_mask_1)
+# --- Step 3: Pre-bind decode rotary outputs (reused every decode step) ---
+if use_vision:
+    binding_Rotary_Vision_Decode.bind_ortvalue_input(in_name_Rotary_Vision_Decode, kv_seq_len)
+    binding_Rotary_Vision_Decode.bind_ortvalue_output(out_name_Rotary_Vision_Decode[0], rotary_cos_buf)
+    binding_Rotary_Vision_Decode.bind_ortvalue_output(out_name_Rotary_Vision_Decode[1], rotary_sin_buf)
+    binding_Rotary_Vision_Decode.bind_ortvalue_output(out_name_Rotary_Vision_Decode[2], kv_seq_len)
+    ort_session_Rotary_Decode = ort_session_Rotary_Vision_Decode
+    binding_Rotary_Decode     = binding_Rotary_Vision_Decode
+else:
+    binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
+    binding_Rotary_Text_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[0], rotary_cos_buf)
+    binding_Rotary_Text_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[1], rotary_sin_buf)
+    binding_Rotary_Text_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[2], kv_seq_len)
+    ort_session_Rotary_Decode = ort_session_Rotary_Text_Decode
+    binding_Rotary_Decode     = binding_Rotary_Text_Decode
 
+# --- Step 4: Bind Main model inputs — rotary & attention mask (prefill) ---
+binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_cos],     rotary_cos)
+binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_sin],     rotary_sin)
+binding_Main.bind_ortvalue_input(in_name_Main[idx_attention_mask], attention_mask)
+
+# --- Step 5: Bind Main model inputs — empty KV cache (keys, values, optional scales/biases) ---
 i = 0
-j = num_layers
-while i < j:
-    binding_Main.bind_ortvalue_input(in_name_Main[i], init_past_keys_Main)
+for _ in range(num_layers):
+    binding_Main.bind_ortvalue_input(in_name_Main[i], past_keys_Main)
     i += 1
-j = i + num_layers
-while i < j:
-    binding_Main.bind_ortvalue_input(in_name_Main[i], init_past_values_Main)
+for _ in range(num_layers):
+    binding_Main.bind_ortvalue_input(in_name_Main[i], past_values_Main)
     i += 1
+if k_scales is not None:
+    for ortval in (k_scales, k_biases, v_scales, v_biases):
+        for _ in range(num_layers):
+            binding_Main.bind_ortvalue_input(in_name_Main[i], ortval)
+            i += 1
 
-if k_scales:
-    j = i + num_layers
-    while i < j:
-        binding_Main.bind_ortvalue_input(in_name_Main[i], k_scales)
-        i += 1
-    j = i + num_layers
-    while i < j:
-        binding_Main.bind_ortvalue_input(in_name_Main[i], k_biases)
-        i += 1
-    j = i + num_layers
-    while i < j:
-        binding_Main.bind_ortvalue_input(in_name_Main[i], v_scales)
-        i += 1
-    j = i + num_layers
-    while i < j:
-        binding_Main.bind_ortvalue_input(in_name_Main[i], v_biases)
-        i += 1
+# --- Step 6: Bind Main model outputs ---
+bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
+binding_Main.bind_ortvalue_output(out_name_Main_logits, prefill_logits_buf)
 
-for i in range(rotary_outputs_len):
-    binding_Main.bind_ortvalue_input(in_name_Main[rotary_indices[i]], rotary_outputs[i])
+# --- Step 7: Bind penalty inputs/outputs to prefill logits buffer ---
+if USE_PENALTY:
+    binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], prefill_logits_buf)
+    binding_Penalty.bind_ortvalue_output(out_name_Penalty,  prefill_logits_buf)
 
-print(f'\nTest Question: {TEST_QUERY}\nLLM Answering:\n')
+# --- Step 8: Bind decode head inputs/outputs to prefill logits buffer ---
+if USE_BEAM_SEARCH:
+    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values], prefill_logits_buf)
+elif USE_PENALTY:
+    binding_Greedy.bind_ortvalue_input(in_name_Greedy[0],   prefill_logits_buf)
+    binding_Greedy.bind_ortvalue_output(out_name_Greedy[0], max_idx_buf)
+else:
+    binding_Argmax.bind_ortvalue_input(in_name_Argmax,   prefill_logits_buf)
+    binding_Argmax.bind_ortvalue_output(out_name_Argmax, max_idx_buf)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DECODE LOOP
+# ══════════════════════════════════════════════════════════════════════════════
+print(f'\nTest Question: {TEST_QUERY}\nLLM Answering:')
+
 num_decode = 0
-start_time = time.time()
+
 while num_decode < generate_limit:
-    bind_ort_out(binding_Main, out_name_Main, _ort_device_type)
-    ort_session_Main.run_with_iobinding(binding_Main, run_options=run_options)
+
+    # ── 1. Run Main Model ────────────────────────────────────────────────
+    run(ort_session_Main, binding_Main)
     outputs_Main = binding_Main.get_outputs()
-    logits = outputs_Main[num_keys_values]
-    if USE_PENALTY and (num_decode >= PENALTY_RANGE):
-        binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], logits)
+
+    # ── 2. Apply Repetition Penalty (if enabled and enough tokens) ───────
+    if USE_PENALTY and num_decode >= PENALTY_RANGE:
         binding_Penalty.bind_ortvalue_input(in_name_Penalty[1], save_id)
-        bind_ort_out(binding_Penalty, out_name_Penalty, _ort_device_type)
-        ort_session_Penalty.run_with_iobinding(binding_Penalty, run_options=run_options)
-        logits = binding_Penalty.get_outputs()[0]
+        run(ort_session_Penalty, binding_Penalty)
+
+    # ── 3. Token Selection ───────────────────────────────────────────────
     if USE_BEAM_SEARCH:
-        if num_decode < 1:
-            binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values], logits)
+        # ── 3a. Beam Search ─────────────────────────────────────────────
+        if is_prefill_step:
+            # First beam step: expand single-beam KV into BEAM_SIZE beams
             bind_ort_in(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
-            bind_ort_out(binding_First_Beam, out_name_First_Beam, _ort_device_type)
-            ort_session_First_Beam.run_with_iobinding(binding_First_Beam, run_options=run_options)
+            bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
+            binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_1], beam_score_buf)
+            binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_2], beam_ids_buf)
+            binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_3], max_idx_buf)
+            run(ort_session_First_Beam, binding_First_Beam)
             outputs_Beam = binding_First_Beam.get_outputs()
         else:
-            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values], logits)
+            # Subsequent beam steps: prune + expand
             bind_ort_in(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
-            bind_ort_out(binding_Second_Beam, out_name_Second_Beam, _ort_device_type)
-            ort_session_Second_Beam.run_with_iobinding(binding_Second_Beam, run_options=run_options)
+            bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
+            if num_decode < 2:
+                binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_2],   beam_score_buf)
+                binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_1], beam_score_buf)
+                binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_2], beam_ids_buf)
+                binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_3], max_idx_buf)
+            run(ort_session_Second_Beam, binding_Second_Beam)
             outputs_Beam = binding_Second_Beam.get_outputs()
-        max_logits_idx = outputs_Beam[num_keys_values_plus_3].numpy()
-        if max_logits_idx in STOP_TOKEN:
+
+        # Stop-token check
+        max_logits_idx = max_idx_buf.numpy().flat[0]
+        if max_logits_idx in STOP_TOKEN_SET:
             break
-        save_id = outputs_Beam[num_keys_values_plus_1]
+
+        # Feed beam KV + save_id back into Main for next step
+        save_id = outputs_Beam[num_keys_values]
         bind_ort_in(binding_Main, in_name_Main_parts, outputs_Beam)
-        binding_Embed.bind_ortvalue_input(in_name_Embed, outputs_Beam[num_keys_values])
-        binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_1], outputs_Beam[num_keys_values_plus_1])
-        binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_2], outputs_Beam[num_keys_values_plus_2])
+        binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_1], save_id)
+
     else:
+        # ── 3b. Greedy / Argmax ─────────────────────────────────────────
         if USE_PENALTY:
-            binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], logits)
-            bind_ort_out(binding_Greedy, out_name_Greedy, _ort_device_type)
-            ort_session_Greedy.run_with_iobinding(binding_Greedy, run_options=run_options)
-            max_logits_ort, save_id = binding_Greedy.get_outputs()
-            max_logits_idx = max_logits_ort.numpy().flat[0]
+            binding_Greedy._iobinding.bind_output(out_name_Greedy[1], _ort_device_type)
+            run(ort_session_Greedy, binding_Greedy)
+            save_id = binding_Greedy.get_outputs()[1]
         else:
-            binding_Argmax.bind_ortvalue_input(in_name_Argmax, logits)
-            bind_ort_out(binding_Argmax, out_name_Argmax, _ort_device_type)
-            ort_session_Argmax.run_with_iobinding(binding_Argmax, run_options=run_options)
-            max_logits_ort = binding_Argmax.get_outputs()[0]
-            max_logits_idx = max_logits_ort.numpy().flat[0]
-        if max_logits_idx in STOP_TOKEN:
+            run(ort_session_Argmax, binding_Argmax)
+
+        # Stop-token check
+        max_logits_idx = max_idx_buf.numpy().flat[0]
+        if max_logits_idx in STOP_TOKEN_SET:
             break
+
+        # Track generated token IDs
         if USE_PENALTY:
             binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id)
         else:
             save_id_numpy[num_decode] = max_logits_idx
-        binding_Embed.bind_ortvalue_input(in_name_Embed, max_logits_ort)
+
+        # Feed greedy KV outputs back into Main
         bind_ort_in(binding_Main, in_name_Main_parts, outputs_Main)
+
+        # Streaming print
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
-    bind_ort_out(binding_Embed, out_name_Embed, _ort_device_type)
-    ort_session_Embed.run_with_iobinding(binding_Embed, run_options=run_options)
-    binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values], binding_Embed.get_outputs()[0])
-    if use_vision:
-        binding_Rotary_Vision.bind_ortvalue_input(in_name_Rotary_Vision[0], init_ids_len_1)
-        binding_Rotary_Vision.bind_ortvalue_input(in_name_Rotary_Vision[1], rotary_outputs[rotary_outputs_len_minus])
-        bind_ort_out(binding_Rotary_Vision, out_name_Rotary_Vision, _ort_device_type)
-        ort_session_Rotary_Vision.run_with_iobinding(binding_Rotary_Vision, run_options=run_options)
-        rotary_outputs = binding_Rotary_Vision.get_outputs()
-    else:
-        binding_Rotary_Text.bind_ortvalue_input(in_name_Rotary_Text[0], init_ids_len_1)
-        binding_Rotary_Text.bind_ortvalue_input(in_name_Rotary_Text[1], rotary_outputs[rotary_outputs_len_minus])
-        bind_ort_out(binding_Rotary_Text, out_name_Rotary_Text, _ort_device_type)
-        ort_session_Rotary_Text.run_with_iobinding(binding_Rotary_Text, run_options=run_options)
-        rotary_outputs = binding_Rotary_Text.get_outputs()
-    bind_ort_in(binding_Main, rotary_in_name_Main, rotary_outputs)
-    if num_decode < 1:
-        binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_plus_deepstack_plus_rotary_plus_1], init_ids_len_1)
-        binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_plus_deepstack_plus_rotary_plus_2], init_attention_mask_0)
+
+    # ── 4. Re-bind Main KV outputs (ORT allocates fresh each step) ───────
+    bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
+
+    # ── 5. Transition: prefill → decode (executes once) ──────────────────
+    if is_prefill_step:
+
+        # Switch Main to decode-sized non-KV inputs
+        binding_Main.bind_ortvalue_input(in_name_Main[idx_hidden_states],  hidden_states_buf)
+        binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_cos],     rotary_cos_buf)
+        binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_sin],     rotary_sin_buf)
+        binding_Main.bind_ortvalue_input(in_name_Main[idx_attention_mask], attention_mask_buf)
+        binding_Main.bind_ortvalue_output(out_name_Main_logits,            decode_logits_buf)
+
+        # Switch deepstack features to zeros for decode
         bind_ort_in(binding_Main, deepstack_in_name_Main, init_deepstack_features)
+
+        # Switch Embed to write into decode hidden_states buffer
+        binding_Embed.bind_ortvalue_output(out_name_Embed, hidden_states_buf)
+
+        # Switch Penalty to decode logits buffer
+        if USE_PENALTY:
+            binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], decode_logits_buf)
+            binding_Penalty.bind_ortvalue_output(out_name_Penalty,  decode_logits_buf)
+
+        # Switch decode head to decode logits buffer
+        if USE_BEAM_SEARCH:
+            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values], decode_logits_buf)
+            binding_Embed.bind_ortvalue_input(in_name_Embed, beam_ids_buf)
+        elif USE_PENALTY:
+            binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], decode_logits_buf)
+        else:
+            binding_Argmax.bind_ortvalue_input(in_name_Argmax, decode_logits_buf)
+
+        is_prefill_step = False
+
+        # Record prefill time and start decode timer
+        decode_start_time = time.time()
+        prefill_elapsed = decode_start_time - prefill_start_time
+
+    # ── 6. Prepare next step: Embed + Rotary ─────────────────────────────
+    run(ort_session_Embed, binding_Embed)
+    run(ort_session_Rotary_Decode, binding_Rotary_Decode)
     num_decode += 1
 
-elapsed_time = time.time() - start_time
-tokens_per_second = (num_decode + 1) / elapsed_time
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESULTS
+# ══════════════════════════════════════════════════════════════════════════════
+decode_end_time = time.time()
+
+# Handle edge case where generation stopped at prefill (0 decode tokens after first)
+if num_decode <= 1:
+    prefill_elapsed = 0.0
+    decode_elapsed = 0.0
+else:
+    decode_elapsed = decode_end_time - decode_start_time
+
+total_elapsed = decode_end_time - prefill_start_time
+
+# Prefill speed: tokens processed per second
+prefill_tokens_per_second = num_prefill / prefill_elapsed if prefill_elapsed > 0 else 0.0
+
+# Decode speed: tokens generated per second (excluding the first token from prefill)
+decode_tokens_per_second = num_decode / decode_elapsed if decode_elapsed > 0 else 0.0
+
+# Overall speed
+overall_tokens_per_second = (num_decode + 1) / total_elapsed if total_elapsed > 0 else 0.0
 
 if USE_PENALTY or USE_BEAM_SEARCH:
     result = tokenizer.decode(save_id.numpy()[0, :num_decode], skip_special_tokens=True)
 else:
     result = tokenizer.decode(save_id_numpy[:num_decode], skip_special_tokens=True)
 
-print(f"\n\nFinal:\n{result}\n\nDecode: {tokens_per_second:.3f} token/s")
-print(f"Total tokens generated: {num_decode}")
-print(f"Total time: {elapsed_time:.3f}s")
-
+print(
+    f"\n\n{'─' * 56}\n"
+    f"  📝 Generated Output\n"
+    f"{'─' * 56}\n"
+    f"{result}\n"
+    f"{'─' * 56}\n\n"
+    f"  ⚡ Performance Summary\n"
+    f"{'─' * 56}\n"
+    f"  {'Phase':<12} {'Speed':>14} {'Tokens':>8} {'Time':>10}\n"
+    f"  {'─' * 48}\n"
+    f"  {'Prefill':<12} {prefill_tokens_per_second:>10.2f} t/s {num_prefill:>8d} {prefill_elapsed:>8.3f}s\n"
+    f"  {'Decode':<12} {decode_tokens_per_second:>10.2f} t/s {num_decode:>8d} {decode_elapsed:>8.3f}s\n"
+    f"  {'─' * 48}\n"
+    f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
+    f"{'─' * 56}\n"
+)
