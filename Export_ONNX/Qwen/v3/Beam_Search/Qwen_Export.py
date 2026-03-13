@@ -1193,7 +1193,6 @@ _rotary_meta = ort_session_Rotary_Mask_Decode._outputs_meta
 # --- Input OrtValues ---
 input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
 ids_len          = create_ort_with_data([num_prefill], np.int64,  device_type, DEVICE_ID)
-init_ids_len_1   = create_ort_with_data([1],           np.int64,  device_type, DEVICE_ID)
 init_history_len = create_ort_with_data([0],           np.int64,  device_type, DEVICE_ID)
 topK             = create_ort_with_data([TOP_K],       np.int64,  device_type, DEVICE_ID)
 beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
@@ -1510,4 +1509,5 @@ print(
     f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
     f"{'─' * 56}\n"
 )
+
 
