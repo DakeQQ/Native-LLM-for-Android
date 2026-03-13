@@ -42,7 +42,7 @@ WIDTH_FACTOR = 15                                          # Adjust this value t
 IMAGE_RESIZE = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]     # 32 = self.patch_size * self.merge_size
 INPUT_IMAGE_SIZE = [960, 960]                              # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
 VISION_BATCH_SIZE = 1                                      # Set the number of images for the vision LLM, whether DYNAMIC_IMAGE_SHAPE is True or False.
-DYNAMIC_IMAGE_SHAPE = False                                # Allow for a dynamic number of image inputs.
+DYNAMIC_IMAGE_SHAPE = False                                # Allow for a dynamic number of image inputs. (Experiment features, may cause errors)
 INPUT_IMAGE_DIM = 5                                        # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
 
 # KV cache quantization
@@ -91,8 +91,8 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         self.kv_q8_cuda = (KV_QUANT_DTYPE == "Q8_CUDA")
 
     def forward(self, *all_inputs):
-        logits = all_inputs[-3]
-        save_id = all_inputs[-2]
+        logits    = all_inputs[-3]
+        save_id   = all_inputs[-2]
         beam_size = all_inputs[-1]
 
         # Compute log-probabilities for the top-k beams
@@ -127,11 +127,11 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         self.save_keys_values = [None] * self.total_layers
 
     def forward(self, *all_inputs):
-        logits = all_inputs[-5]
-        save_id = all_inputs[-4]
+        logits        = all_inputs[-5]
+        save_id       = all_inputs[-4]
         previous_prob = all_inputs[-3]
-        beam_size = all_inputs[-2]
-        top_k = all_inputs[-1]
+        beam_size     = all_inputs[-2]
+        top_k         = all_inputs[-1]
 
         # Compute log-probabilities and accumulate with previous scores
         row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
@@ -448,7 +448,7 @@ class LLM_CONCAT(torch.nn.Module):
         self.hidden_size = hidden_size
 
     def forward(self, *all_inputs):
-        text_hidden_states = all_inputs[-2]
+        text_hidden_states   = all_inputs[-2]
         vision_hidden_states = all_inputs[-1]
         if text_hidden_states.shape[0] != 1:
             vision_hidden_states = vision_hidden_states.expand(text_hidden_states.shape[0], -1, self.hidden_size)
@@ -1476,7 +1476,7 @@ out_name_Embed    = get_out_names(ort_session_Embed)[0]
 # --- Vision ---
 ort_session_Vision = create_session(onnx_model_Vision, **packed_settings)
 binding_Vision     = ort_session_Vision.io_binding()
-in_name_Vision     = get_in_names(ort_session_Vision)
+in_name_Vision     = get_in_names(ort_session_Vision)[0]
 out_name_Vision    = get_out_names(ort_session_Vision)
 deepstack_features_len = len(out_name_Vision) - 1
 vision_dtype = np.float16 if 'float16' in ort_session_Vision._outputs_meta[0].type else np.float32
@@ -1533,10 +1533,10 @@ num_keys_values_plus_4 = num_keys_values + 4
 # Main model non-KV input indices
 # Layout: [KV_caches..., hidden_states, deepstack_0..N-1, rotary_cos, rotary_sin, attention_mask]
 idx_hidden_states  = num_keys_values
-idx_ds_start       = num_keys_values + 1
-idx_rotary_cos     = num_keys_values + deepstack_features_len + 1
-idx_rotary_sin     = num_keys_values + deepstack_features_len + 2
-idx_attention_mask = num_keys_values + deepstack_features_len + 3
+idx_ds_start       = num_keys_values_plus_1
+idx_rotary_cos     = num_keys_values_plus_1 + deepstack_features_len
+idx_rotary_sin     = num_keys_values_plus_2 + deepstack_features_len
+idx_attention_mask = num_keys_values_plus_3 + deepstack_features_len
 
 # Partitioned name lists
 in_name_Main_parts     = in_name_Main[:num_keys_values]
@@ -1598,21 +1598,20 @@ tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
 
 STOP_TOKEN_SET = set(STOP_TOKEN)
 
-prompt  = f"<|im_start|>user\n<|vision_start|><|vision_end|>{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n"
-tokens  = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
+prompt      = f"<|im_start|>user\n<|vision_start|><|vision_end|>{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n"
+tokens      = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
 num_prefill = tokens.shape[-1]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SHARED ORTVALUE BUFFERS
 # ══════════════════════════════════════════════════════════════════════════════
-vision_embed_size = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
+vision_embed_size   = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
 _rotary_decode_meta = ort_session_Rotary_Text_Decode._outputs_meta
 
 # --- Input OrtValues ---
 input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
 ids_len          = create_ort_with_data([num_prefill], np.int64,  device_type, DEVICE_ID)
-init_ids_len_1   = create_ort_with_data([1],           np.int64,  device_type, DEVICE_ID)
 init_history_len = create_ort_with_data([0],           np.int64,  device_type, DEVICE_ID)
 topK             = create_ort_with_data([TOP_K],       np.int64,  device_type, DEVICE_ID)
 beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
@@ -1625,7 +1624,19 @@ hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, _meta[idx_hidden_state
 save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                    np.int32,                 device_type, DEVICE_ID)
 
 # --- Init deepstack features (zeros for decode and text-only mode) ---
-init_deepstack_features = [create_ort_with_shape((1, 1, ort_session_Concat._inputs_meta[0].shape[2]), vision_dtype, device_type, DEVICE_ID)] * deepstack_features_len
+init_deepstack_features = [create_ort_with_shape((1, 1, ort_session_Vision._outputs_meta[0].shape[2]), vision_dtype, device_type, DEVICE_ID)] * deepstack_features_len  # Same memory address buff
+
+if isinstance(ort_session_Vision._outputs_meta[0].shape[1], int):
+    fixed_vision_shape = True
+    deepstack_features_buff = [create_ort_with_shape(ort_session_Vision._outputs_meta[0].shape, vision_dtype, device_type, DEVICE_ID) for _ in range(deepstack_features_len)]  # Different memory address buff
+    vision_hidden_states_buf = create_ort_with_shape(ort_session_Vision._outputs_meta[deepstack_features_len].shape, vision_dtype, device_type, DEVICE_ID)
+    for i in range(deepstack_features_len):
+        binding_Vision.bind_ortvalue_output(out_name_Vision[i], deepstack_features_buff[i])
+        binding_Concat.bind_ortvalue_input(in_name_Concat[i], deepstack_features_buff[i])
+    binding_Vision.bind_ortvalue_output(out_name_Vision[deepstack_features_len], vision_hidden_states_buf)
+    binding_Concat.bind_ortvalue_input(in_name_Concat[amount_of_outputs_Concat], vision_hidden_states_buf)
+else:
+    fixed_vision_shape = False
 
 # --- Logits & token-index buffers ---
 prefill_logits_buf = create_ort_with_shape((1, vocab_size),         _logits_out_dtype, device_type, DEVICE_ID)
@@ -1744,18 +1755,19 @@ if use_vision:
 
     print('\nStart to Process the Image...')
     vision_start_time = time.time()
-
     # Run Vision encoder
-    binding_Vision.bind_ortvalue_input(in_name_Vision[0], onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, DEVICE_ID))
-    bind_ort_out(binding_Vision, out_name_Vision, _ort_device_type)
+    binding_Vision.bind_ortvalue_input(in_name_Vision, onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, DEVICE_ID))
+    if not fixed_vision_shape:
+        bind_ort_out(binding_Vision, out_name_Vision, _ort_device_type)
     run(ort_session_Vision, binding_Vision)
-    outputs_Vision = binding_Vision.get_outputs()
     print(f'\nImage Process Complete. Time Cost: {time.time() - vision_start_time:.3f} Seconds')
 
     # Run Concat: merge text embeddings + vision features
+    if not fixed_vision_shape:
+        outputs_Vision = binding_Vision.get_outputs()
+        bind_ort_in(binding_Concat, in_name_Concat[:deepstack_features_len], outputs_Vision[:deepstack_features_len])
+        binding_Concat.bind_ortvalue_input(in_name_Concat[amount_of_outputs_Concat], outputs_Vision[deepstack_features_len])
     binding_Concat.bind_ortvalue_input(in_name_Concat[deepstack_features_len], hidden_states)
-    binding_Concat.bind_ortvalue_input(in_name_Concat[amount_of_outputs_Concat], outputs_Vision[deepstack_features_len])
-    bind_ort_in(binding_Concat, in_name_Concat[:deepstack_features_len], outputs_Vision[:deepstack_features_len])
     bind_ort_out(binding_Concat, out_name_Concat, _ort_device_type)
     run(ort_session_Concat, binding_Concat)
     outputs_Concat = binding_Concat.get_outputs()
