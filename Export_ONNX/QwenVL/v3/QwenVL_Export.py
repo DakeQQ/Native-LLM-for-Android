@@ -1611,15 +1611,15 @@ _rotary_decode_meta = ort_session_Rotary_Text_Decode._outputs_meta
 
 # --- Input OrtValues ---
 input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len          = create_ort_with_data([num_prefill], np.int64,  device_type, DEVICE_ID)
-init_history_len = create_ort_with_data([0],           np.int64,  device_type, DEVICE_ID)
-topK             = create_ort_with_data([TOP_K],       np.int64,  device_type, DEVICE_ID)
-beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
+ids_len          = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
+init_history_len = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
+topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DEVICE_ID)
+beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
 
 # --- Decode-phase placeholder buffers (reused every step) ---
 attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                   hidden_states_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape(_rotary_decode_meta[0].shape,                            hidden_states_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape(_rotary_decode_meta[1].shape,                            hidden_states_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape(_rotary_decode_meta[0].shape,                      hidden_states_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape(_rotary_decode_meta[1].shape,                      hidden_states_dtype_Main, device_type, DEVICE_ID)
 hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, _meta[idx_hidden_states].shape[2]), hidden_states_dtype_Main, device_type, DEVICE_ID)
 save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                    np.int32,                 device_type, DEVICE_ID)
 
