@@ -1198,11 +1198,11 @@ topK             = create_ort_with_data([TOP_K],       np.int64,  device_type, D
 beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
 
 # --- Decode-phase placeholder buffers (reused every step) ---
-attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                  hidden_states_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[0].shape[4]),           hidden_states_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[1].shape[4]),           hidden_states_dtype_Main, device_type, DEVICE_ID)
-hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, _meta[num_keys_values].shape[2]),  hidden_states_dtype_Main, device_type, DEVICE_ID)
-save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                   np.int32,                 device_type, DEVICE_ID)
+attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                 hidden_states_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[0].shape[4]),          hidden_states_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[1].shape[4]),          hidden_states_dtype_Main, device_type, DEVICE_ID)
+hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, _meta[num_keys_values].shape[2]), hidden_states_dtype_Main, device_type, DEVICE_ID)
+save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                  np.int32,                 device_type, DEVICE_ID)
 
 # --- Logits & token-index buffers ---
 prefill_logits_buf = create_ort_with_shape((1, vocab_size),         _logits_out_dtype, device_type, DEVICE_ID)
