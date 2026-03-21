@@ -19,35 +19,37 @@ onnx_model_Penalty             = r'/home/DakeQQ/Downloads/Qwen_ONNX/Apply_Penalt
 onnx_model_Argmax              = r'/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx'
 onnx_model_KV_Slice            = r'/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.onnx'
 
+
 # Test input
-TEST_THINK_MODE = False
-TEST_QUERY = "地球最高的山峰是什么？"
+TEST_THINK_MODE          = False
+TEST_QUERY               = "地球最高的山峰是什么？"
 
 # Model Config
-DO_EXPORT = True                    # Whether to export the ONNX models
-PREVENT_F16_OVERFLOW = False        # Prevent float16 overflow. Set True for Q4F16 or Q8F16 or F16 quantization.
-STOP_TOKEN = [151643, 151645]       # Qwen stop token ids
-MAX_SEQ_LEN = 4096                  # Max context length. Can not edit after export.
+DO_EXPORT                = True                    # Whether to export the ONNX models
+PREVENT_F16_OVERFLOW     = False                   # Prevent float16 overflow. Set True for Q4F16 or Q8F16 or F16 quantization.
+STOP_TOKEN               = [151643, 151645]        # Qwen stop token ids
+MAX_SEQ_LEN              = 4096                    # Max context length. Can not edit after export.
 
 # KV cache quantization
-KV_QUANT_DTYPE = "F16"              # "Q8" | "Q8_CUDA" | "F16" | "F32"
-USE_FLOAT16_SCALE_BIAS = True       # If choose Q8, whether to use float16 for scale and bias.
+KV_QUANT_DTYPE           = "F16"                   # "Q8" | "Q8_CUDA" | "F16" | "F32"
+USE_FLOAT16_SCALE_BIAS   = True                    # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
-USE_BEAM_SEARCH = False             # Use beam search or greedy search
-REPEAT_PENALTY = 1.0                # 0.0 ~ 1.0; No penalty = 1.0
-PENALTY_RANGE = 20                  # Recent-token window to apply penalty
-MAX_BEAM_SIZE = 10                  # Max beam size for beam search. Can not edit after export.
-TOP_K = 3                           # Top-K for beam search
-BEAM_SIZE = 3                       # Beam size for beam search. Must be <= MAX_BEAM_SIZE
+USE_BEAM_SEARCH          = False                   # Use beam search or greedy search
+REPEAT_PENALTY           = 1.0                     # 0.0 ~ 1.0; No penalty = 1.0
+PENALTY_RANGE            = 20                      # Recent-token window to apply penalty
+MAX_BEAM_SIZE            = 10                      # Max beam size for beam search. Can not edit after export.
+TOP_K                    = 3                       # Top-K for beam search
+BEAM_SIZE                = 3                       # Beam size for beam search. Must be <= MAX_BEAM_SIZE
 
 # Runtime config
-ORT_LOG = False                     # Enable ONNX Runtime logging for debugging. Set to False for best performance.
-ORT_FP16 = False                    # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
-ORT_Accelerate_Providers = []       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
-MAX_THREADS = 0                     # 0 = auto
-DEVICE_ID = 0                       # Device ID for GPU
-OPSET = 17                          # ONNX opset version
+ORT_LOG                  = False                   # Enable ONNX Runtime logging for debugging. Set to False for best performance.
+ORT_FP16                 = False                   # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
+ORT_Accelerate_Providers = []                      # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+MAX_THREADS              = 0                       # 0 = auto
+DEVICE_ID                = 0                       # Device ID for GPU
+OPSET                    = 17                      # ONNX opset version
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
