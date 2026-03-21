@@ -1075,6 +1075,7 @@ ort_session_Rotary_Mask_Decode = create_session(onnx_model_Rotary_Mask_Decode, *
 binding_Rotary_Mask_Decode     = ort_session_Rotary_Mask_Decode.io_binding()
 in_name_Rotary_Mask_Decode     = get_in_names(ort_session_Rotary_Mask_Decode)[0]
 out_name_Rotary_Mask_Decode    = get_out_names(ort_session_Rotary_Mask_Decode)
+out_meta_rotary                = ort_session_Rotary_Mask_Decode._outputs_meta
 
 # --- Main ---
 ort_session_Main = create_session(onnx_model_Main, **packed_settings)
@@ -1164,7 +1165,6 @@ num_prefill = tokens.shape[-1]
 # ══════════════════════════════════════════════════════════════════════════════
 # SHARED ORTVALUE BUFFERS
 # ══════════════════════════════════════════════════════════════════════════════
-_rotary_meta = ort_session_Rotary_Mask_Decode._outputs_meta
 
 # --- Input OrtValues ---
 input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens,   device_type, DEVICE_ID)
@@ -1175,8 +1175,8 @@ beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DE
 
 # --- Decode-phase placeholder buffers (reused every step) ---
 attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                             hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[0].shape[4]),                      hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[1].shape[4]),                      hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape((1, 1, 1, 1, out_meta_rotary[0].shape[4]),                   hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape((1, 1, 1, 1, out_meta_rotary[1].shape[4]),                   hidden_dtype_Main, device_type, DEVICE_ID)
 hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
 save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                              np.int32,          device_type, DEVICE_ID)
 
