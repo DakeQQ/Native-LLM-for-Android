@@ -1175,8 +1175,8 @@ beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DE
 
 # --- Decode-phase placeholder buffers (reused every step) ---
 attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                             hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape((1, 1, 1, 1, out_meta_rotary[0].shape[4]),                   hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape((1, 1, 1, 1, out_meta_rotary[1].shape[4]),                   hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape(out_meta_rotary[0].shape,                                          hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape(out_meta_rotary[1].shape,                                          hidden_dtype_Main, device_type, DEVICE_ID)
 hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
 save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                              np.int32,          device_type, DEVICE_ID)
 
