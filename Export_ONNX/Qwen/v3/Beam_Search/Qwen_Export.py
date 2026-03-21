@@ -61,7 +61,7 @@ class GREEDY_SEARCH(torch.nn.Module):
 
     def forward(self, logits, save_id):
         max_logits_idx = torch.argmax(logits, dim=-1, keepdim=True).int()
-        save_id = torch.cat([save_id, max_logits_idx], dim=-1)
+        save_id        = torch.cat([save_id, max_logits_idx], dim=-1)
         return max_logits_idx, save_id
 
 
@@ -70,13 +70,13 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
 
     def __init__(self, total_layers):
         super().__init__()
-        self.total_layers = total_layers
+        self.total_layers     = total_layers
         self.save_keys_values = [None] * self.total_layers
-        self.kv_q8_cuda = (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.kv_q8_cuda       = (KV_QUANT_DTYPE == "Q8_CUDA")
 
     def forward(self, *all_inputs):
-        logits = all_inputs[-3]
-        save_id = all_inputs[-2]
+        logits    = all_inputs[-3]
+        save_id   = all_inputs[-2]
         beam_size = all_inputs[-1]
 
         # Compute log-probabilities for the top-k beams
@@ -90,8 +90,8 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
             self.save_keys_values[i] = kv.repeat(beam_size, *([1] * (kv.dim() - 1)))
 
         top_beam_indices = top_beam_indices.transpose(0, 1).int()
-        save_id = torch.cat([save_id, top_beam_indices], dim=-1)
-        max_logits_idx = top_beam_indices[[0]]
+        save_id          = torch.cat([save_id, top_beam_indices], dim=-1)
+        max_logits_idx   = top_beam_indices[[0]]
 
         return (
             *self.save_keys_values,
@@ -107,25 +107,25 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
 
     def __init__(self, total_layers):
         super().__init__()
-        self.total_layers = total_layers
+        self.total_layers     = total_layers
         self.save_keys_values = [None] * self.total_layers
 
     def forward(self, *all_inputs):
-        logits = all_inputs[-5]
-        save_id = all_inputs[-4]
+        logits        = all_inputs[-5]
+        save_id       = all_inputs[-4]
         previous_prob = all_inputs[-3]
-        beam_size = all_inputs[-2]
-        top_k = all_inputs[-1]
+        beam_size     = all_inputs[-2]
+        top_k         = all_inputs[-1]
 
         # Compute log-probabilities and accumulate with previous scores
         row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
         top_k_logits, top_k_indices = torch.topk(logits, k=top_k, dim=-1, largest=True, sorted=False)
-        top_k_prob = top_k_logits - row_logsumexp
-        current_prob = (top_k_prob + previous_prob).view(-1)
+        top_k_prob    = top_k_logits - row_logsumexp
+        current_prob  = (top_k_prob + previous_prob).view(-1)
 
         # Select the top beams from all candidates
         top_beam_prob, flat_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=False)
-        beam_index = flat_beam_indices // top_k
+        beam_index       = flat_beam_indices // top_k
         top_beam_indices = top_k_indices.view(-1)[flat_beam_indices]
 
         # Gather KV caches for surviving beams
@@ -134,8 +134,8 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
 
         gathered_save_id = torch.index_select(save_id, dim=0, index=beam_index)
         top_beam_indices = top_beam_indices.unsqueeze(-1).int()
-        max_logits_idx = top_beam_indices[[0]]
-        save_id = torch.cat([gathered_save_id, top_beam_indices], dim=-1)
+        max_logits_idx   = top_beam_indices[[0]]
+        save_id          = torch.cat([gathered_save_id, top_beam_indices], dim=-1)
 
         return (
             *self.save_keys_values,
@@ -157,8 +157,8 @@ class APPLY_PENALTY(torch.nn.Module):
 
     def forward(self, logits, save_id, penalty_value, penalty_range):
         target_indices = save_id[:, -penalty_range:].long()
-        penalized = logits.gather(1, target_indices) * penalty_value
-        logits = logits.scatter(1, target_indices, penalized)
+        penalized      = logits.gather(1, target_indices) * penalty_value
+        logits         = logits.scatter(1, target_indices, penalized)
         return logits
 
 
@@ -181,13 +181,13 @@ class KV_SLICE(torch.nn.Module):
     def __init__(self, num_layers):
         super().__init__()
         self.kv_quantized = (KV_QUANT_DTYPE == "Q8") or (KV_QUANT_DTYPE == "Q8_CUDA")
-        self.num_layers = num_layers
+        self.num_layers   = num_layers
         self.num_layers_2 = num_layers * 2
         self.num_layers_3 = num_layers * 3
         self.num_layers_4 = num_layers * 4
         self.num_layers_5 = num_layers * 5
-        self.save_key   = [None] * num_layers
-        self.save_value = [None] * num_layers
+        self.save_key     = [None] * num_layers
+        self.save_value   = [None] * num_layers
         if self.kv_quantized:
             self.save_k_scale = [None] * num_layers
             self.save_k_bias  = [None] * num_layers
@@ -196,7 +196,7 @@ class KV_SLICE(torch.nn.Module):
 
     def forward(self, *all_inputs):
         slice_start = all_inputs[-2]
-        slice_end = all_inputs[-1]
+        slice_end   = all_inputs[-1]
         for i in range(self.num_layers):
             self.save_key[i]   = all_inputs[i][..., slice_start: slice_end]
             self.save_value[i] = all_inputs[i + self.num_layers][..., slice_start: slice_end, :]
@@ -227,13 +227,13 @@ class KVQuantizer(torch.nn.Module):
     def _quantize_block(self, x, dim):
         """Per-block min-max quantization to [0, 255]."""
         block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
-        scale = (block_max - block_min) * self.inv_qmax
+        scale        = (block_max - block_min) * self.inv_qmax
         x_normalized = (x - block_min) / scale
-        x_packed = torch.round(x_normalized)
+        x_packed     = torch.round(x_normalized)
         if KV_QUANT_DTYPE == "Q8":
             x_packed = x_packed.to(torch.uint8)
         if USE_FLOAT16_SCALE_BIAS:
-            scale = scale.half()
+            scale     = scale.half()
             block_min = block_min.half()
         return x_packed, scale, block_min
 
@@ -250,7 +250,7 @@ class KVQuantizer(torch.nn.Module):
     def unpack_q8_cuda(self, x_i32, dim, batch_size, num_kv_heads, head_dim):
         """Unpack int32 back into 4 uint8 channels."""
         r3 = x_i32 % self._16777216
-        x3 = ((x_i32 - r3) // self._16777216) + self._128
+        x3 = (x_i32 - r3) // self._16777216 + self._128
         x2 = r3 // self._65536
         r2 = r3 % self._65536
         x1 = r2 // self._256
@@ -303,8 +303,8 @@ class ROTARY_MASK_PREFILL(torch.nn.Module):
     @staticmethod
     def _build_rotary_table(llm, max_seq_len):
         position_ids = torch.arange(max_seq_len, dtype=torch.float32).unsqueeze(-1)
-        inv_freq = llm.model.rotary_emb.inv_freq
-        idx_theta = (position_ids * inv_freq).unsqueeze(1).unsqueeze(1).unsqueeze(0)
+        inv_freq     = llm.model.rotary_emb.inv_freq
+        idx_theta    = (position_ids * inv_freq).unsqueeze(1).unsqueeze(1).unsqueeze(0)
         return torch.cos(idx_theta), torch.sin(idx_theta)
 
     def forward(self, ids_len, history_len):
@@ -351,25 +351,25 @@ class LLM_MAIN(torch.nn.Module):
         self.llm = llm
 
         # ── Attention geometry ───────────────────────────────────────────
-        self.head_dim = head_dim
-        self.head_dim_half = head_dim // 2
-        self.head_dim_quarter = head_dim // 4
-        self.num_heads = num_heads
-        self.num_key_value_heads = num_key_value_heads
+        self.head_dim             = head_dim
+        self.head_dim_half        = head_dim // 2
+        self.head_dim_quarter     = head_dim // 4
+        self.num_heads            = num_heads
+        self.num_key_value_heads  = num_key_value_heads
         self.num_key_value_groups = num_heads // num_key_value_heads
-        self.qk_heads = num_heads + num_key_value_heads
+        self.qk_heads             = num_heads + num_key_value_heads
 
         # ── Layer count multipliers (for indexing into flat KV input list) ──
-        self.num_layers = num_layers
+        self.num_layers   = num_layers
         self.num_layers_2 = num_layers * 2
         self.num_layers_3 = num_layers * 3
         self.num_layers_4 = num_layers * 4
         self.num_layers_5 = num_layers * 5
 
         # ── KV cache dtype flags ─────────────────────────────────────────
-        self.kv_f16 = (KV_QUANT_DTYPE == "F16")
-        self.kv_q8 = (KV_QUANT_DTYPE == "Q8")
-        self.kv_q8_cuda = (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.kv_f16       = (KV_QUANT_DTYPE == "F16")
+        self.kv_q8        = (KV_QUANT_DTYPE == "Q8")
+        self.kv_q8_cuda   = (KV_QUANT_DTYPE == "Q8_CUDA")
         self.kv_quantized = self.kv_q8 or self.kv_q8_cuda
 
         # ── Quantizer & overflow guard ───────────────────────────────────
@@ -398,8 +398,8 @@ class LLM_MAIN(torch.nn.Module):
         absorb RMSNorm weights into projection matrices, and fuse
         gate/up projections for the MLP.
         """
-        scale_factor = self.head_dim ** -0.25
-        norm_factor = hidden_size ** 0.5
+        scale_factor   = self.head_dim ** -0.25
+        norm_factor    = hidden_size ** 0.5
         norm_factor_qk = self.head_dim ** 0.5
 
         with torch.no_grad():
@@ -418,9 +418,9 @@ class LLM_MAIN(torch.nn.Module):
         q_proj, k_proj, v_proj = attn.q_proj, attn.k_proj, attn.v_proj
 
         # ── Create merged QKV linear ─────────────────────────────────
-        in_features = int(q_proj.in_features)
+        in_features  = int(q_proj.in_features)
         out_features = int(q_proj.out_features + k_proj.out_features + v_proj.out_features)
-        has_bias = any(p.bias is not None for p in (q_proj, k_proj, v_proj))
+        has_bias     = any(p.bias is not None for p in (q_proj, k_proj, v_proj))
 
         qkv = torch.nn.Linear(in_features, out_features, bias=has_bias)
         qkv.weight.copy_(torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0))
@@ -433,9 +433,9 @@ class LLM_MAIN(torch.nn.Module):
             qkv.bias.copy_(torch.cat([_get_bias(q_proj), _get_bias(k_proj), _get_bias(v_proj)], dim=0))
 
         # Store split dimensions for later use
-        attn.q_out_features = int(q_proj.out_features)
-        attn.k_out_features = int(k_proj.out_features)
-        attn.v_out_features = int(v_proj.out_features)
+        attn.q_out_features  = int(q_proj.out_features)
+        attn.k_out_features  = int(k_proj.out_features)
+        attn.v_out_features  = int(v_proj.out_features)
         attn.qkv_in_features = in_features
 
         del attn.q_proj, attn.k_proj, attn.v_proj
@@ -445,8 +445,8 @@ class LLM_MAIN(torch.nn.Module):
         attn.q_norm.weight.mul_(combined_scale)
         attn.k_norm.weight.mul_(combined_scale)
 
-        q_norm_repeated = attn.q_norm.weight.repeat(self.num_heads)
-        k_norm_repeated = attn.k_norm.weight.repeat(self.num_key_value_heads)
+        q_norm_repeated     = attn.q_norm.weight.repeat(self.num_heads)
+        k_norm_repeated     = attn.k_norm.weight.repeat(self.num_key_value_heads)
         attn.qk_norm_weight = torch.nn.Parameter(torch.cat([q_norm_repeated, k_norm_repeated], dim=0).view(1, 1, 1, -1, self.head_dim))
         del attn.q_norm, attn.k_norm
 
@@ -459,7 +459,7 @@ class LLM_MAIN(torch.nn.Module):
     def _fuse_gate_up_projection(self, layer, norm_factor):
         """Fuse gate and up projections, absorbing post-attention LayerNorm."""
         post_norm_weight = layer.post_attention_layernorm.weight.unsqueeze(0) * norm_factor
-        gate, up = layer.mlp.gate_proj, layer.mlp.up_proj
+        gate, up         = layer.mlp.gate_proj, layer.mlp.up_proj
 
         gate_up = torch.nn.Linear(gate.in_features, gate.out_features + up.out_features, bias=False)
         gate_up.weight.copy_(torch.cat([
@@ -507,22 +507,22 @@ class LLM_MAIN(torch.nn.Module):
         for i, layer in enumerate(self.llm.model.layers):
 
             # ── Self-Attention ───────────────────────────────────────
-            residual = hidden_states
+            residual      = hidden_states
             hidden_states = self._rms_norm(hidden_states)
 
             # Fused QKV projection & reshape
-            qkv = layer.self_attn.qkv(hidden_states)
-            qkv = qkv.reshape(batch_size, -1, 1, self.qk_heads + self.num_key_value_heads, self.head_dim)
+            qkv   = layer.self_attn.qkv(hidden_states)
+            qkv   = qkv.reshape(batch_size, -1, 1, self.qk_heads + self.num_key_value_heads, self.head_dim)
             qk, v = torch.split(qkv, [self.qk_heads, self.num_key_value_heads], dim=-2)
 
             # QK normalization & rotary embedding
-            qk = self._rms_norm(qk) * layer.self_attn.qk_norm_weight
+            qk     = self._rms_norm(qk) * layer.self_attn.qk_norm_weight
             qk_rot = qk * rotary_pos_emb_cos + self._rotate_half(qk, batch_size) * rotary_pos_emb_sin
 
             # Split into query and key, reshape query for GQA
             q, k = torch.split(qk_rot, [self.num_heads, self.num_key_value_heads], dim=-2)
-            q = q.reshape(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
-            q = q.permute(0, 2, 3, 1, 4)
+            q    = q.reshape(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
+            q    = q.permute(0, 2, 3, 1, 4)
 
             # Optional FP16 cast for KV
             if self.kv_f16:
@@ -537,12 +537,12 @@ class LLM_MAIN(torch.nn.Module):
             if self.kv_quantized:
                 # Quantize current K/V and concatenate with cached values
                 packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.head_dim_quarter)
-                k   = torch.cat([all_inputs[i],                        packed_k], dim=-1)
-                v   = torch.cat([all_inputs[i + self.num_layers],      packed_v], dim=-2)
-                k_s = torch.cat([all_inputs[i + self.num_layers_2],    scale_k],  dim=-1)
-                k_b = torch.cat([all_inputs[i + self.num_layers_3],    bias_k],   dim=-1)
-                v_s = torch.cat([all_inputs[i + self.num_layers_4],    scale_v],  dim=-2)
-                v_b = torch.cat([all_inputs[i + self.num_layers_5],    bias_v],   dim=-2)
+                k   = torch.cat([all_inputs[i],                     packed_k], dim=-1)
+                v   = torch.cat([all_inputs[i + self.num_layers],   packed_v], dim=-2)
+                k_s = torch.cat([all_inputs[i + self.num_layers_2], scale_k],  dim=-1)
+                k_b = torch.cat([all_inputs[i + self.num_layers_3], bias_k],   dim=-1)
+                v_s = torch.cat([all_inputs[i + self.num_layers_4], scale_v],  dim=-2)
+                v_b = torch.cat([all_inputs[i + self.num_layers_5], bias_v],   dim=-2)
 
                 # Save updated caches
                 self.save_key[i]     = k
@@ -565,12 +565,12 @@ class LLM_MAIN(torch.nn.Module):
                     v = self.quantizer.unpack_q8_cuda(v, -1, batch_size, self.num_key_value_heads, self.head_dim)
 
                 # Dequantized attention: attn = softmax((Q @ K) * k_scale + Q_sum * k_bias + mask) @ (V * v_scale + v_bias)
-                attn_raw        = torch.matmul(q, k.float())
-                attn_bias       = q.sum(dim=-1, keepdim=True) * k_b + attention_mask
-                attn            = torch.addcmul(attn_bias, attn_raw, k_s)
-                attn            = torch.softmax(attn, dim=-1)
-                v_dequant       = torch.addcmul(v_b, v.float(), v_s)
-                attn            = torch.matmul(attn, v_dequant)
+                attn_raw  = torch.matmul(q, k.float())
+                attn_bias = q.sum(dim=-1, keepdim=True) * k_b + attention_mask
+                attn      = torch.addcmul(attn_bias, attn_raw, k_s)
+                attn      = torch.softmax(attn, dim=-1)
+                v_dequant = torch.addcmul(v_b, v.float(), v_s)
+                attn      = torch.matmul(attn, v_dequant)
 
             else:
                 # Concatenate with cached K/V (F16 or F32)
@@ -588,20 +588,20 @@ class LLM_MAIN(torch.nn.Module):
                 attn = torch.matmul(attn, v)
 
             # Output projection & residual
-            attn = attn.permute(0, 3, 1, 2, 4).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
+            attn          = attn.permute(0, 3, 1, 2, 4).reshape(batch_size, -1, layer.self_attn.o_proj.in_features)
             hidden_states = residual + layer.self_attn.o_proj(attn)
 
             # ── Feed-Forward Network ─────────────────────────────────
-            residual = hidden_states
+            residual      = hidden_states
             hidden_states = self._rms_norm(hidden_states)
 
-            gate_up = layer.mlp.gate_up_proj(hidden_states)
-            gate, up = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
+            gate_up       = layer.mlp.gate_up_proj(hidden_states)
+            gate, up      = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
             hidden_states = residual + layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
 
         # ── Final Projection ─────────────────────────────────────────
         hidden_states = self._rms_norm(hidden_states[:, -1])
-        logits = self.llm.lm_head(hidden_states)
+        logits        = self.llm.lm_head(hidden_states)
 
         if self.kv_quantized:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits
@@ -1107,10 +1107,11 @@ print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
 # ══════════════════════════════════════════════════════════════════════════════
 in_name_Main           = get_in_names(ort_session_Main)
 out_name_Main          = get_out_names(ort_session_Main)
-amount_of_outputs_Main = len(out_name_Main)
-num_keys_values        = amount_of_outputs_Main - 1
+in_meta_Main           = ort_session_Main._inputs_meta
+out_meta_Main          = ort_session_Main._outputs_meta
 
 # Derived index offsets for accessing beam/greedy extra inputs
+num_keys_values        = len(out_name_Main) - 1
 num_keys_values_plus_1 = num_keys_values + 1
 num_keys_values_plus_2 = num_keys_values + 2
 num_keys_values_plus_3 = num_keys_values + 3
@@ -1122,34 +1123,30 @@ out_name_Main_kv     = out_name_Main[:num_keys_values]
 out_name_Main_logits = out_name_Main[num_keys_values]
 
 # Dtype introspection
-kv_dtype_str             = ort_session_Main._inputs_meta[0].type
-hidden_states_dtype_Main = np.float16 if 'float16' in ort_session_Main._inputs_meta[num_keys_values].type else np.float32
-vocab_size               = ort_session_Main._outputs_meta[num_keys_values].shape[1]
-
-_logits_out_meta  = ort_session_Main._outputs_meta[num_keys_values]
-_logits_out_dtype = np.float16 if 'float16' in _logits_out_meta.type else np.float32
+kv_dtype_str      = in_meta_Main[0].type
+hidden_dtype_Main = np.float16 if 'float16' in in_meta_Main[num_keys_values].type else np.float32
+vocab_size        = out_meta_Main[num_keys_values].shape[1]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # KV CACHE SETUP
 # ══════════════════════════════════════════════════════════════════════════════
-_meta = ort_session_Main._inputs_meta
 
 if 'uint8' in kv_dtype_str or 'int32' in kv_dtype_str:
     kv_dtype_Main = np.int32 if 'int32' in kv_dtype_str else np.uint8
     num_layers    = num_keys_values // 6
-    scale_dtype   = np.float16 if 'float16' in _meta[num_layers * 2].type else np.float32
-    k_scales      = create_ort_with_shape((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    k_biases      = create_ort_with_shape((1, _meta[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    v_scales      = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
-    v_biases      = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    scale_dtype   = np.float16 if 'float16' in in_meta_Main[num_layers * 2].type else np.float32
+    k_scales      = create_ort_with_shape((1, in_meta_Main[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    k_biases      = create_ort_with_shape((1, in_meta_Main[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    v_scales      = create_ort_with_shape((1, in_meta_Main[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    v_biases      = create_ort_with_shape((1, in_meta_Main[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
 else:
     kv_dtype_Main = np.float16 if 'float16' in kv_dtype_str else np.float32
     num_layers    = num_keys_values // 2
     k_scales      = None
 
-past_keys_Main   = create_ort_with_shape((1, _meta[0].shape[1],          1, _meta[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
-past_values_Main = create_ort_with_shape((1, _meta[num_layers].shape[1], 1, 0, _meta[num_layers].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
+past_keys_Main   = create_ort_with_shape((1, in_meta_Main[0].shape[1],          1, in_meta_Main[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
+past_values_Main = create_ort_with_shape((1, in_meta_Main[num_layers].shape[1], 1, 0, in_meta_Main[num_layers].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1191,22 +1188,22 @@ num_prefill = tokens.shape[-1]
 _rotary_meta = ort_session_Rotary_Mask_Decode._outputs_meta
 
 # --- Input OrtValues ---
-input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len          = create_ort_with_data([num_prefill], np.int64,  device_type, DEVICE_ID)
-init_history_len = create_ort_with_data([0],           np.int64,  device_type, DEVICE_ID)
-topK             = create_ort_with_data([TOP_K],       np.int64,  device_type, DEVICE_ID)
-beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64,  device_type, DEVICE_ID)
+input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens,   device_type, DEVICE_ID)
+ids_len          = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
+init_history_len = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
+topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DEVICE_ID)
+beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
 
 # --- Decode-phase placeholder buffers (reused every step) ---
-attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                 hidden_states_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[0].shape[4]),          hidden_states_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[1].shape[4]),          hidden_states_dtype_Main, device_type, DEVICE_ID)
-hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, _meta[num_keys_values].shape[2]), hidden_states_dtype_Main, device_type, DEVICE_ID)
-save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                  np.int32,                 device_type, DEVICE_ID)
+attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                        hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[0].shape[4]),                 hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape((1, 1, 1, 1, _rotary_meta[1].shape[4]),                 hidden_dtype_Main, device_type, DEVICE_ID)
+hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[num_keys_values].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
+save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                         np.int32,          device_type, DEVICE_ID)
 
 # --- Logits & token-index buffers ---
-prefill_logits_buf = create_ort_with_shape((1, vocab_size),         _logits_out_dtype, device_type, DEVICE_ID)
-decode_logits_buf  = create_ort_with_shape((BEAM_SIZE, vocab_size), _logits_out_dtype, device_type, DEVICE_ID)
+prefill_logits_buf = create_ort_with_shape((1, vocab_size),         hidden_dtype_Main, device_type, DEVICE_ID)
+decode_logits_buf  = create_ort_with_shape((BEAM_SIZE, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
 max_idx_buf        = create_ort_with_shape((1, 1),                  np.int32,          device_type, DEVICE_ID)
 
 
@@ -1233,8 +1230,8 @@ if USE_BEAM_SEARCH:
     out_name_Second_Beam_parts = out_name_Second_Beam[:num_keys_values_plus_1]
 
     # --- Beam-specific buffers ---
-    beam_ids_buf    = create_ort_with_shape((BEAM_SIZE, 1), np.int32,                 device_type, DEVICE_ID)
-    beam_score_buf  = create_ort_with_shape((BEAM_SIZE, 1), hidden_states_dtype_Main, device_type, DEVICE_ID)
+    beam_ids_buf    = create_ort_with_shape((BEAM_SIZE, 1), np.int32,          device_type, DEVICE_ID)
+    beam_score_buf  = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
 
     # --- Static beam bindings ---
     binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_1], save_id_buf)
@@ -1509,5 +1506,3 @@ print(
     f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
     f"{'─' * 56}\n"
 )
-
-
