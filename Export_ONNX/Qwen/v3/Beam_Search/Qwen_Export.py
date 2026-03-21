@@ -1486,7 +1486,7 @@ decode_tokens_per_second = num_decode / decode_elapsed if decode_elapsed > 0 els
 overall_tokens_per_second = (num_decode + 1) / total_elapsed if total_elapsed > 0 else 0.0
 
 if USE_PENALTY or USE_BEAM_SEARCH:
-    result = tokenizer.decode(save_id.numpy()[0, :num_decode], skip_special_tokens=True)
+    result = tokenizer.decode(save_id.numpy().flat[:num_decode], skip_special_tokens=True)
 else:
     result = tokenizer.decode(save_id_numpy[:num_decode], skip_special_tokens=True)
 
