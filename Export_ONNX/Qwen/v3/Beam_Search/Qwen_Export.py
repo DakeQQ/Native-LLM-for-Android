@@ -1118,7 +1118,7 @@ num_keys_values_Main_plus_3 = num_keys_values_Main + 3
 num_keys_values_Main_plus_4 = num_keys_values_Main + 4
 
 # Partitioned name lists
-in_name_Main_parts   = in_name_Main[:num_keys_values_Main]
+in_name_Main_kv      = in_name_Main[:num_keys_values_Main]
 out_name_Main_kv     = out_name_Main[:num_keys_values_Main]
 out_name_Main_logits = out_name_Main[num_keys_values_Main]
 
@@ -1390,7 +1390,7 @@ while num_decode < generate_limit:
 
         # Feed beam KV + save_id back into Main for next step
         save_id = outputs_Beam[num_keys_values_Main]
-        bind_ort_in(binding_Main, in_name_Main_parts, outputs_Beam)
+        bind_ort_in(binding_Main, in_name_Main_kv, outputs_Beam)
         binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_1], save_id)
 
     else:
@@ -1414,7 +1414,7 @@ while num_decode < generate_limit:
             save_id_numpy[num_decode] = max_logits_idx
 
         # Feed greedy KV outputs back into Main
-        bind_ort_in(binding_Main, in_name_Main_parts, outputs_Main)
+        bind_ort_in(binding_Main, in_name_Main_kv, outputs_Main)
 
         # Streaming print
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
