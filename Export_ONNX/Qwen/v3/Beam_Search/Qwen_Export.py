@@ -51,10 +51,6 @@ DEVICE_ID                = 0                       # Device ID for GPU
 OPSET                    = 17                      # ONNX opset version
 
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Decoding Strategy Modules
-# ══════════════════════════════════════════════════════════════════════════════
 class GREEDY_SEARCH(torch.nn.Module):
     """Greedy decoding: select the token with the highest logit."""
 
@@ -148,9 +144,6 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Penalty & Utility Modules
-# ══════════════════════════════════════════════════════════════════════════════
 class APPLY_PENALTY(torch.nn.Module):
     """Apply repetition penalty to recently generated token logits."""
 
@@ -174,9 +167,6 @@ class ARGMAX(torch.nn.Module):
         return torch.argmax(logits, dim=-1, keepdim=True).int()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# KV Cache Slice
-# ══════════════════════════════════════════════════════════════════════════════
 class KV_SLICE(torch.nn.Module):
     """Apply slice to KV cache tensors."""
 
@@ -212,9 +202,6 @@ class KV_SLICE(torch.nn.Module):
         return *self.save_key, *self.save_value
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# KV Cache Quantization
-# ══════════════════════════════════════════════════════════════════════════════
 class KVQuantizer(torch.nn.Module):
     """Quantize key/value tensors to Q8 or Q8_CUDA packed formats."""
     
@@ -271,9 +258,6 @@ class KVQuantizer(torch.nn.Module):
         return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Embedding Module
-# ══════════════════════════════════════════════════════════════════════════════
 class LLM_EMBED(torch.nn.Module):
     """Extract and apply the token embedding layer in float32."""
 
@@ -285,9 +269,6 @@ class LLM_EMBED(torch.nn.Module):
         return self.embed_tokens(input_ids)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Rotary Positional Embedding & Attention Mask
-# ══════════════════════════════════════════════════════════════════════════════
 class ROTARY_MASK_PREFILL(torch.nn.Module):
     """Precompute rotary embeddings and causal mask for the prefill phase."""
 
@@ -333,9 +314,6 @@ class ROTARY_MASK_DECODE(torch.nn.Module):
         return rotary_cos, rotary_sin, kv_seq_len_next
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Main Transformer Module
-# ══════════════════════════════════════════════════════════════════════════════
 class LLM_MAIN(torch.nn.Module):
     """
     Main transformer module that processes hidden states through all decoder layers.
@@ -1110,7 +1088,6 @@ print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
 in_name_Main  = get_in_names(ort_session_Main)
 out_name_Main = get_out_names(ort_session_Main)
 in_meta_Main  = ort_session_Main._inputs_meta
-out_meta_Main = ort_session_Main._outputs_meta
 
 # Derived index offsets for accessing beam/greedy extra inputs
 num_keys_values_Main        = len(out_name_Main) - 1
@@ -1127,7 +1104,7 @@ out_name_Main_logits = out_name_Main[num_keys_values_Main]
 # Dtype introspection
 kv_dtype_str      = in_meta_Main[0].type
 hidden_dtype_Main = np.float16 if 'float16' in in_meta_Main[num_keys_values_Main].type else np.float32
-vocab_size        = out_meta_Main[num_keys_values_Main].shape[1]
+vocab_size        = ort_session_Main._outputs_meta[num_keys_values_Main].shape[1]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
