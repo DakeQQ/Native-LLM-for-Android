@@ -59,7 +59,7 @@ ALGORITHM = "k_quant"       # Strategies: "DEFAULT", "RTN", "HQQ", "k_quant"
 BITS = 4                    # Target bit precision (e.g., 4 or 8)
 BLOCK_SIZE = 32             # [16, 32, 64, 128, 256]; Smaller => more accuracy, more time/size
 ACCURACY_LEVEL = 4          # 0:default, 1:fp32, 2:fp16, 3:bf16, 4:int8
-QUANT_SYMMETRIC = False     # False = Asymmetric (includes ZeroPoint), True = Symmetric
+QUANT_SYMMETRIC = False     # False = Asymmetric (Accuracy, Slower), True = Symmetric (Faster)
 NODES_TO_EXCLUDE = None     # List of specific ONNX node names to exclude from quantization
 USE_Q8_VISION = True        # Enable INT8 dynamic quantization specifically for Vision models
 USE_F16 = False             # Convert Q4F32/Q8F32 to Q4F16/Q8F16. BLOCK_SIZE <= 32 recommended
