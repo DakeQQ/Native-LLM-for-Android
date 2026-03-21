@@ -859,8 +859,8 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         # Export: Apply Penalty
         # ══════════════════════════════════════════════════════════════════
-        penalty_value  = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
-        penalty_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
+        penalty_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
+        penalty_range = torch.tensor([PENALTY_RANGE],  dtype=torch.int64)
 
         torch.onnx.export(
             APPLY_PENALTY(),
