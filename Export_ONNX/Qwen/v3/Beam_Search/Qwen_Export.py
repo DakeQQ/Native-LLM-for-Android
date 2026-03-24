@@ -1065,16 +1065,16 @@ in_name_Embed     = get_in_names(ort_session_Embed)[0]
 out_name_Embed    = get_out_names(ort_session_Embed)[0]
 
 # --- Rotary + Mask (Prefill) ---
-ort_session_Rotary_Mask_Prefill = create_session(onnx_model_Rotary_Mask_Prefill, **packed_settings)
-binding_Rotary_Mask_Prefill     = ort_session_Rotary_Mask_Prefill.io_binding()
-in_name_Rotary_Mask_Prefill     = get_in_names(ort_session_Rotary_Mask_Prefill)
-out_name_Rotary_Mask_Prefill    = get_out_names(ort_session_Rotary_Mask_Prefill)
+ort_session_Rotary_Text_Prefill = create_session(onnx_model_Rotary_Mask_Prefill, **packed_settings)
+binding_Rotary_Text_Prefill     = ort_session_Rotary_Text_Prefill.io_binding()
+in_name_Rotary_Text_Prefill     = get_in_names(ort_session_Rotary_Text_Prefill)
+out_name_Rotary_Text_Prefill    = get_out_names(ort_session_Rotary_Text_Prefill)
 
 # --- Rotary + Mask (Decode) ---
 ort_session_Rotary_Mask_Decode = create_session(onnx_model_Rotary_Mask_Decode, **packed_settings)
 binding_Rotary_Mask_Decode     = ort_session_Rotary_Mask_Decode.io_binding()
-in_name_Rotary_Mask_Decode     = get_in_names(ort_session_Rotary_Mask_Decode)[0]
-out_name_Rotary_Mask_Decode    = get_out_names(ort_session_Rotary_Mask_Decode)
+in_name_Rotary_Text_Decode     = get_in_names(ort_session_Rotary_Mask_Decode)[0]
+out_name_Rotary_Text_Decode    = get_out_names(ort_session_Rotary_Mask_Decode)
 out_meta_rotary                = ort_session_Rotary_Mask_Decode._outputs_meta
 
 # --- Main ---
@@ -1209,8 +1209,8 @@ if USE_BEAM_SEARCH:
     out_name_Second_Beam_parts = out_name_Second_Beam[:num_keys_values_Main_plus_1]
 
     # --- Beam-specific buffers ---
-    beam_ids_buf    = create_ort_with_shape((BEAM_SIZE, 1), np.int32,          device_type, DEVICE_ID)
-    beam_score_buf  = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
+    beam_ids_buf   = create_ort_with_shape((BEAM_SIZE, 1), np.int32,          device_type, DEVICE_ID)
+    beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
 
     # --- Static beam bindings ---
     binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main_plus_1], save_id_buf)
@@ -1267,17 +1267,16 @@ hidden_states = binding_Embed.get_outputs()[0]
 binding_Embed.bind_ortvalue_input(in_name_Embed, max_idx_buf)
 
 # --- Step 2: Compute rotary embeddings & causal mask (prefill) ---
-binding_Rotary_Mask_Prefill.bind_ortvalue_input(in_name_Rotary_Mask_Prefill[0], ids_len)
-binding_Rotary_Mask_Prefill.bind_ortvalue_input(in_name_Rotary_Mask_Prefill[1], init_history_len)
-bind_ort_out(binding_Rotary_Mask_Prefill, out_name_Rotary_Mask_Prefill, _ort_device_type)
-run(ort_session_Rotary_Mask_Prefill, binding_Rotary_Mask_Prefill)
-rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Mask_Prefill.get_outputs()
+bind_ort_in(binding_Rotary_Text_Prefill, in_name_Rotary_Text_Prefill, [ids_len, init_history_len])
+bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_device_type)
+run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
+rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
 
 # --- Step 3: Pre-bind decode rotary outputs (reused every decode step) ---
-binding_Rotary_Mask_Decode.bind_ortvalue_input(in_name_Rotary_Mask_Decode, kv_seq_len)
-binding_Rotary_Mask_Decode.bind_ortvalue_output(out_name_Rotary_Mask_Decode[0], rotary_cos_buf)
-binding_Rotary_Mask_Decode.bind_ortvalue_output(out_name_Rotary_Mask_Decode[1], rotary_sin_buf)
-binding_Rotary_Mask_Decode.bind_ortvalue_output(out_name_Rotary_Mask_Decode[2], kv_seq_len)
+binding_Rotary_Mask_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode,      kv_seq_len)
+binding_Rotary_Mask_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[0], rotary_cos_buf)
+binding_Rotary_Mask_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[1], rotary_sin_buf)
+binding_Rotary_Mask_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[2], kv_seq_len)
 
 # --- Step 4: Bind Main model inputs — non-KV (hidden_states, rotary, mask) ---
 binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main],        hidden_states)
