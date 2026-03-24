@@ -1776,8 +1776,7 @@ if use_vision:
 
 else:
     # Rotary Text Prefill
-    binding_Rotary_Text_Prefill.bind_ortvalue_input(in_name_Rotary_Text_Prefill[0], ids_len)
-    binding_Rotary_Text_Prefill.bind_ortvalue_input(in_name_Rotary_Text_Prefill[1], init_history_len)
+    bind_ort_in(binding_Rotary_Text_Prefill, in_name_Rotary_Text_Prefill, [ids_len, init_history_len])
     bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_device_type)
     run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
     rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
