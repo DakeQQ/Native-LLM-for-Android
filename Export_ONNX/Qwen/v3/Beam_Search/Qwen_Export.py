@@ -1222,11 +1222,8 @@ if USE_BEAM_SEARCH:
     beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
 
     # --- Static beam bindings ---
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main_plus_1], save_id_buf)
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main_plus_2], beam_size)
-    binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_3], beam_size)
-    binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_4], topK)
-
+    bind_ort_in_buf(binding_First_Beam, in_name_First_Beam[num_keys_values_Main_plus_1: num_keys_values_Main_plus_3], [save_id_buf, beam_size])
+    bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam[num_keys_values_Main_plus_3:], [beam_size, topK])
 else:
     # --- Greedy ---
     ort_session_Greedy = create_session(onnx_model_Greedy, **packed_settings)
@@ -1256,8 +1253,7 @@ if USE_PENALTY:
     penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
     penalty_range = create_ort_with_data([PENALTY_RANGE],  np.int64,      device_type, DEVICE_ID)
 
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[2], penalty_value)
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[3], penalty_range)
+    binding_Penalty.bind_ortvalue_input(in_name_Penalty[2:], [penalty_value, penalty_range])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
