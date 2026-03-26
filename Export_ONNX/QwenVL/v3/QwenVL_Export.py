@@ -1509,7 +1509,7 @@ ort_session_Rotary_Text_Decode = create_session(onnx_model_Rotary_Text_Decode, *
 binding_Rotary_Text_Decode     = ort_session_Rotary_Text_Decode.io_binding()
 in_name_Rotary_Text_Decode     = get_in_names(ort_session_Rotary_Text_Decode)[0]
 out_name_Rotary_Text_Decode    = get_out_names(ort_session_Rotary_Text_Decode)
-out_meta_rotary                = ort_session_Rotary_Text_Decode._outputs_meta
+out_meta_Rotary_Text_Decode    = ort_session_Rotary_Text_Decode._outputs_meta
 
 # --- Main ---
 ort_session_Main = create_session(onnx_model_Main, **packed_settings)
@@ -1608,9 +1608,9 @@ topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DE
 beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
 
 # --- Decode-phase placeholder buffers (reused every step) ---
-attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                              hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape(out_meta_rotary[0].shape,                                           hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape(out_meta_rotary[1].shape,                                           hidden_dtype_Main, device_type, DEVICE_ID)
+attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                             hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[0].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[1].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
 hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
 save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                              np.int32,          device_type, DEVICE_ID)
 
