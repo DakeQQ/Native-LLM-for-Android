@@ -1252,7 +1252,7 @@ if USE_PENALTY:
     penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
     penalty_range = create_ort_with_data([PENALTY_RANGE],  np.int64,      device_type, DEVICE_ID)
 
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[2:], [penalty_value, penalty_range])
+    bind_ort_in_buf(binding_Penalty, in_name_Penalty[2:], [penalty_value, penalty_range])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
