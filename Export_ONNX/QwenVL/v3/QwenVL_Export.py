@@ -66,7 +66,6 @@ DEVICE_ID                = 0                                        # Device ID 
 OPSET                    = 17                                       # ONNX opset version
 
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Decoding Strategy Modules
 # ══════════════════════════════════════════════════════════════════════════════
@@ -513,7 +512,7 @@ class ROTARY_VISION_DECODE(torch.nn.Module):
     def __init__(self, llm, width_factor, height_factor, prompt_head_len, max_seq_len):
         super().__init__()
         cos, sin = ROTARY_VISION_PREFILL._build_rotary_table(llm, width_factor, height_factor, prompt_head_len, max_seq_len)
-        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos,  cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
         self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
 
     def forward(self, kv_seq_len):
@@ -534,7 +533,7 @@ class ROTARY_TEXT_PREFILL(torch.nn.Module):
         self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, max_seq_len, max_seq_len, dtype=torch.int8))) * -128
 
         cos, sin = self._build_rotary_table(llm, max_seq_len)
-        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos,  cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
         self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
 
     @staticmethod
@@ -561,7 +560,7 @@ class ROTARY_TEXT_DECODE(torch.nn.Module):
     def __init__(self, llm, max_seq_len):
         super().__init__()
         cos, sin = ROTARY_TEXT_PREFILL._build_rotary_table(llm, max_seq_len)
-        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos,  cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
         self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
 
     def forward(self, kv_seq_len):
@@ -880,7 +879,7 @@ if DO_EXPORT:
         # ══════════════════════════════════════════════════════════════════
         batch_size  = BEAM_SIZE
         ids_len     = torch.tensor([10], dtype=torch.int64)
-        history_len = torch.tensor([0], dtype=torch.int64)
+        history_len = torch.tensor([0],  dtype=torch.int64)
         kv_seq_len  = ids_len + history_len
         beam_size   = torch.tensor([BEAM_SIZE], dtype=torch.int64)
         logits      = torch.ones((BEAM_SIZE, vocab_size), dtype=torch.float32)
@@ -1234,7 +1233,7 @@ if DO_EXPORT:
         # Export: Apply Penalty
         # ══════════════════════════════════════════════════════════════════
         penalty_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
-        penalty_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
+        penalty_range = torch.tensor([PENALTY_RANGE],  dtype=torch.int64)
 
         torch.onnx.export(
             APPLY_PENALTY(),
@@ -1311,10 +1310,16 @@ def is_valid_image_path(path):
     return ext.lower() in valid_extensions
 
 
-def bind_ort_in(binding, names, values):
+def bind_ort_in_buf(binding, names, values):
     """Bind OrtValue inputs by name."""
     for name, val in zip(names, values):
         binding.bind_ortvalue_input(name, val)
+
+
+def bind_ort_out_buf(binding, names, values):
+    """Bind OrtValue outputs by name."""
+    for name, val in zip(names, values):
+        binding.bind_ortvalue_output(name, val)
 
 
 def bind_ort_out(binding, names, device):
@@ -1520,30 +1525,25 @@ out_name_Main = get_out_names(ort_session_Main)
 in_meta_Main  = ort_session_Main._inputs_meta
 
 # Derived index offsets for beam/greedy extra inputs
-num_keys_values        = len(out_name_Main) - 1
-num_keys_values_plus_1 = num_keys_values + 1
-num_keys_values_plus_2 = num_keys_values + 2
-num_keys_values_plus_3 = num_keys_values + 3
-num_keys_values_plus_4 = num_keys_values + 4
+num_keys_values_Main        = len(out_name_Main)   - 1
+num_keys_values_Main_plus_1 = num_keys_values_Main + 1
+num_keys_values_Main_plus_2 = num_keys_values_Main + 2
+num_keys_values_Main_plus_3 = num_keys_values_Main + 3
 
 # Main model non-KV input indices
 # Layout: [KV_caches..., hidden_states, deepstack_0..N-1, rotary_cos, rotary_sin, attention_mask]
-idx_hidden_states  = num_keys_values
-idx_ds_start       = num_keys_values_plus_1
-idx_rotary_cos     = num_keys_values_plus_1 + deepstack_features_len
-idx_rotary_sin     = num_keys_values_plus_2 + deepstack_features_len
-idx_attention_mask = num_keys_values_plus_3 + deepstack_features_len
+idx_rotary_cos = num_keys_values_Main_plus_1 + deepstack_features_len
 
 # Partitioned name lists
-in_name_Main_kv        = in_name_Main[:num_keys_values]
-out_name_Main_kv       = out_name_Main[:num_keys_values]
-out_name_Main_logits   = out_name_Main[num_keys_values]
-deepstack_in_name_Main = in_name_Main[idx_ds_start: idx_ds_start + deepstack_features_len]
+in_name_Main_kv        = in_name_Main[:num_keys_values_Main]
+out_name_Main_kv       = out_name_Main[:num_keys_values_Main]
+out_name_Main_logits   = out_name_Main[num_keys_values_Main]
+deepstack_in_name_Main = in_name_Main[num_keys_values_Main_plus_1: idx_rotary_cos]
 
 # Dtype introspection
 kv_dtype_str      = in_meta_Main[0].type
-hidden_dtype_Main = np.float16 if 'float16' in in_meta_Main[idx_hidden_states].type else np.float32
-vocab_size        = ort_session_Main._outputs_meta[num_keys_values].shape[1]
+hidden_dtype_Main = np.float16 if 'float16' in in_meta_Main[num_keys_values_Main].type else np.float32
+vocab_size        = ort_session_Main._outputs_meta[num_keys_values_Main].shape[1]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1551,20 +1551,20 @@ vocab_size        = ort_session_Main._outputs_meta[num_keys_values].shape[1]
 # ══════════════════════════════════════════════════════════════════════════════
 
 if 'uint8' in kv_dtype_str or 'int32' in kv_dtype_str:
-    kv_dtype_Main = np.int32 if 'int32' in kv_dtype_str else np.uint8
-    num_layers    = num_keys_values // 6
-    scale_dtype   = np.float16 if 'float16' in in_meta_Main[num_layers * 2].type else np.float32
-    k_scales      = create_ort_with_shape((1, in_meta_Main[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    k_biases      = create_ort_with_shape((1, in_meta_Main[0].shape[1],          1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    v_scales      = create_ort_with_shape((1, in_meta_Main[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
-    v_biases      = create_ort_with_shape((1, in_meta_Main[num_layers].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    kv_dtype_Main   = np.int32 if 'int32' in kv_dtype_str else np.uint8
+    num_layers_Main = num_keys_values_Main // 6
+    scale_dtype     = np.float16 if 'float16' in in_meta_Main[num_layers_Main * 2].type else np.float32
+    k_scales        = create_ort_with_shape((1, in_meta_Main[0].shape[1],               1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    k_biases        = create_ort_with_shape((1, in_meta_Main[0].shape[1],               1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
+    v_scales        = create_ort_with_shape((1, in_meta_Main[num_layers_Main].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    v_biases        = create_ort_with_shape((1, in_meta_Main[num_layers_Main].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
 else:
-    kv_dtype_Main = np.float16 if 'float16' in kv_dtype_str else np.float32
-    num_layers    = num_keys_values // 2
-    k_scales      = None
+    kv_dtype_Main   = np.float16 if 'float16' in kv_dtype_str else np.float32
+    num_layers_Main = num_keys_values_Main // 2
+    k_scales        = None
 
-past_keys_Main   = create_ort_with_shape((1, in_meta_Main[0].shape[1],          1, in_meta_Main[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
-past_values_Main = create_ort_with_shape((1, in_meta_Main[num_layers].shape[1], 1, 0, in_meta_Main[num_layers].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
+past_keys_Main   = create_ort_with_shape((1, in_meta_Main[0].shape[1],                    1, in_meta_Main[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
+past_values_Main = create_ort_with_shape((1, in_meta_Main[num_layers_Main].shape[1], 1, 0, in_meta_Main[num_layers_Main].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1598,7 +1598,7 @@ num_prefill = tokens.shape[-1]
 # ══════════════════════════════════════════════════════════════════════════════
 # SHARED ORTVALUE BUFFERS
 # ══════════════════════════════════════════════════════════════════════════════
-vision_embed_size   = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
+vision_embed_size = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
 
 # --- Input OrtValues ---
 input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens,   device_type, DEVICE_ID)
@@ -1608,11 +1608,11 @@ topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DE
 beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
 
 # --- Decode-phase placeholder buffers (reused every step) ---
-attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                          hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape(out_meta_rotary[0].shape,                                 hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape(out_meta_rotary[1].shape,                                 hidden_dtype_Main, device_type, DEVICE_ID)
-hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[idx_hidden_states].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
-save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                           np.int32,          device_type, DEVICE_ID)
+attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                              hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_cos_buf     = create_ort_with_shape(out_meta_rotary[0].shape,                                           hidden_dtype_Main, device_type, DEVICE_ID)
+rotary_sin_buf     = create_ort_with_shape(out_meta_rotary[1].shape,                                           hidden_dtype_Main, device_type, DEVICE_ID)
+hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
+save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                              np.int32,          device_type, DEVICE_ID)
 
 # --- Init deepstack features (zeros for decode and text-only mode) ---
 init_deepstack_features = [create_ort_with_shape((1, 1, ort_session_Vision._outputs_meta[0].shape[2]), vision_dtype, device_type, DEVICE_ID)] * deepstack_features_len  # Same memory address buff
@@ -1642,30 +1642,30 @@ if USE_BEAM_SEARCH:
     print("\nBeam Search does not display immediate decoding results...")
 
     # --- First Beam ---
-    ort_session_First_Beam    = create_session(onnx_model_First_Beam, **packed_settings)
-    binding_First_Beam        = ort_session_First_Beam.io_binding()
-    in_name_First_Beam        = get_in_names(ort_session_First_Beam)
-    out_name_First_Beam       = get_out_names(ort_session_First_Beam)
-    in_name_First_Beam_parts  = in_name_First_Beam[:num_keys_values_plus_1]
-    out_name_First_Beam_parts = out_name_First_Beam[:num_keys_values_plus_1]
+    ort_session_First_Beam     = create_session(onnx_model_First_Beam, **packed_settings)
+    binding_First_Beam         = ort_session_First_Beam.io_binding()
+    in_name_First_Beam         = get_in_names(ort_session_First_Beam)
+    out_name_First_Beam        = get_out_names(ort_session_First_Beam)
+    in_name_First_Beam_parts   = in_name_First_Beam[:num_keys_values_Main_plus_1]
+    out_name_First_Beam_parts  = out_name_First_Beam[:num_keys_values_Main_plus_1]
+    out_name_First_Beam_others = out_name_First_Beam[num_keys_values_Main_plus_1:]
 
     # --- Second Beam ---
-    ort_session_Second_Beam    = create_session(onnx_model_Second_Beam, **packed_settings)
-    binding_Second_Beam        = ort_session_Second_Beam.io_binding()
-    in_name_Second_Beam        = get_in_names(ort_session_Second_Beam)
-    out_name_Second_Beam       = get_out_names(ort_session_Second_Beam)
-    in_name_Second_Beam_parts  = in_name_Second_Beam[:num_keys_values_plus_1]
-    out_name_Second_Beam_parts = out_name_Second_Beam[:num_keys_values_plus_1]
+    ort_session_Second_Beam     = create_session(onnx_model_Second_Beam, **packed_settings)
+    binding_Second_Beam         = ort_session_Second_Beam.io_binding()
+    in_name_Second_Beam         = get_in_names(ort_session_Second_Beam)
+    out_name_Second_Beam        = get_out_names(ort_session_Second_Beam)
+    in_name_Second_Beam_parts   = in_name_Second_Beam[:num_keys_values_Main_plus_1]
+    out_name_Second_Beam_parts  = out_name_Second_Beam[:num_keys_values_Main_plus_1]
+    out_name_Second_Beam_others = out_name_Second_Beam[num_keys_values_Main_plus_1:]
 
     # --- Beam-specific buffers ---
     beam_ids_buf   = create_ort_with_shape((BEAM_SIZE, 1), np.int32,          device_type, DEVICE_ID)
     beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
 
     # --- Static beam bindings ---
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_1], save_id_buf)
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_plus_2], beam_size)
-    binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_3], beam_size)
-    binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_4], topK)
+    bind_ort_in_buf(binding_First_Beam, in_name_First_Beam[num_keys_values_Main_plus_1: num_keys_values_Main_plus_3], [save_id_buf, beam_size])
+    bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam[num_keys_values_Main_plus_3:], [beam_size, topK])
 
 else:
     # --- Greedy ---
@@ -1696,8 +1696,7 @@ if USE_PENALTY:
     penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
     penalty_range = create_ort_with_data([PENALTY_RANGE],  np.int64,      device_type, DEVICE_ID)
 
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[2], penalty_value)
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[3], penalty_range)
+    bind_ort_in_buf(binding_Penalty, in_name_Penalty[2:], [penalty_value, penalty_range])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1756,7 +1755,7 @@ if use_vision:
     # Run Concat: merge text embeddings + vision features
     if not fixed_vision_shape:
         outputs_Vision = binding_Vision.get_outputs()
-        bind_ort_in(binding_Concat, in_name_Concat[:deepstack_features_len], outputs_Vision[:deepstack_features_len])
+        bind_ort_in_buf(binding_Concat, in_name_Concat[:deepstack_features_len], outputs_Vision[:deepstack_features_len])
         binding_Concat.bind_ortvalue_input(in_name_Concat[amount_of_outputs_Concat], outputs_Vision[deepstack_features_len])
     binding_Concat.bind_ortvalue_input(in_name_Concat[deepstack_features_len], hidden_states)
     bind_ort_out(binding_Concat, out_name_Concat, _ort_device_type)
@@ -1764,59 +1763,52 @@ if use_vision:
     outputs_Concat = binding_Concat.get_outputs()
 
     # Rotary Vision Prefill
-    binding_Rotary_Vision_Prefill.bind_ortvalue_input(in_name_Rotary_Vision_Prefill[0], ids_len)
-    binding_Rotary_Vision_Prefill.bind_ortvalue_input(in_name_Rotary_Vision_Prefill[1], init_history_len)
+    bind_ort_in_buf(binding_Rotary_Vision_Prefill, in_name_Rotary_Vision_Prefill, [ids_len, init_history_len])
     bind_ort_out(binding_Rotary_Vision_Prefill, out_name_Rotary_Vision_Prefill, _ort_device_type)
     run(ort_session_Rotary_Vision_Prefill, binding_Rotary_Vision_Prefill)
     rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Vision_Prefill.get_outputs()
 
     # Bind Main: concat hidden_states + deepstack features from vision
-    binding_Main.bind_ortvalue_input(in_name_Main[idx_hidden_states], outputs_Concat[deepstack_features_len])
-    bind_ort_in(binding_Main, deepstack_in_name_Main, outputs_Concat[:deepstack_features_len])
+    binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], outputs_Concat[deepstack_features_len])
+    bind_ort_in_buf(binding_Main, deepstack_in_name_Main, outputs_Concat[:deepstack_features_len])
 
 else:
     # Rotary Text Prefill
-    bind_ort_in(binding_Rotary_Text_Prefill, in_name_Rotary_Text_Prefill, [ids_len, init_history_len])
+    bind_ort_in_buf(binding_Rotary_Text_Prefill, in_name_Rotary_Text_Prefill, [ids_len, init_history_len])
     bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_device_type)
     run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
     rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
 
     # Bind Main: text-only hidden_states + zero deepstack features
-    binding_Main.bind_ortvalue_input(in_name_Main[idx_hidden_states], hidden_states)
-    bind_ort_in(binding_Main, deepstack_in_name_Main, init_deepstack_features)
+    binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], hidden_states)
+    bind_ort_in_buf(binding_Main, deepstack_in_name_Main, init_deepstack_features)
 
 # --- Step 3: Pre-bind decode rotary outputs (reused every decode step) ---
 if use_vision:
     binding_Rotary_Vision_Decode.bind_ortvalue_input(in_name_Rotary_Vision_Decode, kv_seq_len)
-    binding_Rotary_Vision_Decode.bind_ortvalue_output(out_name_Rotary_Vision_Decode[0], rotary_cos_buf)
-    binding_Rotary_Vision_Decode.bind_ortvalue_output(out_name_Rotary_Vision_Decode[1], rotary_sin_buf)
-    binding_Rotary_Vision_Decode.bind_ortvalue_output(out_name_Rotary_Vision_Decode[2], kv_seq_len)
+    bind_ort_out_buf(binding_Rotary_Vision_Decode, out_name_Rotary_Vision_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
     ort_session_Rotary_Decode = ort_session_Rotary_Vision_Decode
     binding_Rotary_Decode     = binding_Rotary_Vision_Decode
 else:
     binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
-    binding_Rotary_Text_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[0], rotary_cos_buf)
-    binding_Rotary_Text_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[1], rotary_sin_buf)
-    binding_Rotary_Text_Decode.bind_ortvalue_output(out_name_Rotary_Text_Decode[2], kv_seq_len)
+    bind_ort_out_buf(binding_Rotary_Text_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
     ort_session_Rotary_Decode = ort_session_Rotary_Text_Decode
     binding_Rotary_Decode     = binding_Rotary_Text_Decode
 
 # --- Step 4: Bind Main model inputs — rotary & attention mask (prefill) ---
-binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_cos],     rotary_cos)
-binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_sin],     rotary_sin)
-binding_Main.bind_ortvalue_input(in_name_Main[idx_attention_mask], attention_mask)
+bind_ort_in_buf(binding_Main, in_name_Main[idx_rotary_cos:], [rotary_cos, rotary_sin, attention_mask])
 
 # --- Step 5: Bind Main model inputs — empty KV cache (keys, values, optional scales/biases) ---
 i = 0
-for _ in range(num_layers):
+for _ in range(num_layers_Main):
     binding_Main.bind_ortvalue_input(in_name_Main[i], past_keys_Main)
     i += 1
-for _ in range(num_layers):
+for _ in range(num_layers_Main):
     binding_Main.bind_ortvalue_input(in_name_Main[i], past_values_Main)
     i += 1
 if k_scales is not None:
     for ortval in (k_scales, k_biases, v_scales, v_biases):
-        for _ in range(num_layers):
+        for _ in range(num_layers_Main):
             binding_Main.bind_ortvalue_input(in_name_Main[i], ortval)
             i += 1
 
@@ -1831,7 +1823,7 @@ if USE_PENALTY:
 
 # --- Step 8: Bind decode head inputs/outputs to prefill logits buffer ---
 if USE_BEAM_SEARCH:
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values], prefill_logits_buf)
+    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main], prefill_logits_buf)
 elif USE_PENALTY:
     binding_Greedy.bind_ortvalue_input(in_name_Greedy[0],   prefill_logits_buf)
     binding_Greedy.bind_ortvalue_output(out_name_Greedy[0], max_idx_buf)
@@ -1863,22 +1855,18 @@ while num_decode < generate_limit:
         # ── 3a. Beam Search ─────────────────────────────────────────────
         if is_prefill_step:
             # First beam step: expand single-beam KV into BEAM_SIZE beams
-            bind_ort_in(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
+            bind_ort_in_buf(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
             bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
-            binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_1], beam_score_buf)
-            binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_2], beam_ids_buf)
-            binding_First_Beam.bind_ortvalue_output(out_name_First_Beam[num_keys_values_plus_3], max_idx_buf)
+            bind_ort_out_buf(binding_First_Beam, out_name_First_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
             run(ort_session_First_Beam, binding_First_Beam)
             outputs_Beam = binding_First_Beam.get_outputs()
         else:
             # Subsequent beam steps: prune + expand
-            bind_ort_in(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
+            bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
             bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
             if num_decode < 2:
-                binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_2],   beam_score_buf)
-                binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_1], beam_score_buf)
-                binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_2], beam_ids_buf)
-                binding_Second_Beam.bind_ortvalue_output(out_name_Second_Beam[num_keys_values_plus_3], max_idx_buf)
+                binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_2], beam_score_buf)
+                bind_ort_out_buf(binding_Second_Beam, out_name_Second_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
             run(ort_session_Second_Beam, binding_Second_Beam)
             outputs_Beam = binding_Second_Beam.get_outputs()
 
@@ -1888,9 +1876,9 @@ while num_decode < generate_limit:
             break
 
         # Feed beam KV + save_id back into Main for next step
-        save_id = outputs_Beam[num_keys_values]
-        bind_ort_in(binding_Main, in_name_Main_kv, outputs_Beam)
-        binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_plus_1], save_id)
+        save_id = outputs_Beam[num_keys_values_Main]
+        bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Beam)
+        binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_1], save_id)
 
     else:
         # ── 3b. Greedy / Argmax ─────────────────────────────────────────
@@ -1913,7 +1901,7 @@ while num_decode < generate_limit:
             save_id_numpy[num_decode] = max_logits_idx
 
         # Feed greedy KV outputs back into Main
-        bind_ort_in(binding_Main, in_name_Main_kv, outputs_Main)
+        bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Main)
 
         # Streaming print
         print(tokenizer.decode(max_logits_idx), end="", flush=True)
@@ -1925,14 +1913,12 @@ while num_decode < generate_limit:
     if is_prefill_step:
 
         # Switch Main to decode-sized non-KV inputs
-        binding_Main.bind_ortvalue_input(in_name_Main[idx_hidden_states],  hidden_states_buf)
-        binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_cos],     rotary_cos_buf)
-        binding_Main.bind_ortvalue_input(in_name_Main[idx_rotary_sin],     rotary_sin_buf)
-        binding_Main.bind_ortvalue_input(in_name_Main[idx_attention_mask], attention_mask_buf)
-        binding_Main.bind_ortvalue_output(out_name_Main_logits,            decode_logits_buf)
+        binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], hidden_states_buf)
+        bind_ort_in_buf(binding_Main, in_name_Main[idx_rotary_cos:], [rotary_cos_buf, rotary_sin_buf, attention_mask_buf])
+        binding_Main.bind_ortvalue_output(out_name_Main_logits, decode_logits_buf)
 
         # Switch deepstack features to zeros for decode
-        bind_ort_in(binding_Main, deepstack_in_name_Main, init_deepstack_features)
+        bind_ort_in_buf(binding_Main, deepstack_in_name_Main, init_deepstack_features)
 
         # Switch Embed to write into decode hidden_states buffer
         binding_Embed.bind_ortvalue_output(out_name_Embed, hidden_states_buf)
@@ -1944,7 +1930,7 @@ while num_decode < generate_limit:
 
         # Switch decode head to decode logits buffer
         if USE_BEAM_SEARCH:
-            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values], decode_logits_buf)
+            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main], decode_logits_buf)
             binding_Embed.bind_ortvalue_input(in_name_Embed, beam_ids_buf)
         elif USE_PENALTY:
             binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], decode_logits_buf)
@@ -1969,7 +1955,7 @@ while num_decode < generate_limit:
 decode_end_time = time.time()
 
 # Handle edge case where generation stopped at prefill (0 decode tokens after first)
-if num_decode <= 1:
+if num_decode < 2:
     prefill_elapsed = 0.0
     decode_elapsed = 0.0
 else:
