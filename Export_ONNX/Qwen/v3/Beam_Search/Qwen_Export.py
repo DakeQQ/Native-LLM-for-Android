@@ -10,8 +10,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 download_path                  = r'/home/DakeQQ/Downloads/Qwen3-1.7B'                             # Set the folder path where the Qwen whole project downloaded.
 onnx_model_Embed               = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx'
 onnx_model_Main                = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx'
-onnx_model_Rotary_Mask_Prefill = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Mask_Text_Prefill.onnx'
-onnx_model_Rotary_Mask_Decode  = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Mask_Text_Decode.onnx'
+onnx_model_Rotary_Text_Prefill = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Prefill.onnx'
+onnx_model_Rotary_Text_Decode  = r'/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Decode.onnx'
 onnx_model_Greedy              = r'/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx'
 onnx_model_First_Beam          = r'/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx'
 onnx_model_Second_Beam         = r'/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx'
@@ -691,7 +691,7 @@ if DO_EXPORT:
         torch.onnx.export(
             ROTARY_MASK_PREFILL(model, MAX_SEQ_LEN),
             (ids_len, history_len),
-            onnx_model_Rotary_Mask_Prefill,
+            onnx_model_Rotary_Text_Prefill,
             input_names=['ids_len', 'history_len'],
             output_names=['rotary_cos', 'rotary_sin', 'attention_mask', 'kv_seq_len'],
             dynamic_axes={
@@ -709,7 +709,7 @@ if DO_EXPORT:
         torch.onnx.export(
             ROTARY_MASK_DECODE(model, MAX_SEQ_LEN),
             (kv_seq_len,),
-            onnx_model_Rotary_Mask_Decode,
+            onnx_model_Rotary_Text_Decode,
             input_names=['kv_seq_len'],
             output_names=['rotary_cos', 'rotary_sin', 'kv_seq_len'],
             dynamic_axes=None,
@@ -1071,17 +1071,17 @@ in_name_Embed     = get_in_names(ort_session_Embed)[0]
 out_name_Embed    = get_out_names(ort_session_Embed)[0]
 
 # --- Rotary + Mask (Prefill) ---
-ort_session_Rotary_Text_Prefill = create_session(onnx_model_Rotary_Mask_Prefill, **packed_settings)
+ort_session_Rotary_Text_Prefill = create_session(onnx_model_Rotary_Text_Prefill, **packed_settings)
 binding_Rotary_Text_Prefill     = ort_session_Rotary_Text_Prefill.io_binding()
 in_name_Rotary_Text_Prefill     = get_in_names(ort_session_Rotary_Text_Prefill)
 out_name_Rotary_Text_Prefill    = get_out_names(ort_session_Rotary_Text_Prefill)
 
 # --- Rotary + Mask (Decode) ---
-ort_session_Rotary_Mask_Decode = create_session(onnx_model_Rotary_Mask_Decode, **packed_settings)
-binding_Rotary_Mask_Decode     = ort_session_Rotary_Mask_Decode.io_binding()
-in_name_Rotary_Text_Decode     = get_in_names(ort_session_Rotary_Mask_Decode)[0]
-out_name_Rotary_Text_Decode    = get_out_names(ort_session_Rotary_Mask_Decode)
-out_meta_Rotary_Text_Decode    = ort_session_Rotary_Mask_Decode._outputs_meta
+ort_session_Rotary_Text_Decode = create_session(onnx_model_Rotary_Text_Decode, **packed_settings)
+binding_Rotary_Text_Decode     = ort_session_Rotary_Text_Decode.io_binding()
+in_name_Rotary_Text_Decode     = get_in_names(ort_session_Rotary_Text_Decode)[0]
+out_name_Rotary_Text_Decode    = get_out_names(ort_session_Rotary_Text_Decode)
+out_meta_Rotary_Text_Decode    = ort_session_Rotary_Text_Decode._outputs_meta
 
 # --- Main ---
 ort_session_Main = create_session(onnx_model_Main, **packed_settings)
@@ -1277,8 +1277,8 @@ run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
 rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
 
 # --- Step 3: Pre-bind decode rotary outputs (reused every decode step) ---
-binding_Rotary_Mask_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
-bind_ort_out_buf(binding_Rotary_Mask_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
+binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
+bind_ort_out_buf(binding_Rotary_Text_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
 
 # --- Step 4: Bind Main model inputs — non-KV (hidden_states, rotary, mask) ---
 bind_ort_in_buf(binding_Main, in_name_Main_others, [hidden_states, rotary_cos, rotary_sin, attention_mask])
@@ -1427,7 +1427,7 @@ while num_decode < generate_limit:
 
     # ── 6. Prepare next step: Embed + Rotary ─────────────────────────────
     run(ort_session_Embed, binding_Embed)
-    run(ort_session_Rotary_Mask_Decode, binding_Rotary_Mask_Decode)
+    run(ort_session_Rotary_Text_Decode, binding_Rotary_Text_Decode)
     num_decode += 1
 
 
