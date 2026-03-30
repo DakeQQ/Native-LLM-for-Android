@@ -42,16 +42,16 @@ MODEL_NAMES = [
     "Apply_Penalty",
     "Argmax",
     "KV_Slice",
-    "Rotary_Mask_Text_Prefill",
-    "Rotary_Mask_Text_Decode",
+    "Rotary_Text_Prefill",
+    "Rotary_Text_Decode",
 
     # -------------
     # Vision Models
     # -------------
     "LLM_Vision",
     "LLM_Concat",
-    "Rotary_Mask_Vision_Prefill",
-    "Rotary_Mask_Vision_Decode"
+    "Rotary_Vision_Prefill",
+    "Rotary_Vision_Decode"
 ]
 
 # Quantization Settings
