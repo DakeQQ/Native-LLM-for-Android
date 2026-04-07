@@ -31,7 +31,8 @@ STOP_TOKEN               = [151643, 151645]        # Qwen stop token ids
 MAX_SEQ_LEN              = 4096                    # Max context length. Can not edit after export.
 
 # KV cache quantization
-KV_QUANT_DTYPE           = "F16"                   # "Q8" | "Q8_CUDA" | "F16" | "F32"
+KV_QUANT_DTYPE           = "F16"                   # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
+Q4_GROUP_SIZE            = 8                       # Group size for ROTARY_Q4 per-group quantization. Smaller = more accurate. Must divide head_dim evenly.
 USE_FLOAT16_SCALE_BIAS   = True                    # If choose Q8, whether to use float16 for scale and bias.
 
 # Decoding strategy
@@ -70,7 +71,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         super().__init__()
         self.total_layers     = total_layers
         self.save_keys_values = [None] * self.total_layers
-        self.kv_q8_cuda       = (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.kv_q8_cuda       = KV_QUANT_DTYPE in ("Q8_CUDA", "ROTARY_Q8_CUDA", "ROTARY_Q4_CUDA")
 
     def forward(self, *all_inputs):
         logits    = all_inputs[-3]
@@ -172,7 +173,8 @@ class KV_SLICE(torch.nn.Module):
 
     def __init__(self, num_layers):
         super().__init__()
-        self.kv_quantized = (KV_QUANT_DTYPE == "Q8") or (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.kv_quantized  = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA")
+        self.kv_rotary_q4  = KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.num_layers   = num_layers
         self.num_layers_2 = num_layers * 2
         self.num_layers_3 = num_layers * 3
@@ -182,9 +184,10 @@ class KV_SLICE(torch.nn.Module):
         self.save_value   = [None] * num_layers
         if self.kv_quantized:
             self.save_k_scale = [None] * num_layers
-            self.save_k_bias  = [None] * num_layers
             self.save_v_scale = [None] * num_layers
-            self.save_v_bias  = [None] * num_layers
+            if not self.kv_rotary_q4:
+                self.save_k_bias  = [None] * num_layers
+                self.save_v_bias  = [None] * num_layers
 
     def forward(self, *all_inputs):
         slice_start = all_inputs[-2]
@@ -193,40 +196,167 @@ class KV_SLICE(torch.nn.Module):
             self.save_key[i]   = all_inputs[i][..., slice_start: slice_end]
             self.save_value[i] = all_inputs[i + self.num_layers][..., slice_start: slice_end, :]
             if self.kv_quantized:
-                self.save_k_scale[i] = all_inputs[i + self.num_layers_2][..., slice_start: slice_end]
-                self.save_k_bias[i]  = all_inputs[i + self.num_layers_3][..., slice_start: slice_end]
-                self.save_v_scale[i] = all_inputs[i + self.num_layers_4][..., slice_start: slice_end, :]
-                self.save_v_bias[i]  = all_inputs[i + self.num_layers_5][..., slice_start: slice_end, :]
+                if self.kv_rotary_q4:
+                    # ROTARY_Q4: 4 types (key, value, k_scale, v_scale) — no bias
+                    self.save_k_scale[i] = all_inputs[i + self.num_layers_2][..., slice_start: slice_end]
+                    self.save_v_scale[i] = all_inputs[i + self.num_layers_3][:, :, :, slice_start: slice_end, :, :]
+                else:
+                    self.save_k_scale[i] = all_inputs[i + self.num_layers_2][..., slice_start: slice_end]
+                    self.save_k_bias[i]  = all_inputs[i + self.num_layers_3][..., slice_start: slice_end]
+                    self.save_v_scale[i] = all_inputs[i + self.num_layers_4][..., slice_start: slice_end, :]
+                    self.save_v_bias[i]  = all_inputs[i + self.num_layers_5][..., slice_start: slice_end, :]
+        if self.kv_rotary_q4:
+            return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_v_scale
         if self.kv_quantized:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias
         return *self.save_key, *self.save_value
 
 
 class KVQuantizer(torch.nn.Module):
-    """Quantize key/value tensors to Q8 or Q8_CUDA packed formats."""
-    
-    def __init__(self):
-        super().__init__()
-        self.QMAX = 255.0
-        self.register_buffer("inv_qmax", torch.tensor([1.0 / self.QMAX]).view(1, 1, 1, 1, -1))
-        # Constants for Q8_CUDA int32 packing/unpacking
-        for name, val in [("_256", 256), ("_128", 128), ("_65536", 65536), ("_16777216", 16777216)]:
-            self.register_buffer(name, torch.tensor([val], dtype=torch.int32).view(1, 1, 1, 1, -1))
+    """Unified KV cache quantizer supporting Q8, Q8_CUDA, ROTARY_Q8, and ROTARY_Q4.
 
-    def _quantize_block(self, x, dim):
-        """Per-block min-max quantization to [0, 255]."""
+    For rotary modes (ROTARY_Q8 / ROTARY_Q4), applies an orthogonal pairwise
+    rotation (Hadamard-like, θ=π/4) to the head_dim axis *before* standard
+    min-max quantization.  The rotation spreads outlier energy across dimension
+    pairs, making the value distribution more uniform and dramatically reducing
+    quantization error — especially at 4-bit where standard min-max is often
+    unacceptable.
+
+    During attention the inverse rotation is fused algebraically so that
+    no full dequant + inverse-rotate materialisation is needed for keys.
+    """
+
+    def __init__(self, head_dim, num_kv_heads, num_kv_groups, is_q4=False, is_rotary=False, is_q8_cuda=False):
+        super().__init__()
+        self.is_rotary     = is_rotary
+        self.is_q4         = is_q4
+        self.is_q8_cuda    = is_q8_cuda
+        self.head_dim      = head_dim
+        self.head_dim_half = head_dim // 2 if head_dim else 0
+        self.num_kv_heads  = num_kv_heads
+        self.num_kv_groups = num_kv_groups
+
+        # ── Quantization range ───────────────────────────────────────
+        # Q4 uses symmetric quantization: range [-7, 7] mapped to [1, 15] with zero_point=8
+        self.QMAX = 7.0 if is_q4 else 255.0
+        self.register_buffer("inv_qmax", torch.tensor([1.0 / self.QMAX]).view(1, 1, 1, 1, -1))
+
+        # ── Q4 group parameters ──────────────────────────────────────
+        self.q4_group_size = Q4_GROUP_SIZE if is_q4 else 0
+        self.q4_num_groups = head_dim // Q4_GROUP_SIZE if is_q4 else 0
+
+        # ── Q8_CUDA int32 packing constants ──────────────────────────
+        if is_q8_cuda:
+            for name, val in [("_256", 256), ("_128", 128), ("_65536", 65536), ("_16777216", 16777216)]:
+                self.register_buffer(name, torch.tensor([val], dtype=torch.int32).view(1, 1, 1, 1, -1))
+
+        # ── Rotary transform buffers ─────────────────────────────────
+        if is_rotary:
+            sqrt2 = 2.0 ** 0.5
+            inv_sqrt2 = 1.0 / sqrt2
+            self.register_buffer("rot_cos", torch.tensor([inv_sqrt2]))
+
+            fwd_sin = torch.cat([torch.full((head_dim // 2,), -inv_sqrt2), torch.full((head_dim // 2,),  inv_sqrt2)])
+            self.register_buffer("rot_sin_k", fwd_sin.view(1, 1, 1, -1, 1))
+            self.register_buffer("rot_sin_v", fwd_sin.view(1, 1, 1, 1, -1))
+
+            c_vec = torch.zeros(head_dim)
+            c_vec[:head_dim // 2] = sqrt2
+            self.register_buffer("c_vec", c_vec.view(1, 1, 1, 1, -1))
+
+    # ══════════════════════════════════════════════════════════════════
+    # Rotary flip helpers (view + flip + view)
+    # ══════════════════════════════════════════════════════════════════
+    def _flip_k(self, k, batch_size):
+        """Swap halves along head_dim (dim 3). k: (B, KVH, 1, head_dim, S)"""
+        return k.view(batch_size, self.num_kv_heads, 1, 2, self.head_dim_half, -1).flip(-3).view(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+
+    def _flip_v(self, v, batch_size):
+        """Swap halves along head_dim (last dim). v: (B, KVH, 1, S, head_dim)"""
+        return v.view(batch_size, self.num_kv_heads, 1, -1, 2, self.head_dim_half).flip(-2).view(batch_size, self.num_kv_heads, 1, -1, self.head_dim)
+
+    def _flip_q(self, q, batch_size):
+        """Swap halves along head_dim (last dim). q: (B, KVH, G, Qlen, head_dim)"""
+        return q.view(batch_size, self.num_kv_heads, self.num_kv_groups, -1, 2, self.head_dim_half).flip(-2).view(batch_size, self.num_kv_heads, self.num_kv_groups, -1, self.head_dim)
+
+    # ── Forward rotation (applied during quantization) ───────────────
+    def rotate_k(self, k, batch_size):
+        """Rotate key pairs along head_dim (dim 3).
+        k: (B, KVH, 1, head_dim, S)"""
+        return k * self.rot_cos + self._flip_k(k, batch_size) * self.rot_sin_k
+
+    def rotate_v(self, v, batch_size):
+        """Rotate value pairs along head_dim (dim -1).
+        v: (B, KVH, 1, S, head_dim)"""
+        return v * self.rot_cos + self._flip_v(v, batch_size) * self.rot_sin_v
+
+    # ── Inverse rotation (fused into attention computation) ──────────
+    def rotate_q(self, q, batch_size):
+        """Forward-rotate query along head_dim (last dim) for fused key attention.
+        By orthogonality: <Q, R^{-1}(K)> = <R(Q), K>, so we need R(Q).
+        q: (B, KVH, G, Qlen, head_dim)"""
+        return q * self.rot_cos + self._flip_q(q, batch_size) * self.rot_sin_v
+
+    def inverse_rotate_v(self, v, batch_size):
+        """Inverse-rotate dequantized V along head_dim (last dim).
+        v: (B, KVH, 1, S, head_dim)"""
+        return v * self.rot_cos - self._flip_v(v, batch_size) * self.rot_sin_v
+
+    def inverse_rotate_k(self, k, batch_size):
+        """Inverse-rotate dequantized K along head_dim (dim 3).
+        k: (B, KVH, 1, head_dim, S)"""
+        return k * self.rot_cos - self._flip_k(k, batch_size) * self.rot_sin_k
+
+    def inverse_rotate_attn(self, x, batch_size):
+        """Inverse-rotate attention output along head_dim (last dim).
+        Applied post-matmul instead of pre-matmul on V, since the rotation
+        is position-independent: attn @ R^{-1}(V) = R^{-1}(attn @ V).
+        x: (B, KVH, G, Qlen, head_dim)"""
+        return x * self.rot_cos - self._flip_q(x, batch_size) * self.rot_sin_v
+
+    # ══════════════════════════════════════════════════════════════════
+    # Block quantization
+    # ══════════════════════════════════════════════════════════════════
+    def _quantize_block(self, x, dim, batch_size=1):
+        """Per-block min-max quantization to [0, QMAX]."""
+        if self.is_q4:
+            return self._quantize_block_q4_grouped(x, dim, batch_size)
         block_min, block_max = torch.aminmax(x, dim=dim, keepdim=True)
         scale        = (block_max - block_min) * self.inv_qmax
         x_normalized = (x - block_min) / scale
         x_packed     = torch.round(x_normalized)
-        if KV_QUANT_DTYPE == "Q8":
+        if not self.is_q8_cuda:
             x_packed = x_packed.to(torch.uint8)
         if USE_FLOAT16_SCALE_BIAS:
             scale     = scale.half()
             block_min = block_min.half()
         return x_packed, scale, block_min
 
-    def pack_q8_cuda(self, x, dim, batch_size, num_kv_heads, head_dim_quarter):
+    def _quantize_block_q4_grouped(self, x, dim, batch_size):
+        """Per-group symmetric Q4 quantization. The rotary transform makes the
+        distribution zero-centered and symmetric, so we use absmax scaling
+        with zero_point=8, eliminating the need to store bias and saving ~30%
+        bandwidth vs Q8."""
+        if dim == -2:  # keys: (B, KVH, 1, D, S)
+            x = x.view(batch_size, self.num_kv_heads, 1, self.q4_num_groups, self.q4_group_size, -1)
+            absmax   = x.abs().amax(dim=-2, keepdim=True).clamp(min=1e-10)
+            scale    = absmax * self.inv_qmax  # absmax / 7.0
+            x_packed = (torch.round(x / scale) + 8.0).clamp(0, 15).to(torch.uint8)
+            x_packed = x_packed.reshape(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+        else:          # values: (B, KVH, 1, S, D)
+            x = x.view(batch_size, self.num_kv_heads, 1, -1, self.q4_num_groups, self.q4_group_size)
+            absmax   = x.abs().amax(dim=-1, keepdim=True).clamp(min=1e-10)
+            scale    = absmax * self.inv_qmax
+            x_packed = (torch.round(x / scale) + 8.0).clamp(0, 15).to(torch.uint8)
+            x_packed = x_packed.reshape(batch_size, self.num_kv_heads, 1, -1, self.head_dim)
+        if USE_FLOAT16_SCALE_BIAS:
+            scale = scale.half()
+        return x_packed, scale
+
+    # ══════════════════════════════════════════════════════════════════
+    # CUDA packing / unpacking (4 uint8 → 1 int32)
+    # ══════════════════════════════════════════════════════════════════
+    def pack_cuda(self, x, dim, batch_size, num_kv_heads, head_dim_quarter):
         """Pack 4 uint8 values into a single int32 for CUDA-friendly storage."""
         x_i32 = x.to(torch.int32)
         if dim != -1:
@@ -236,7 +366,7 @@ class KVQuantizer(torch.nn.Module):
         x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
         return x0 + x1 * self._256 + x2 * self._65536 + (x3 - self._128) * self._16777216
 
-    def unpack_q8_cuda(self, x_i32, dim, batch_size, num_kv_heads, head_dim):
+    def unpack_cuda(self, x_i32, dim, batch_size, num_kv_heads, head_dim):
         """Unpack int32 back into 4 uint8 channels."""
         r3 = x_i32 % self._16777216
         x3 = (x_i32 - r3) // self._16777216 + self._128
@@ -249,13 +379,60 @@ class KVQuantizer(torch.nn.Module):
             return unpacked.reshape(batch_size, num_kv_heads, 1, head_dim, -1)
         return unpacked.reshape(batch_size, num_kv_heads, 1, -1, head_dim)
 
+    # ══════════════════════════════════════════════════════════════════
+    # Q4 packing / unpacking (2 nibbles → 1 byte)
+    # ══════════════════════════════════════════════════════════════════
+    def pack_q4_k(self, x, batch_size):
+        """Pack Q4 keys: (B,KVH,1, D, S) → (B,KVH,1, D//2, S)."""
+        x = x.view(batch_size, self.num_kv_heads, 1, self.head_dim_half, 2, -1)
+        low, high = torch.unbind(x, dim=-2)
+        return (low + high * 16).to(torch.uint8)
+
+    def pack_q4_v(self, x, batch_size):
+        """Pack Q4 values: (B,KVH,1, S, D) → (B,KVH,1, S, D//2)."""
+        x = x.view(batch_size, self.num_kv_heads, 1, -1, self.head_dim_half, 2)
+        low, high = torch.unbind(x, dim=-1)
+        return (low + high * 16).to(torch.uint8)
+
+    def unpack_q4_k(self, x, batch_size):
+        """Unpack Q4 keys: (B,KVH,1, D//2, S) → (B,KVH,1, D, S)."""
+        low  = x % 16
+        high = x // 16
+        return torch.stack([low, high], dim=-2).reshape(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+
+    def unpack_q4_v(self, x, batch_size):
+        """Unpack Q4 values: (B,KVH,1, S, D//2) → (B,KVH,1, S, D)."""
+        low  = x % 16
+        high = x // 16
+        return torch.stack([low, high], dim=-1).reshape(batch_size, self.num_kv_heads, 1, -1, self.head_dim)
+
+    # ══════════════════════════════════════════════════════════════════
+    # Main entry point
+    # ══════════════════════════════════════════════════════════════════
     def forward(self, keys, values, batch_size, num_kv_heads, head_dim_quarter):
-        k_packed, k_scale, k_bias = self._quantize_block(keys, dim=-2)
-        v_packed, v_scale, v_bias = self._quantize_block(values, dim=-1)
-        if KV_QUANT_DTYPE == "Q8_CUDA":
-            k_packed = self.pack_q8_cuda(k_packed, -2, batch_size, num_kv_heads, head_dim_quarter)
-            v_packed = self.pack_q8_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
-        return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
+        if self.is_rotary:
+            # 1. Rotate before quantization
+            keys   = self.rotate_k(keys, batch_size)
+            values = self.rotate_v(values, batch_size)
+
+        if self.is_q4:
+            # 2a. Symmetric quantize (no bias) + nibble pack
+            k_packed, k_scale = self._quantize_block(keys,   dim=-2, batch_size=batch_size)
+            v_packed, v_scale = self._quantize_block(values, dim=-1, batch_size=batch_size)
+            k_packed = self.pack_q4_k(k_packed, batch_size)
+            v_packed = self.pack_q4_v(v_packed, batch_size)
+            if self.is_q8_cuda:
+                k_packed = self.pack_cuda(k_packed, -2, batch_size, num_kv_heads, head_dim_quarter)
+                v_packed = self.pack_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
+            return k_packed, k_scale, v_packed, v_scale
+        else:
+            # 2b. Asymmetric min-max quantize (with bias)
+            k_packed, k_scale, k_bias = self._quantize_block(keys,   dim=-2, batch_size=batch_size)
+            v_packed, v_scale, v_bias = self._quantize_block(values, dim=-1, batch_size=batch_size)
+            if self.is_q8_cuda:
+                k_packed = self.pack_cuda(k_packed, -2, batch_size, num_kv_heads, head_dim_quarter)
+                v_packed = self.pack_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
+            return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
 
 
 class LLM_EMBED(torch.nn.Module):
@@ -347,19 +524,37 @@ class LLM_MAIN(torch.nn.Module):
         self.num_layers_5 = num_layers * 5
 
         # ── KV cache dtype flags ─────────────────────────────────────────
-        self.kv_f16       = (KV_QUANT_DTYPE == "F16")
-        self.kv_q8        = (KV_QUANT_DTYPE == "Q8")
-        self.kv_q8_cuda   = (KV_QUANT_DTYPE == "Q8_CUDA")
-        self.kv_quantized = self.kv_q8 or self.kv_q8_cuda
+        self.kv_f16              = (KV_QUANT_DTYPE == "F16")
+        self.kv_q8               = (KV_QUANT_DTYPE == "Q8")
+        self.kv_q8_cuda          = (KV_QUANT_DTYPE == "Q8_CUDA")
+        self.kv_rotary_q8        = KV_QUANT_DTYPE in ("ROTARY_Q8", "ROTARY_Q8_CUDA")
+        self.kv_rotary_q4        = KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA")
+        self.kv_rotary_q8_cuda   = (KV_QUANT_DTYPE == "ROTARY_Q8_CUDA")
+        self.kv_rotary_q4_cuda   = (KV_QUANT_DTYPE == "ROTARY_Q4_CUDA")
+        self.kv_rotary_cuda      = self.kv_rotary_q8_cuda or self.kv_rotary_q4_cuda
+        self.kv_rotary           = self.kv_rotary_q8 or self.kv_rotary_q4
+        self.kv_quantized        = self.kv_q8 or self.kv_q8_cuda
+        self.kv_any_quantized    = self.kv_quantized or self.kv_rotary
+
+        # head_dim used for int32 unpack in rotary CUDA modes
+        self.kv_unpack_head_dim  = (head_dim // 2) if self.kv_rotary_q4_cuda else head_dim
+        self.kv_pack_quarter     = (head_dim // 8) if self.kv_rotary_q4_cuda else (head_dim // 4)
 
         # ── Quantizer & overflow guard ───────────────────────────────────
-        self.quantizer = KVQuantizer().eval()
+        self.quantizer = KVQuantizer(
+            head_dim=head_dim,
+            num_kv_heads=num_key_value_heads,
+            num_kv_groups=self.num_key_value_groups,
+            is_q4=self.kv_rotary_q4,
+            is_rotary=self.kv_rotary,
+            is_q8_cuda=self.kv_rotary_cuda or self.kv_q8_cuda,
+        ).eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
 
         # ── Per-layer output buffers ─────────────────────────────────────
         self.save_key   = [None] * num_layers
         self.save_value = [None] * num_layers
-        if self.kv_quantized:
+        if self.kv_any_quantized:
             self.save_k_scale = [None] * num_layers
             self.save_k_bias  = [None] * num_layers
             self.save_v_scale = [None] * num_layers
@@ -514,7 +709,98 @@ class LLM_MAIN(torch.nn.Module):
             v = v.transpose(1, 3)
 
             # ── KV Cache Update & Attention Compute ──────────────────
-            if self.kv_quantized:
+            if self.kv_rotary_q4:
+                # ── ROTARY_Q4: Symmetric quantization (no stored bias) ────
+                # Bias is derived on-the-fly as -8 * scale, saving ~30% KV bandwidth vs Q8
+                packed_k, scale_k, packed_v, scale_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.kv_pack_quarter)
+                k   = torch.cat([all_inputs[i],                     packed_k], dim=-1)
+                v   = torch.cat([all_inputs[i + self.num_layers],   packed_v], dim=-2)
+                k_s = torch.cat([all_inputs[i + self.num_layers_2], scale_k],  dim=-1)
+                v_s = torch.cat([all_inputs[i + self.num_layers_3], scale_v],  dim=-3)
+
+                # Save updated caches (4 types: key, value, k_scale, v_scale)
+                self.save_key[i]     = k
+                self.save_value[i]   = v
+                self.save_k_scale[i] = k_s
+                self.save_v_scale[i] = v_s
+
+                # Upcast scale if stored as FP16
+                if USE_FLOAT16_SCALE_BIAS:
+                    k_s = k_s.float()
+                    v_s = v_s.float()
+
+                # Fused rotary-dequant attention for keys (per-group, symmetric):
+                #   dequant(K_q) = (K_q - 8) * scale
+                #   attn = sum_g [ (R(Q)_g @ K_q_g - 8 * R(Q)_g_sum) * k_s_g ] + mask
+                if self.kv_rotary_q4_cuda:
+                    k = self.quantizer.unpack_cuda(k, -2, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
+                    v = self.quantizer.unpack_cuda(v, -1, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
+                k_unpacked = self.quantizer.unpack_q4_k(k, batch_size).float()
+                q_rot      = self.quantizer.rotate_q(q, batch_size)
+                q_rot_g    = q_rot.view(batch_size, self.num_key_value_heads, self.num_key_value_groups, -1, self.quantizer.q4_num_groups, self.quantizer.q4_group_size)
+                q_rot_g    = q_rot_g.transpose(-2, -3)          # (B, KVH, G, ng, Qlen, gs)
+                k_q_g      = k_unpacked.view(batch_size, self.num_key_value_heads, 1, self.quantizer.q4_num_groups, self.quantizer.q4_group_size, -1)
+                attn_raw_g = torch.matmul(q_rot_g, k_q_g)       # (B, KVH, G, ng, Qlen, S)
+                q_sum_g    = q_rot_g.sum(dim=-1, keepdim=True)  # (B, KVH, G, ng, Qlen, 1)
+                # Symmetric: bias = -8 * scale, fused into: (raw - 8*sum) * scale
+                attn       = ((attn_raw_g - 8.0 * q_sum_g) * k_s).sum(dim=-3) + attention_mask
+                attn       = torch.softmax(attn, dim=-1)
+
+                # Value dequant with post-matmul inverse rotation (symmetric):
+                #   dequant(V_q) = (V_q - 8) * scale
+                v_unpacked = self.quantizer.unpack_q4_v(v, batch_size).float()
+                v_q_g   = v_unpacked.view(batch_size, self.num_key_value_heads, 1, -1, self.quantizer.q4_num_groups, self.quantizer.q4_group_size)
+                v_dequant = ((v_q_g - 8.0) * v_s).reshape(batch_size, self.num_key_value_heads, 1, -1, self.head_dim)
+                attn      = torch.matmul(attn, v_dequant)
+                attn      = self.quantizer.inverse_rotate_attn(attn, batch_size)
+
+            elif self.kv_rotary:
+                # ── ROTARY_Q8: Rotary-quantized KV cache ────────────
+                # Rotate + quantize current K/V, concatenate with cache
+                packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.kv_pack_quarter)
+                k   = torch.cat([all_inputs[i],                     packed_k], dim=-1)
+                v   = torch.cat([all_inputs[i + self.num_layers],   packed_v], dim=-2)
+                k_s = torch.cat([all_inputs[i + self.num_layers_2], scale_k],  dim=-1)
+                k_b = torch.cat([all_inputs[i + self.num_layers_3], bias_k],   dim=-1)
+                v_s = torch.cat([all_inputs[i + self.num_layers_4], scale_v],  dim=-2)
+                v_b = torch.cat([all_inputs[i + self.num_layers_5], bias_v],  dim=-2)
+
+                # Save updated caches
+                self.save_key[i]     = k
+                self.save_value[i]   = v
+                self.save_k_scale[i] = k_s
+                self.save_k_bias[i]  = k_b
+                self.save_v_scale[i] = v_s
+                self.save_v_bias[i]  = v_b
+
+                # Upcast scale/bias if stored as FP16
+                if USE_FLOAT16_SCALE_BIAS:
+                    k_s = k_s.float()
+                    k_b = k_b.float()
+                    v_s = v_s.float()
+                    v_b = v_b.float()
+
+                # Fused rotary-dequant attention for keys:
+                #   Q @ R^{-1}(K_deq) = R(Q) @ K_q * k_scale + (Q · c_vec) * k_bias + mask
+                if self.kv_rotary_q8_cuda:
+                    k = self.quantizer.unpack_cuda(k, -2, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
+                    v = self.quantizer.unpack_cuda(v, -1, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
+                q_rot         = self.quantizer.rotate_q(q, batch_size)
+                attn_raw      = torch.matmul(q_rot, k.float())
+                q_bias_factor = (q * self.quantizer.c_vec).sum(dim=-1, keepdim=True)
+                attn_bias     = q_bias_factor * k_b + attention_mask
+                attn          = torch.addcmul(attn_bias, attn_raw, k_s)
+                attn          = torch.softmax(attn, dim=-1)
+
+                # Value dequant with post-matmul inverse rotation:
+                #   attn @ (v_b·c + R^{-1}(v)·v_s)
+                #   = (attn @ v_b)·c + R^{-1}(attn @ (v·v_s))
+                #   Saves O(S·D) inverse_rotate → O(G·D) on small output
+                v_scaled  = v.float() * v_s
+                bias_term = torch.matmul(attn, v_b) * self.quantizer.c_vec
+                attn      = self.quantizer.inverse_rotate_attn(torch.matmul(attn, v_scaled), batch_size) + bias_term
+
+            elif self.kv_quantized:
                 # Quantize current K/V and concatenate with cached values
                 packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(k, v, batch_size, self.num_key_value_heads, self.head_dim_quarter)
                 k   = torch.cat([all_inputs[i],                     packed_k], dim=-1)
@@ -541,8 +827,8 @@ class LLM_MAIN(torch.nn.Module):
 
                 # Unpack int32-packed Q8 for CUDA path
                 if self.kv_q8_cuda:
-                    k = self.quantizer.unpack_q8_cuda(k, -2, batch_size, self.num_key_value_heads, self.head_dim)
-                    v = self.quantizer.unpack_q8_cuda(v, -1, batch_size, self.num_key_value_heads, self.head_dim)
+                    k = self.quantizer.unpack_cuda(k, -2, batch_size, self.num_key_value_heads, self.head_dim)
+                    v = self.quantizer.unpack_cuda(v, -1, batch_size, self.num_key_value_heads, self.head_dim)
 
                 # Dequantized attention: attn = softmax((Q @ K) * k_scale + Q_sum * k_bias + mask) @ (V * v_scale + v_bias)
                 attn_raw  = torch.matmul(q, k.float())
@@ -583,7 +869,9 @@ class LLM_MAIN(torch.nn.Module):
         hidden_states = self._rms_norm(hidden_states[:, -1])
         logits        = self.llm.lm_head(hidden_states)
 
-        if self.kv_quantized:
+        if self.kv_rotary_q4:
+            return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_v_scale, logits
+        elif self.kv_any_quantized:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_k_bias, *self.save_v_scale, *self.save_v_bias, logits
         return *self.save_key, *self.save_value, logits
 
@@ -626,6 +914,18 @@ if DO_EXPORT:
                 ('value_scale', 3), ('value_bias', 3)
             ])
             kv_dtype = torch.int32 if KV_QUANT_DTYPE == "Q8_CUDA" else torch.uint8
+        elif KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA"):
+            kv_specs.extend([
+                ('key_scale', 5),
+                ('value_scale', 3)
+            ])
+            kv_dtype = torch.int32 if KV_QUANT_DTYPE == "ROTARY_Q4_CUDA" else torch.uint8
+        elif KV_QUANT_DTYPE in ("ROTARY_Q8", "ROTARY_Q8_CUDA"):
+            kv_specs.extend([
+                ('key_scale', 4), ('key_bias', 4),
+                ('value_scale', 3), ('value_bias', 3)
+            ])
+            kv_dtype = torch.int32 if KV_QUANT_DTYPE == "ROTARY_Q8_CUDA" else torch.uint8
         else:
             kv_dtype = torch.float32
 
@@ -633,6 +933,15 @@ if DO_EXPORT:
         if KV_QUANT_DTYPE == "Q8_CUDA":
             k_head = head_dim // 4
             v_head = head_dim // 4
+        elif KV_QUANT_DTYPE == "ROTARY_Q8_CUDA":
+            k_head = head_dim // 4
+            v_head = head_dim // 4
+        elif KV_QUANT_DTYPE == "ROTARY_Q4":
+            k_head = head_dim // 2
+            v_head = head_dim // 2
+        elif KV_QUANT_DTYPE == "ROTARY_Q4_CUDA":
+            k_head = head_dim // 8
+            v_head = head_dim // 8
         else:
             k_head = head_dim
             v_head = head_dim
@@ -641,13 +950,24 @@ if DO_EXPORT:
             'key':   torch.zeros((batch_size, num_kv_heads, 1, k_head, history_len), dtype=kv_dtype),
             'value': torch.zeros((batch_size, num_kv_heads, 1, history_len, v_head), dtype=kv_dtype)
         }
-        if KV_QUANT_DTYPE in ("Q8", "Q8_CUDA"):
-            kv_tensors.update({
-                'key_scale':   torch.ones((batch_size, num_kv_heads, 1, 1, history_len), dtype=scale_dtype),
-                'key_bias':    torch.ones((batch_size, num_kv_heads, 1, 1, history_len), dtype=scale_dtype),
-                'value_scale': torch.ones((batch_size, num_kv_heads, 1, history_len, 1), dtype=scale_dtype),
-                'value_bias':  torch.ones((batch_size, num_kv_heads, 1, history_len, 1), dtype=scale_dtype)
-            })
+        if KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA"):
+            if KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA"):
+                q4_num_groups = head_dim // Q4_GROUP_SIZE
+                scale_k_dim3  = q4_num_groups
+                scale_v_dim4  = q4_num_groups
+                kv_tensors.update({
+                    'key_scale':   torch.ones((batch_size, num_kv_heads, 1, scale_k_dim3, 1, history_len), dtype=scale_dtype),
+                    'value_scale': torch.ones((batch_size, num_kv_heads, 1, history_len, scale_v_dim4, 1), dtype=scale_dtype),
+                })
+            else:
+                scale_k_dim3  = 1
+                scale_v_dim4  = 1
+                kv_tensors.update({
+                    'key_scale':   torch.ones((batch_size, num_kv_heads, 1, scale_k_dim3, history_len), dtype=scale_dtype),
+                    'key_bias':    torch.ones((batch_size, num_kv_heads, 1, scale_k_dim3, history_len), dtype=scale_dtype),
+                    'value_scale': torch.ones((batch_size, num_kv_heads, 1, history_len, scale_v_dim4), dtype=scale_dtype),
+                    'value_bias':  torch.ones((batch_size, num_kv_heads, 1, history_len, scale_v_dim4), dtype=scale_dtype)
+                })
 
         # ══════════════════════════════════════════════════════════════════
         # Helper: Build KV I/O names, tensors, and dynamic axes
@@ -1120,12 +1440,34 @@ vocab_size        = ort_session_Main._outputs_meta[num_keys_values_Main].shape[1
 
 if 'uint8' in kv_dtype_str or 'int32' in kv_dtype_str:
     kv_dtype_Main   = np.int32 if 'int32' in kv_dtype_str else np.uint8
-    num_layers_Main = num_keys_values_Main // 6
-    scale_dtype     = np.float16 if 'float16' in in_meta_Main[num_layers_Main * 2].type else np.float32
-    k_scales        = create_ort_with_shape((1, in_meta_Main[0].shape[1],               1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    k_biases        = create_ort_with_shape((1, in_meta_Main[0].shape[1],               1, 1, 0), scale_dtype, kv_device, DEVICE_ID)
-    v_scales        = create_ort_with_shape((1, in_meta_Main[num_layers_Main].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
-    v_biases        = create_ort_with_shape((1, in_meta_Main[num_layers_Main].shape[1], 1, 0, 1), scale_dtype, kv_device, DEVICE_ID)
+    if KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA"):
+        # ROTARY_Q4: 4 tensor types (key, value, k_scale, v_scale) — no bias
+        num_layers_Main = num_keys_values_Main // 4
+        scale_dtype     = np.float16 if 'float16' in in_meta_Main[num_layers_Main * 2].type else np.float32
+        k_scale_shape   = list(in_meta_Main[num_layers_Main * 2].shape)
+        k_scale_shape[0] = 1
+        k_scale_shape[-1] = 0
+        v_scale_shape   = list(in_meta_Main[num_layers_Main * 3].shape)
+        v_scale_shape[0] = 1
+        v_scale_shape[3] = 0
+        k_scales        = create_ort_with_shape(tuple(k_scale_shape), scale_dtype, kv_device, DEVICE_ID)
+        k_biases        = None
+        v_scales        = create_ort_with_shape(tuple(v_scale_shape), scale_dtype, kv_device, DEVICE_ID)
+        v_biases        = None
+    else:
+        # Q8/ROTARY_Q8: 6 tensor types (key, value, k_scale, k_bias, v_scale, v_bias)
+        num_layers_Main = num_keys_values_Main // 6
+        scale_dtype     = np.float16 if 'float16' in in_meta_Main[num_layers_Main * 2].type else np.float32
+        k_scale_shape   = list(in_meta_Main[num_layers_Main * 2].shape)
+        k_scale_shape[0] = 1
+        k_scale_shape[-1] = 0
+        v_scale_shape   = list(in_meta_Main[num_layers_Main * 4].shape)
+        v_scale_shape[0] = 1
+        v_scale_shape[3] = 0
+        k_scales        = create_ort_with_shape(tuple(k_scale_shape), scale_dtype, kv_device, DEVICE_ID)
+        k_biases        = create_ort_with_shape(tuple(k_scale_shape), scale_dtype, kv_device, DEVICE_ID)
+        v_scales        = create_ort_with_shape(tuple(v_scale_shape), scale_dtype, kv_device, DEVICE_ID)
+        v_biases        = create_ort_with_shape(tuple(v_scale_shape), scale_dtype, kv_device, DEVICE_ID)
 else:
     kv_dtype_Main   = np.float16 if 'float16' in kv_dtype_str else np.float32
     num_layers_Main = num_keys_values_Main // 2
@@ -1292,10 +1634,18 @@ for _ in range(num_layers_Main):
     binding_Main.bind_ortvalue_input(in_name_Main[i], past_values_Main)
     i += 1
 if k_scales is not None:
-    for j in (k_scales, k_biases, v_scales, v_biases):
-        for _ in range(num_layers_Main):
-            binding_Main.bind_ortvalue_input(in_name_Main[i], j)
-            i += 1
+    if k_biases is not None:
+        # Q8/ROTARY_Q8: bind k_scale, k_bias, v_scale, v_bias
+        for j in (k_scales, k_biases, v_scales, v_biases):
+            for _ in range(num_layers_Main):
+                binding_Main.bind_ortvalue_input(in_name_Main[i], j)
+                i += 1
+    else:
+        # ROTARY_Q4: bind k_scale, v_scale only (no bias)
+        for j in (k_scales, v_scales):
+            for _ in range(num_layers_Main):
+                binding_Main.bind_ortvalue_input(in_name_Main[i], j)
+                i += 1
 
 # --- Step 6: Bind Main model outputs ---
 bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
