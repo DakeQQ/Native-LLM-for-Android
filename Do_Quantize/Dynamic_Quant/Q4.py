@@ -30,7 +30,7 @@ from onnxruntime.quantization import (
 # File Paths
 ORIGINAL_FOLDER_PATH = r"/home/DakeQQ/Downloads/Qwen_ONNX"
 QUANTED_FOLDER_PATH = r"/home/DakeQQ/Downloads/Qwen_Optimized"
-DOWNLOAD_PATH = r"/home/iamj/Downloads/Qwen3-VL-2B-Instruct"
+DOWNLOAD_PATH = r"/home/DakeQQ/Downloads/Qwen3-VL-2B-Instruct"
 
 # Model List
 MODEL_NAMES = [
