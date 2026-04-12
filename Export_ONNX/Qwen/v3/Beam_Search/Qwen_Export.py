@@ -33,11 +33,11 @@ MAX_SEQ_LEN              = 4096                    # Max context length. Can not
 
 # KV cache quantization
 KV_QUANT_DTYPE           = "F16"                   # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
-KV_QUANT_GROUP_SIZE      = 16                      # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Smaller = more accurate. Must divide head_dim evenly.
+KV_QUANT_GROUP_SIZE      = 32                      # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Smaller = more accurate. Must divide head_dim evenly.
 USE_HADAMARD             = True                    # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes (enables per-group Q8 quantization).
-HADAMARD_RANDOM_SEED     = 42                      # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
+HADAMARD_RANDOM_SEED     = 9527                    # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
 USE_CLIP                 = True                    # Clip outliers to mean ± CLIP_SIGMA*std before quantization. Works for Q4 and Q8 modes. For Q8 without hadamard/shuffle, clips per-head; with grouping, clips per-group.
-CLIP_SIGMA               = 3.0                     # Clip threshold in standard deviations. Lower = more aggressive clipping. 2.0-3.0 recommended. Only used when USE_CLIP=True.
+CLIP_SIGMA               = 3.0                     # Clip threshold in standard deviations. Lower = more aggressive clipping. 2.5-3.5 recommended. Only used when USE_CLIP=True.
 USE_SHUFFLE              = True                    # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes (enables per-group Q8 quantization).
 USE_SYM                  = False                   # True = Less RAM Bandwidth. True: symmetric quantization (no bias, absmax-based); False: asymmetric (min-max with bias). Works for all quantized KV modes.
 USE_FLOAT16_SCALE_BIAS   = True                    # Whether to use float16 for scale and bias in all quantized KV modes (Q4, Q8, and ROTARY variants).
@@ -57,6 +57,60 @@ ORT_Accelerate_Providers = []                      # ORT execution providers; ['
 MAX_THREADS              = 0                       # 0 = auto
 DEVICE_ID                = 0                       # Device ID for GPU
 OPSET                    = 17                      # ONNX opset version
+
+
+SUPPORTED_KV_QUANT_DTYPES = (
+    "ROTARY_Q4", "ROTARY_Q4_CUDA", "Q8", "Q8_CUDA",
+    "ROTARY_Q8", "ROTARY_Q8_CUDA", "F16", "F32"
+)
+
+
+def normalize_kv_quant_settings(head_dim):
+    """Validate and normalize KV quant settings once head_dim is known."""
+    global KV_QUANT_GROUP_SIZE
+
+    if KV_QUANT_DTYPE not in SUPPORTED_KV_QUANT_DTYPES:
+        raise ValueError(f"Unsupported KV_QUANT_DTYPE: {KV_QUANT_DTYPE}")
+
+    quantized_kv = {"Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA"}
+    rotary_kv = {"ROTARY_Q4", "ROTARY_Q4_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA"}
+    q8_kv = {"Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA"}
+    notes = []
+
+    if KV_QUANT_DTYPE in rotary_kv and head_dim % 2 != 0:
+        raise ValueError(f"{KV_QUANT_DTYPE} requires an even head_dim, got {head_dim}.")
+    if KV_QUANT_DTYPE in {"Q8_CUDA", "ROTARY_Q8_CUDA"} and head_dim % 4 != 0:
+        raise ValueError(f"{KV_QUANT_DTYPE} requires head_dim divisible by 4, got {head_dim}.")
+    if KV_QUANT_DTYPE == "ROTARY_Q4_CUDA" and head_dim % 8 != 0:
+        raise ValueError(f"{KV_QUANT_DTYPE} requires head_dim divisible by 8, got {head_dim}.")
+
+    if KV_QUANT_DTYPE in quantized_kv:
+        if KV_QUANT_GROUP_SIZE <= 0:
+            raise ValueError(f"KV_QUANT_GROUP_SIZE must be positive, got {KV_QUANT_GROUP_SIZE}.")
+        if KV_QUANT_GROUP_SIZE > head_dim:
+            notes.append(
+                f"[Warning] KV_QUANT_GROUP_SIZE ({KV_QUANT_GROUP_SIZE}) > head_dim ({head_dim}); clamping to head_dim."
+            )
+            KV_QUANT_GROUP_SIZE = head_dim
+        elif KV_QUANT_GROUP_SIZE < head_dim and head_dim % KV_QUANT_GROUP_SIZE != 0:
+            original = KV_QUANT_GROUP_SIZE
+            KV_QUANT_GROUP_SIZE = max(g for g in range(1, KV_QUANT_GROUP_SIZE + 1) if head_dim % g == 0)
+            notes.append(
+                f"[Warning] KV_QUANT_GROUP_SIZE ({original}) does not evenly divide head_dim ({head_dim}); falling back to {KV_QUANT_GROUP_SIZE}."
+            )
+        elif KV_QUANT_GROUP_SIZE == head_dim:
+            notes.append(
+                f"[Info] KV_QUANT_GROUP_SIZE ({KV_QUANT_GROUP_SIZE}) == head_dim ({head_dim}); Q8 grouping collapses to per-head quantization."
+            )
+
+        if KV_QUANT_DTYPE in q8_kv and KV_QUANT_GROUP_SIZE == head_dim and (USE_HADAMARD or USE_SHUFFLE):
+            notes.append(
+                "[Info] USE_HADAMARD and USE_SHUFFLE do not change Q8 accuracy when grouping collapses to one full-head block."
+            )
+    elif any((USE_HADAMARD, USE_CLIP, USE_SHUFFLE, USE_SYM, USE_FLOAT16_SCALE_BIAS)):
+        notes.append("[Info] Quant-only KV flags are ignored when KV_QUANT_DTYPE is F16 or F32.")
+
+    return notes
 
 
 class GREEDY_SEARCH(torch.nn.Module):
@@ -1384,18 +1438,8 @@ if DO_EXPORT:
         hidden_size  = model.model.embed_tokens.embedding_dim
         scale_dtype  = torch.float16 if USE_FLOAT16_SCALE_BIAS else torch.float32
 
-        if KV_QUANT_GROUP_SIZE > head_dim:
-            print(f"\n[Warning] KV_QUANT_GROUP_SIZE ({KV_QUANT_GROUP_SIZE}) > head_dim ({head_dim}), clamping to head_dim.")
-            print(f"[警告] KV_QUANT_GROUP_SIZE ({KV_QUANT_GROUP_SIZE}) 大于 head_dim ({head_dim})，已自动调整为 head_dim。\n")
-            KV_QUANT_GROUP_SIZE = head_dim
-        elif KV_QUANT_GROUP_SIZE < head_dim and head_dim % KV_QUANT_GROUP_SIZE != 0:
-            original = KV_QUANT_GROUP_SIZE
-            KV_QUANT_GROUP_SIZE = max(g for g in range(1, KV_QUANT_GROUP_SIZE + 1) if head_dim % g == 0)
-            print(f"\n[Warning] KV_QUANT_GROUP_SIZE ({original}) does not evenly divide head_dim ({head_dim}), falling back to {KV_QUANT_GROUP_SIZE}.")
-            print(f"[警告] KV_QUANT_GROUP_SIZE ({original}) 无法被 head_dim ({head_dim}) 整除，已自动退化为 {KV_QUANT_GROUP_SIZE}。\n")
-        elif KV_QUANT_GROUP_SIZE == head_dim:
-            print(f"\nKV_QUANT_GROUP_SIZE ({KV_QUANT_GROUP_SIZE}) == head_dim ({head_dim}), using per-head quantization directly.")
-            print(f"[提示] KV_QUANT_GROUP_SIZE ({KV_QUANT_GROUP_SIZE}) == head_dim ({head_dim})，将直接使用 per-head 量化。\n")
+        for note in normalize_kv_quant_settings(head_dim):
+            print(f"\n{note}")
 
         # ══════════════════════════════════════════════════════════════════
         # Build Dummy Tensors for Tracing
