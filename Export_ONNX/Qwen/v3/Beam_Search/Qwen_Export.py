@@ -806,8 +806,8 @@ class ROTARY_MASK_DECODE(torch.nn.Module):
 
     def forward(self, kv_seq_len):
         kv_seq_len_next = kv_seq_len + 1
-        rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len_next].float()
-        rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len_next].float()
+        rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len].float()
         return rotary_cos, rotary_sin, kv_seq_len_next
 
 
