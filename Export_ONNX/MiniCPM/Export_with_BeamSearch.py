@@ -68,7 +68,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
         penality_value = all_inputs[-2]
         beam_size = all_inputs[-1]
         logits = torch.log_softmax(logits, dim=-1)
-        top_beam_prob, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=False, largest=True)
+        top_beam_prob, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=True, largest=True)
         for i in range(self.num_keys_values):
             self.save_keys_values[i] = all_inputs[i].repeat(beam_size, *([1] * (all_inputs[i].dim() - 1)))
         top_beam_indices = top_beam_indices.transpose(0, 1)
@@ -97,9 +97,9 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
         beam_size = all_inputs[-2]
         topK = all_inputs[-1]
         logits = torch.log_softmax(logits * repeat_penality, dim=-1)
-        top_k_prob, top_k_indices = torch.topk(logits, k=topK, dim=-1, largest=True, sorted=False)
+        top_k_prob, top_k_indices = torch.topk(logits, k=topK, dim=-1, largest=True, sorted=True)
         current_prob = (top_k_prob + previous_prob).view(-1)
-        top_beam_prob, top_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=False)
+        top_beam_prob, top_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=True)
         beam_index = top_beam_indices // topK
         top_beam_indices = top_k_indices.view(-1)[top_beam_indices]
         for i in range(self.num_keys_values):
