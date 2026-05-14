@@ -97,7 +97,7 @@ class FIRST_BEAM_SEARCH(torch.nn.Module):
 
         # Compute log-probabilities for the top-k beams
         row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_beam_logits, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=False, largest=True)
+        top_beam_logits, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=True, largest=True)
         top_beam_prob = top_beam_logits - row_logsumexp
 
         # Replicate KV caches across all beams
@@ -135,12 +135,12 @@ class SECOND_BEAM_SEARCH(torch.nn.Module):
 
         # Compute log-probabilities and accumulate with previous scores
         row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_k_logits, top_k_indices = torch.topk(logits, k=top_k, dim=-1, largest=True, sorted=False)
+        top_k_logits, top_k_indices = torch.topk(logits, k=top_k, dim=-1, largest=True, sorted=True)
         top_k_prob    = top_k_logits - row_logsumexp
         current_prob  = (top_k_prob + previous_prob).view(-1)
 
         # Select the top beams from all candidates
-        top_beam_prob, flat_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=False)
+        top_beam_prob, flat_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=True)
         beam_index       = flat_beam_indices // top_k
         top_beam_indices = top_k_indices.view(-1)[flat_beam_indices]
 
