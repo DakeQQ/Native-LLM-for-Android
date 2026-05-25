@@ -12,17 +12,17 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # ══════════════════════════════════════════════════════════════════
 # Configuration
 # ══════════════════════════════════════════════════════════════════
-download_path                  = r'/home/iamj/Downloads/Hy-MT2-1.8B'                       # Set the folder path where the HunYuan-MT-[1.8B, 7B] project was downloaded.
-onnx_model_Embed               = r'/home/iamj/Downloads/Hunyuan_ONNX/LLM_Embed.onnx'       # Output path for the exported ONNX model.
-onnx_model_Main                = r'/home/iamj/Downloads/Hunyuan_ONNX/LLM_Main.onnx'
-onnx_model_Rotary_Text_Prefill = r'/home/iamj/Downloads/Hunyuan_ONNX/Rotary_Text_Prefill.onnx'
-onnx_model_Rotary_Text_Decode  = r'/home/iamj/Downloads/Hunyuan_ONNX/Rotary_Text_Decode.onnx'
-onnx_model_Greedy              = r'/home/iamj/Downloads/Hunyuan_ONNX/Greedy_Search.onnx'
-onnx_model_First_Beam          = r'/home/iamj/Downloads/Hunyuan_ONNX/First_Beam_Search.onnx'
-onnx_model_Second_Beam         = r'/home/iamj/Downloads/Hunyuan_ONNX/Second_Beam_Search.onnx'
-onnx_model_Penalty             = r'/home/iamj/Downloads/Hunyuan_ONNX/Apply_Penalty.onnx'
-onnx_model_Argmax              = r'/home/iamj/Downloads/Hunyuan_ONNX/Argmax.onnx'
-onnx_model_KV_Slice            = r'/home/iamj/Downloads/Hunyuan_ONNX/KV_Slice.onnx'
+download_path                  = r'/home/DakeQQ/Downloads/Hy-MT2-1.8B'                       # Set the folder path where the HunYuan-MT-[1.8B, 7B] project was downloaded.
+onnx_model_Embed               = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/LLM_Embed.onnx'       # Output path for the exported ONNX model.
+onnx_model_Main                = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/LLM_Main.onnx'
+onnx_model_Rotary_Text_Prefill = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Rotary_Text_Prefill.onnx'
+onnx_model_Rotary_Text_Decode  = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Rotary_Text_Decode.onnx'
+onnx_model_Greedy              = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Greedy_Search.onnx'
+onnx_model_First_Beam          = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/First_Beam_Search.onnx'
+onnx_model_Second_Beam         = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Second_Beam_Search.onnx'
+onnx_model_Penalty             = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Apply_Penalty.onnx'
+onnx_model_Argmax              = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Argmax.onnx'
+onnx_model_KV_Slice            = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/KV_Slice.onnx'
 
 
 # Test input
