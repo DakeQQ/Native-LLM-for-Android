@@ -18,6 +18,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **HunYuan**: [MT2-1.8B/7B](https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B)
 
 ## Update
+- 2026/05/25：Update HunYuan-MT-2
 - 2026/01/04：Update HunYuan-MT-1.5
 - 2025/11/11：Update Qwen3-VL.
 - 2025/09/07：Update HunYuan-MT.
@@ -151,6 +152,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **HunYuan**: [MT2-1.8B/7B](https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B)
 
 ## 最近更新
+- 2026/05/25：Update HunYuan-MT-2
 - 2026/01/04：Update HunYuan-MT-1.5
 - 2025/11/11：更新 Qwen3-VL。
 - 2025/09/07：更新 HunYuan-MT。
