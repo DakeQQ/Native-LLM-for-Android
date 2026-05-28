@@ -3,6 +3,7 @@
 ## Overview
 Demonstration of running a native Large Language Model (LLM) on Android devices. Currently supported models include:
 
+- **Qwen3.5**: 0.8B, 2B, 4B...
 - **Qwen3**: 0.6B, 1.7B, 4B...
 - **Qwen3-VL**: 2B, 4B...
 - **Qwen2.5-Instruct**: 0.5B, 1.5B, 3B...
@@ -18,6 +19,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **HunYuan**: [MT2-1.8B/7B](https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B)
 
 ## Update
+- 2026/05/28：Update Qwen3.5-Dense
 - 2026/05/25：Update HunYuan-MT-2
 - 2026/01/04：Update HunYuan-MT-1.5
 - 2025/11/11：Update Qwen3-VL.
@@ -137,6 +139,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 
 展示在 Android 设备上运行原生大型语言模型 (LLM) 的示范。目前支持的模型包括：
 
+- **Qwen3.5**: 0.8B, 2B, 4B...
 - **Qwen3**: 0.6B, 1.7B, 4B...
 - **Qwen3-VL**: 2B, 4B...
 - **Qwen2.5-Instruct**: 0.5B, 1.5B, 3B...
@@ -152,8 +155,9 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **HunYuan**: [MT2-1.8B/7B](https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B)
 
 ## 最近更新
-- 2026/05/25：Update HunYuan-MT-2
-- 2026/01/04：Update HunYuan-MT-1.5
+- 2026/05/28：更新 Qwen3.5-Dense
+- 2026/05/25：更新 HunYuan-MT-2
+- 2026/01/04：更新 HunYuan-MT-1.5
 - 2025/11/11：更新 Qwen3-VL。
 - 2025/09/07：更新 HunYuan-MT。
 - 2025/08/02：更新 Seed-X。
