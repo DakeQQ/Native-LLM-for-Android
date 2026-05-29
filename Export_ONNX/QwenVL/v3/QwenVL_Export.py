@@ -1093,6 +1093,9 @@ class LLM_MAIN(torch.nn.Module):
             use_shuffle=USE_SHUFFLE,
         ).eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
+        rms_norm_eps = llm.config.text_config.rms_norm_eps
+        self.rms_eps_hidden = torch.tensor([rms_norm_eps * hidden_size], dtype=torch.float32)
+        self.rms_eps_head = torch.tensor([rms_norm_eps * head_dim], dtype=torch.float32)
 
         # ── Per-layer output buffers ─────────────────────────────────────
         self.save_key   = [None] * num_layers
@@ -1201,11 +1204,11 @@ class LLM_MAIN(torch.nn.Module):
             else:
                 LLM_MAIN._replace_gelu_with_tanh_approximation(child)
 
-    def _rms_norm(self, x):
+    def _rms_norm(self, x, eps):
         """Apply modified RMS normalization (with optional overflow scaling)."""
         if PREVENT_F16_OVERFLOW:
             x = x * self.overflow_scale
-        return x * torch.rsqrt(x.square().sum(-1, keepdim=True))  # Note, not the .mean()
+        return x * torch.rsqrt(x.square().sum(-1, keepdim=True) + eps)  # Note, not the .mean()
 
     def _rotate_half(self, x, batch_size):
         """Rotate the last dimension by swapping and negating halves (for RoPE).
@@ -1227,7 +1230,7 @@ class LLM_MAIN(torch.nn.Module):
 
             # ── Self-Attention ───────────────────────────────────────
             residual      = hidden_states
-            hidden_states = self._rms_norm(hidden_states)
+            hidden_states = self._rms_norm(hidden_states, self.rms_eps_hidden)
 
             # Fused QKV projection & reshape
             qkv   = layer.self_attn.qkv(hidden_states)
@@ -1235,7 +1238,7 @@ class LLM_MAIN(torch.nn.Module):
             qk, v = torch.split(qkv, [self.qk_heads, self.num_key_value_heads], dim=-2)
 
             # QK normalization & rotary embedding
-            qk     = self._rms_norm(qk) * layer.self_attn.qk_norm_weight
+            qk     = self._rms_norm(qk, self.rms_eps_head) * layer.self_attn.qk_norm_weight
             qk_rot = qk * rotary_pos_emb_cos + self._rotate_half(qk, batch_size) * rotary_pos_emb_sin
 
             # Split into query and key, reshape query for GQA
@@ -1598,7 +1601,7 @@ class LLM_MAIN(torch.nn.Module):
 
             # ── Feed-Forward Network ─────────────────────────────────
             residual      = hidden_states
-            hidden_states = self._rms_norm(hidden_states)
+            hidden_states = self._rms_norm(hidden_states, self.rms_eps_hidden)
 
             gate_up       = layer.mlp.gate_up_proj(hidden_states)
             gate, up      = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
@@ -1609,7 +1612,7 @@ class LLM_MAIN(torch.nn.Module):
                 hidden_states = all_inputs[i - self._ds_offset] + hidden_states
 
         # ── Final Projection ─────────────────────────────────────────
-        hidden_states = self._rms_norm(hidden_states[:, -1])
+        hidden_states = self._rms_norm(hidden_states[:, -1], self.rms_eps_hidden)
         logits        = self.llm.lm_head(hidden_states)
 
         if self.kv_sym:
