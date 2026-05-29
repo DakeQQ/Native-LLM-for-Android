@@ -6,13 +6,12 @@ import torch
 import torch.nn.functional as F
 from onnxruntime.capi import _pybind_state as C
 from transformers import AutoModelForCausalLM, AutoTokenizer
-# transformers-4.57.6
 
 
 # ══════════════════════════════════════════════════════════════════
 # Configuration
 # ══════════════════════════════════════════════════════════════════
-download_path                  = r'/home/DakeQQ/Downloads/Hy-MT2-1.8B'                       # Set the folder path where the HunYuan-MT-[1.8B, 7B] project was downloaded.
+download_path                  = r'/home/DakeQQ/Downloads/Hy-MT2-1.8B'                       # Set the folder path where the HunYuan-MT2-[1.8B, 7B] project was downloaded.
 onnx_model_Embed               = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/LLM_Embed.onnx'       # Output path for the exported ONNX model.
 onnx_model_Main                = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/LLM_Main.onnx'
 onnx_model_Rotary_Text_Prefill = r'/home/DakeQQ/Downloads/Hunyuan_ONNX/Rotary_Text_Prefill.onnx'
@@ -967,6 +966,12 @@ class LLM_MAIN(torch.nn.Module):
             use_shuffle=USE_SHUFFLE,
         ).eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
+        hidden_rms_norm = self.llm.model.layers[0].input_layernorm
+        qk_rms_norm = self.llm.model.layers[0].self_attn.query_layernorm
+        hidden_rms_norm_eps = float(getattr(hidden_rms_norm, "variance_epsilon", getattr(hidden_rms_norm, "eps", 1e-6)))
+        qk_rms_norm_eps = float(getattr(qk_rms_norm, "variance_epsilon", getattr(qk_rms_norm, "eps", hidden_rms_norm_eps)))
+        self.register_buffer("hidden_rms_norm_eps", torch.tensor(hidden_size * hidden_rms_norm_eps, dtype=torch.float32))
+        self.register_buffer("qk_rms_norm_eps", torch.tensor(self.head_dim * qk_rms_norm_eps, dtype=torch.float32))
 
         # ── Per-layer output buffers ─────────────────────────────────────
         self.save_key = [None] * num_layers
@@ -1072,11 +1077,11 @@ class LLM_MAIN(torch.nn.Module):
             else:
                 LLM_MAIN._replace_gelu_with_tanh_approximation(child)
 
-    def _rms_norm(self, x):
+    def _rms_norm(self, x, eps):
         """Apply modified RMS normalization (with optional overflow scaling)."""
         if PREVENT_F16_OVERFLOW:
             x = x * self.overflow_scale
-        return x * torch.rsqrt(x.square().sum(-1, keepdim=True))  # Note, not the .mean()
+        return x * torch.rsqrt(x.square().sum(-1, keepdim=True) + eps)  # Note, not the .mean()
 
     def _rotate_half(self, x, batch_size):
         """Rotate the last dimension by swapping and negating halves (for RoPE).
@@ -1095,7 +1100,7 @@ class LLM_MAIN(torch.nn.Module):
         for i, layer in enumerate(self.llm.model.layers):
             # ── Self-Attention ───────────────────────────────────────
             residual = hidden_states
-            hidden_states = self._rms_norm(hidden_states)
+            hidden_states = self._rms_norm(hidden_states, self.hidden_rms_norm_eps)
 
             # Fused QKV projection & reshape.
             qkv = layer.self_attn.qkv(hidden_states)
@@ -1104,7 +1109,7 @@ class LLM_MAIN(torch.nn.Module):
 
             # QK normalization & rotary embedding.
             qk = qk * rotary_pos_emb_cos + self._rotate_half(qk, batch_size) * rotary_pos_emb_sin
-            qk = self._rms_norm(qk) * layer.self_attn.qk_norm_weight
+            qk = self._rms_norm(qk, self.qk_rms_norm_eps) * layer.self_attn.qk_norm_weight
 
             # Split into query and key, reshape query for GQA.
             q, k = torch.split(qk, self.qk_split_sizes, dim=-2)
@@ -1462,14 +1467,14 @@ class LLM_MAIN(torch.nn.Module):
 
             # ── Feed-Forward Network ─────────────────────────────────
             residual = hidden_states
-            hidden_states = self._rms_norm(hidden_states)
+            hidden_states = self._rms_norm(hidden_states, self.hidden_rms_norm_eps)
 
             gate_up = layer.mlp.gate_up_proj(hidden_states)
             gate, up = torch.split(gate_up, self.mlp_split, dim=-1)
             hidden_states = residual + layer.mlp.down_proj(layer.mlp.act_fn(gate) * up)
 
         # ── Final Projection ─────────────────────────────────────────
-        hidden_states = self._rms_norm(hidden_states[:, -1])
+        hidden_states = self._rms_norm(hidden_states[:, -1], self.hidden_rms_norm_eps)
         logits = self.llm.lm_head(hidden_states)
 
         if self.kv_sym:
@@ -2402,3 +2407,4 @@ else:
         f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
         f"{'─' * 56}\n"
     )
+    
