@@ -1472,10 +1472,6 @@ class LLM_MAIN(torch.nn.Module):
         if self.linear_key_head_dim != self.linear_value_head_dim:
             raise ValueError("LLM_MAIN reshape-before-split requires matching linear key/value head dims.")
         self.rms_norm_eps = RMS_NORM_EPS
-        self.register_buffer("hidden_rms_norm_eps", torch.tensor([self.hidden_size * self.rms_norm_eps], dtype=torch.float32))
-        self.register_buffer("qk_rms_norm_eps", torch.tensor([self.head_dim * self.rms_norm_eps], dtype=torch.float32))
-        self.register_buffer("linear_rms_norm_eps", torch.tensor([self.linear_value_head_dim * self.rms_norm_eps], dtype=torch.float32))
-        self.register_buffer("linear_qk_rms_norm_eps", torch.tensor([1e-6], dtype=torch.float32))
         self.register_buffer("linear_gated_delta_query_scale", torch.tensor([float(self.linear_key_head_dim) ** -0.5], dtype=torch.float32))
 
         self.kv_f16 = KV_QUANT_DTYPE == "F16"
@@ -1552,6 +1548,19 @@ class LLM_MAIN(torch.nn.Module):
             use_shuffle=USE_SHUFFLE,
         ).eval()
         self.register_buffer("overflow_scale", torch.tensor([0.01], dtype=torch.float32))
+        hidden_rms_norm_eps = self.hidden_size * self.rms_norm_eps
+        qk_rms_norm_eps = self.head_dim * self.rms_norm_eps
+        linear_rms_norm_eps = self.linear_value_head_dim * self.rms_norm_eps
+        linear_qk_rms_norm_eps = 1e-6
+        if PREVENT_F16_OVERFLOW:
+            hidden_rms_norm_eps *= self.overflow_scale.square()
+            qk_rms_norm_eps *= self.overflow_scale.square()
+            linear_rms_norm_eps *= self.overflow_scale.square()
+            linear_qk_rms_norm_eps *= self.overflow_scale.square()
+        self.register_buffer("hidden_rms_norm_eps", torch.tensor([hidden_rms_norm_eps], dtype=torch.float32))
+        self.register_buffer("qk_rms_norm_eps", torch.tensor([qk_rms_norm_eps], dtype=torch.float32))
+        self.register_buffer("linear_rms_norm_eps", torch.tensor([linear_rms_norm_eps], dtype=torch.float32))
+        self.register_buffer("linear_qk_rms_norm_eps", torch.tensor([linear_qk_rms_norm_eps], dtype=torch.float32))
         self.lm_head_weight = None
 
         replace_gelu_with_tanh_approximation(self.llm.model.language_model)

@@ -738,7 +738,10 @@ class LLM_MAIN(torch.nn.Module):
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         hidden_rms_norm = self.llm.model.layers[0].input_layernorm
         hidden_rms_norm_eps = float(getattr(hidden_rms_norm, 'variance_epsilon', getattr(hidden_rms_norm, 'eps', 1e-6)))
-        self.register_buffer('hidden_rms_norm_eps', torch.tensor(self.llm.config.hidden_size * hidden_rms_norm_eps, dtype=torch.float32))
+        hidden_rms_norm_eps = self.llm.config.hidden_size * hidden_rms_norm_eps
+        if PREVENT_F16_OVERFLOW:
+            hidden_rms_norm_eps *= self.overflow_scale.square()
+        self.register_buffer('hidden_rms_norm_eps', torch.tensor([hidden_rms_norm_eps], dtype=torch.float32))
 
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers

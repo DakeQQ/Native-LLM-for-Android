@@ -670,7 +670,6 @@ class LLM_MAIN(torch.nn.Module):
         super().__init__()
         self.llm = llm
         self.hidden_size_sqrt = self.llm.config.hidden_size ** 0.5
-        self.register_buffer('hidden_rms_norm_eps', torch.tensor(self.llm.config.hidden_size * self.llm.config.rms_norm_eps, dtype=torch.float32))
 
         self.head_dim = head_dim
         self.head_dim_half = head_dim // 2
@@ -717,6 +716,10 @@ class LLM_MAIN(torch.nn.Module):
             use_shuffle=USE_SHUFFLE,
         ).eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
+        hidden_rms_norm_eps = self.llm.config.hidden_size * self.llm.config.rms_norm_eps
+        if PREVENT_F16_OVERFLOW:
+            hidden_rms_norm_eps *= self.overflow_scale.square()
+        self.register_buffer('hidden_rms_norm_eps', torch.tensor([hidden_rms_norm_eps], dtype=torch.float32))
 
         self.save_key = [None] * num_layers
         self.save_value = [None] * num_layers

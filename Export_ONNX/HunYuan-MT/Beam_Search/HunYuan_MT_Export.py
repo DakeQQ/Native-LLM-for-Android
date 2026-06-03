@@ -970,8 +970,13 @@ class LLM_MAIN(torch.nn.Module):
         qk_rms_norm = self.llm.model.layers[0].self_attn.query_layernorm
         hidden_rms_norm_eps = float(getattr(hidden_rms_norm, "variance_epsilon", getattr(hidden_rms_norm, "eps", 1e-6)))
         qk_rms_norm_eps = float(getattr(qk_rms_norm, "variance_epsilon", getattr(qk_rms_norm, "eps", hidden_rms_norm_eps)))
-        self.register_buffer("hidden_rms_norm_eps", torch.tensor(hidden_size * hidden_rms_norm_eps, dtype=torch.float32))
-        self.register_buffer("qk_rms_norm_eps", torch.tensor(self.head_dim * qk_rms_norm_eps, dtype=torch.float32))
+        hidden_rms_norm_eps = hidden_size * hidden_rms_norm_eps
+        qk_rms_norm_eps = self.head_dim * qk_rms_norm_eps
+        if PREVENT_F16_OVERFLOW:
+            hidden_rms_norm_eps *= self.overflow_scale.square()
+            qk_rms_norm_eps *= self.overflow_scale.square()
+        self.register_buffer("hidden_rms_norm_eps", torch.tensor([hidden_rms_norm_eps], dtype=torch.float32))
+        self.register_buffer("qk_rms_norm_eps", torch.tensor([qk_rms_norm_eps], dtype=torch.float32))
 
         # ── Per-layer output buffers ─────────────────────────────────────
         self.save_key = [None] * num_layers

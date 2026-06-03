@@ -1094,8 +1094,13 @@ class LLM_MAIN(torch.nn.Module):
         ).eval()
         self.overflow_scale = torch.tensor([0.01], dtype=torch.float32)
         rms_norm_eps = llm.config.text_config.rms_norm_eps
-        self.rms_eps_hidden = torch.tensor([rms_norm_eps * hidden_size], dtype=torch.float32)
-        self.rms_eps_head = torch.tensor([rms_norm_eps * head_dim], dtype=torch.float32)
+        rms_eps_hidden = rms_norm_eps * hidden_size
+        rms_eps_head = rms_norm_eps * head_dim
+        if PREVENT_F16_OVERFLOW:
+            rms_eps_hidden *= self.overflow_scale.square()
+            rms_eps_head *= self.overflow_scale.square()
+        self.rms_eps_hidden = torch.tensor([rms_eps_hidden], dtype=torch.float32)
+        self.rms_eps_head = torch.tensor([rms_eps_head], dtype=torch.float32)
 
         # ── Per-layer output buffers ─────────────────────────────────────
         self.save_key   = [None] * num_layers
