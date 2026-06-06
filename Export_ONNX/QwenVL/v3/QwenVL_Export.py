@@ -89,7 +89,7 @@ ORT_FP16                 = False                                    # Set to Tru
 ORT_Accelerate_Providers = []                                       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS              = 0                                        # 0 = auto
 DEVICE_ID                = 0                                        # Device ID for GPU
-OPSET                    = 17                                       # ONNX opset version
+OPSET                    = 18                                       # ONNX opset version
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3545,7 +3545,7 @@ for INPUT_MODE, current_query in test_modes:
         use_video = True
         print('\nChat with video.')
 
-        # Decode video frames (only Python filesystem I/O allowed here)
+        # Decode video frames using av (libavcodec) with built-in libswscale resize
         import av
         container = av.open(TEST_VIDEO)
         stream = container.streams.video[0]
@@ -3561,7 +3561,6 @@ for INPUT_MODE, current_query in test_modes:
             raise ValueError(f"Video has no decodable frames: {TEST_VIDEO}")
 
         # Sample frames uniformly, then pad to exactly VIDEO_NUM_FRAMES
-        # This ensures the prompt structure matches the exported ROTARY_VIDEO_PREFILL table
         num_sample = min(max(int(total_frames / video_fps_actual * VIDEO_FPS), VIDEO_MIN_FRAMES), VIDEO_MAX_FRAMES, total_frames)
         if num_sample > VIDEO_NUM_FRAMES:
             num_sample = VIDEO_NUM_FRAMES
@@ -3569,45 +3568,69 @@ for INPUT_MODE, current_query in test_modes:
         frame_indices = np.linspace(0, total_frames - 1, num_sample).round().astype(int)
 
         # Pad to exactly VIDEO_NUM_FRAMES (must match export-time frame count for rotary table alignment)
-        if len(frame_indices) < VIDEO_NUM_FRAMES:
-            pad_count = VIDEO_NUM_FRAMES - len(frame_indices)
+        if num_sample < VIDEO_NUM_FRAMES:
+            pad_count = VIDEO_NUM_FRAMES - num_sample
             frame_indices = np.concatenate([frame_indices, np.full(pad_count, frame_indices[-1], dtype=frame_indices.dtype)])
 
-        # Extract frames as numpy array [num_frames, 3, H, W]
-        all_frames = []
+        # Determine output spatial dimensions (apply resize target if static shape)
+        if not DYNAMIC_VIDEO_SHAPE:
+            out_h, out_w = INPUT_VIDEO_SIZE
+        else:
+            out_h, out_w = stream.codec_context.height, stream.codec_context.width
+
+        # Pre-allocate contiguous output buffer [VIDEO_NUM_FRAMES, 3, H, W]
+        video_frames_np = np.empty((VIDEO_NUM_FRAMES, 3, out_h, out_w), dtype=np.uint8)
+
+        # Build sorted unique-index → slot mapping for O(1) decode-time lookup
+        # frame_indices is already sorted (from linspace + pad), deduplicate for decode
+        unique_indices, inverse_map = np.unique(frame_indices, return_inverse=True)
+        last_needed = int(unique_indices[-1])
+
+        # Check if resize is needed during decode
+        need_resize = (stream.codec_context.height != out_h or stream.codec_context.width != out_w)
+
+        # Decode only up to last_needed frame; pointer-based extraction into pre-allocated buffer
         container.seek(0)
-        frame_set = set(frame_indices.tolist())
+        unique_pos = 0  # pointer into unique_indices
         frame_idx = 0
+        temp_decoded = [None] * len(unique_indices)  # temporary refs for unique frames
+
         for frame in container.decode(video=0):
-            if frame_idx in frame_set:
-                img = frame.to_ndarray(format='rgb24')  # [H, W, 3]
-                all_frames.append(np.transpose(img, (2, 0, 1)))  # [3, H, W]
+            if frame_idx == unique_indices[unique_pos]:
+                # Fused resize + format conversion via libswscale in one reformat() call
+                if need_resize:
+                    frame = frame.reformat(width=out_w, height=out_h, format='rgb24')
+                # Extract as [H, W, 3] uint8 directly into numpy — single allocation per unique frame
+                rgb = frame.to_ndarray(format='rgb24')
+                temp_decoded[unique_pos] = rgb
+                unique_pos += 1
+                if unique_pos >= len(unique_indices):
+                    break
             frame_idx += 1
-            if len(all_frames) >= len(frame_indices):
+            if frame_idx > last_needed:
                 break
         container.close()
 
-        # Handle case where not enough frames were decoded
-        while len(all_frames) < len(frame_indices):
-            all_frames.append(all_frames[-1])
+        # Fill any missing unique frames (short video) by repeating last decoded
+        last_valid = None
+        for i in range(len(unique_indices)):
+            if temp_decoded[i] is not None:
+                last_valid = temp_decoded[i]
+            else:
+                temp_decoded[i] = last_valid
 
-        # Stack into contiguous tensor [num_frames, 3, H, W], wrap as OrtValue once
-        video_frames_np = np.stack(all_frames, axis=0).astype(np.uint8)
-
-        # Resize to static INPUT_VIDEO_SIZE when DYNAMIC_VIDEO_SHAPE is disabled
-        if not DYNAMIC_VIDEO_SHAPE:
-            target_h, target_w = INPUT_VIDEO_SIZE
-            if video_frames_np.shape[2] != target_h or video_frames_np.shape[3] != target_w:
-                from PIL import Image as _PILImage
-                resized = np.empty((video_frames_np.shape[0], 3, target_h, target_w), dtype=np.uint8)
-                for i in range(video_frames_np.shape[0]):
-                    img = _PILImage.fromarray(video_frames_np[i].transpose(1, 2, 0))
-                    img = img.resize((target_w, target_h), _PILImage.BILINEAR)
-                    resized[i] = np.array(img).transpose(2, 0, 1)
-                video_frames_np = resized
+        # Scatter unique frames into the pre-allocated [N, 3, H, W] buffer via inverse_map
+        # Use np.transpose once per unique frame, then copy into all slots that reference it
+        for uid in range(len(unique_indices)):
+            chw = np.ascontiguousarray(temp_decoded[uid].transpose(2, 0, 1))  # [3, H, W]
+            # Find all output slots mapping to this unique frame
+            slots = np.where(inverse_map == uid)[0]
+            for s in slots:
+                video_frames_np[s] = chw
+        del temp_decoded, unique_indices, inverse_map
 
         video_frames_ort = onnxruntime.OrtValue.ortvalue_from_numpy(video_frames_np, device_type, DEVICE_ID)
-        del all_frames, video_frames_np
+        del video_frames_np
 
         # Re-build prompt with fixed timestamps (must match export-time rotary table structure)
         video_grid_t_runtime = len(frame_indices) // TEMPORAL_PATCH_SIZE
@@ -3654,18 +3677,25 @@ for INPUT_MODE, current_query in test_modes:
         vision_embed_size = video_grid_t_runtime * video_frame_seqlen_runtime
 
     elif INPUT_MODE == 'image':
-        # Load and preprocess multiple images
-        image_arrays = []
-        for img_path in valid_image_paths:
+        # Load and preprocess images — pre-allocate buffer, avoid per-image list append + stack
+        target_h, target_w = INPUT_IMAGE_SIZE
+        if INPUT_IMAGE_DIM != 4:
+            pixel_values = np.empty((num_test_images, 1, 3, target_h, target_w), dtype=np.float32)
+        else:
+            pixel_values = np.empty((num_test_images, 3, target_h, target_w), dtype=np.float32)
+
+        for i, img_path in enumerate(valid_image_paths):
             image = Image.open(img_path)
-            image = image.resize((INPUT_IMAGE_SIZE[1], INPUT_IMAGE_SIZE[0]))
+            if image.size != (target_w, target_h):
+                image = image.resize((target_w, target_h), Image.BILINEAR)
             if image.mode != 'RGB':
                 image = image.convert('RGB')
-            image_arrays.append(np.transpose(np.array(image).astype(np.float32), (2, 0, 1)))
-        # Stack into [N, 3, H, W]
-        pixel_values = np.stack(image_arrays, axis=0)
-        if INPUT_IMAGE_DIM != 4:
-            pixel_values = np.expand_dims(pixel_values, axis=1)  # [N, 1, 3, H, W]
+            # Write directly into pre-allocated buffer — [3, H, W] in CHW float32
+            chw = np.ascontiguousarray(np.array(image, dtype=np.float32).transpose(2, 0, 1))
+            if INPUT_IMAGE_DIM != 4:
+                pixel_values[i, 0] = chw
+            else:
+                pixel_values[i] = chw
         use_vision = True
         print(f'\nChat with {num_test_images} image(s).')
     else:
