@@ -86,7 +86,7 @@ BEAM_SIZE                = 3                                        # Beam size 
 # Runtime config
 ORT_LOG                  = False                                    # Enable ONNX Runtime logging for debugging. Set to False for best performance.
 ORT_FP16                 = False                                    # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
-ORT_Accelerate_Providers = ["CUDAExecutionProvider"]                                       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+ORT_Accelerate_Providers = []                                       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS              = 0                                        # 0 = auto
 DEVICE_ID                = 0                                        # Device ID for GPU
 OPSET                    = 17                                       # ONNX opset version
