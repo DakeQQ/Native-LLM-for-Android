@@ -33,7 +33,7 @@ onnx_model_KV_Slice             = r'/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.on
 onnx_model_Video_Preprocess     = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Video_Preprocess.onnx'
 
 # Test Input
-TEST_IMAGE               = ["../psyduck.png"]                                   # List of test images for the exported onnx model. Supports multi-image: [r"img1.png", r"img2.png"]
+TEST_IMAGE               = ["../psyduck.png", "../psyduck_2.png"]                                   # List of test images for the exported onnx model. Supports multi-image: [r"img1.png", r"img2.png"]
 TEST_VIDEO               = r"../test_video_8s.mp4"                              # Test video path. Set non-empty to enable video mode.
 TEST_QUERY               = ["Describe this image.", "Describe this video."]     # Test query for the exported onnx model.
 
@@ -48,7 +48,7 @@ HEIGHT_FACTOR            = 20                                       # Adjust thi
 WIDTH_FACTOR             = 20                                       # Adjust this value to determine the resize shape and vision resolution.
 IMAGE_RESIZE             = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]  # 32 = self.patch_size * self.merge_size
 INPUT_IMAGE_SIZE         = [960, 960]                               # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
-VISION_BATCH_SIZE        = 1                                        # Fixed at export time. Number of images in multi-image mode. Set >1 for multi-image support. Each image uses HEIGHT_FACTOR * WIDTH_FACTOR vision tokens.
+VISION_BATCH_SIZE        = 2                                        # Fixed at export time. Number of images in multi-image mode. Set >1 for multi-image support. Each image uses HEIGHT_FACTOR * WIDTH_FACTOR vision tokens.
 DYNAMIC_IMAGE_SHAPE      = False                                    # Allow for a dynamic number of image inputs (1..VISION_BATCH_SIZE). When False, exactly VISION_BATCH_SIZE images required.
 INPUT_IMAGE_DIM          = 5                                        # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
 
@@ -1162,7 +1162,7 @@ class LLM_CONCAT_IMAGE(torch.nn.Module):
 # Vision-Text Concatenation Module (Video — multi-segment)
 # ══════════════════════════════════════════════════════════════════════════════
 class LLM_CONCAT_VIDEO(torch.nn.Module):
-    """Replaces video placeholder spans in text hidden states with vision features.
+    """Replaces fixed exported video placeholder spans with vision features.
 
     For video, vision tokens are interleaved with timestamp text tokens:
       [text_before] [ts1_text] [frame1_vision] [ts2_text] [frame2_vision] ... [text_after]
@@ -1170,76 +1170,73 @@ class LLM_CONCAT_VIDEO(torch.nn.Module):
     This module takes:
       - text_hidden_states: embeddings of all text tokens (including timestamps)
       - vision_hidden_states: all vision features concatenated [total_vision_tokens, hidden]
-            - segment_offsets: [num_segments] int32 tensor — index of the first <|video_pad|>
-                token for each frame segment in the tokenized prompt
 
-    Since all segments have the same frame_seqlen for a single video, we use a fixed
-    frame_seqlen and num_frames approach for static export. The output length matches
-    the tokenized prompt length because each placeholder span is replaced in-place.
+    The tokenized export prompt places all video placeholder spans at deterministic
+    offsets for a fixed video configuration. Baking those offsets and the derived
+    text slice ranges into the module keeps `forward()` close to the simpler
+    Qwen3.5 static-slice concat path while preserving the extra deepstack outputs
+    that QwenVL needs.
     """
 
-    def __init__(self, num_frames, frame_seqlen, hidden_size, deepstack_features_len, max_seq_len):
+    def __init__(self, segment_offsets, frame_seqlen, hidden_size, deepstack_features_len, max_seq_len):
         super().__init__()
-        self.num_frames = num_frames
+        self.segment_offsets = tuple(int(offset) for offset in segment_offsets)
+        self.num_frames = len(self.segment_offsets)
         self.frame_seqlen = frame_seqlen
         self.hidden_size = hidden_size
         self.deepstack_features_len = deepstack_features_len
-        self.total_vision_tokens = num_frames * frame_seqlen
-        self.register_buffer("zeros_pad", torch.zeros([1, max_seq_len, hidden_size], dtype=torch.int8))
+        self.total_vision_tokens = self.num_frames * frame_seqlen
         # Pre-compute constant vision slice indices and range objects
-        self._vis_slices = [(f * frame_seqlen, f * frame_seqlen + frame_seqlen) for f in range(num_frames)]
+        self._vis_slices = [(f * frame_seqlen, f * frame_seqlen + frame_seqlen) for f in range(self.num_frames)]
+        text_cursor = 0
+        self._text_slices = []
+        for offset in self.segment_offsets:
+            self._text_slices.append((text_cursor, offset))
+            text_cursor = offset + self.frame_seqlen
+        self._text_chunk_lens = tuple(text_end - text_start for text_start, text_end in self._text_slices)
+        self._tail_start = text_cursor
+        self.register_buffer("zeros_seq_pad", torch.zeros(1, max_seq_len, hidden_size, dtype=torch.int8))
         self._ds_range = range(deepstack_features_len)
-        self._frame_range = range(num_frames)
+        self._frame_range = range(self.num_frames)
 
     def forward(self, *all_inputs):
-        # Inputs: [ds_feat_0, ..., ds_feat_N-1, text_hidden_states, vision_hidden_states, segment_offsets]
-        text_hidden_states   = all_inputs[self.deepstack_features_len]
+        # Inputs: [ds_feat_0, ..., ds_feat_N-1, text_hidden_states, vision_hidden_states]
+        deepstack_inputs = all_inputs[:self.deepstack_features_len]
+        text_hidden_states = all_inputs[self.deepstack_features_len]
         vision_hidden_states = all_inputs[self.deepstack_features_len + 1]
-        segment_offsets      = all_inputs[self.deepstack_features_len + 2]
+        zero_dtype = text_hidden_states.dtype
+        static_zero_chunks = {
+            text_len: self.zeros_seq_pad[:, :text_len].to(zero_dtype)
+            for text_len in self._text_chunk_lens
+        }
 
         # Replace each [<|video_pad|>] * frame_seqlen span with the matching vision segment.
-        text_len = text_hidden_states.shape[1]
-
-        # Pre-slice zeros_pad to text_len and convert to float once outside the loop
-        zeros_float = self.zeros_pad[:, :text_len].float()
-
-        # Build output by gathering pieces
         pieces = []
         ds_pieces = [[] for _ in self._ds_range]
-        text_cursor = torch.zeros(1, dtype=torch.int32)
 
         for f in self._frame_range:
             # Text tokens before this vision segment
-            offset = segment_offsets[f]
-            text_chunk_len = offset - text_cursor
-            if text_chunk_len > 0:
-                # Cast to int64 for slice indices
-                tc = text_cursor.to(torch.int64)
-                tcl = text_chunk_len.to(torch.int64)
-                pieces.append(text_hidden_states[:, tc:tc + tcl])
-                # Slice once, reuse across all deepstack channels
-                zeros_chunk = zeros_float[:, :tcl]
-                for d in self._ds_range:
-                    ds_pieces[d].append(zeros_chunk)
-                text_cursor = text_cursor + text_chunk_len
+            text_start, text_end = self._text_slices[f]
+            text_chunk = text_hidden_states[:, text_start:text_end]
+            pieces.append(text_chunk)
+            zeros_chunk = static_zero_chunks[self._text_chunk_lens[f]]
+            for d in self._ds_range:
+                ds_pieces[d].append(zeros_chunk)
 
             # Vision segment for this frame (pre-computed slice indices)
             vis_start, vis_end = self._vis_slices[f]
             vis_chunk = vision_hidden_states[:, vis_start:vis_end]
             pieces.append(vis_chunk)
             for d in self._ds_range:
-                ds_pieces[d].append(all_inputs[d][:, vis_start:vis_end])
+                ds_pieces[d].append(deepstack_inputs[d][:, vis_start:vis_end])
 
-            # Skip the placeholder span that this vision segment replaces.
-            text_cursor = offset + self.frame_seqlen
-
-        # Remaining text tokens after all replaced placeholder spans
-        if text_cursor < text_len:
-            tc = text_cursor.to(torch.int64)
-            pieces.append(text_hidden_states[:, tc:])
-            remaining = zeros_float[:, :text_len - tc]
-            for d in self._ds_range:
-                ds_pieces[d].append(remaining)
+        # Remaining text tokens after all replaced placeholder spans.
+        tail_chunk = text_hidden_states[:, self._tail_start:]
+        pieces.append(tail_chunk)
+        tail_len = text_hidden_states.shape[1] - self._tail_start
+        tail_zeros = self.zeros_seq_pad[:, :tail_len].to(zero_dtype)
+        for d in self._ds_range:
+            ds_pieces[d].append(tail_zeros)
 
         concat_hidden_states = torch.cat(pieces, dim=1)
         deepstack_features = [torch.cat(ds_pieces[d], dim=1) for d in self._ds_range]
@@ -2562,7 +2559,6 @@ if DO_EXPORT:
                 if video_pad_count % video_frame_seqlen == 0:
                     video_segment_offsets.append(idx)
                 video_pad_count += 1
-        video_segment_offsets = torch.tensor(video_segment_offsets, dtype=torch.int32)
 
         video_concat_inputs = []
         video_concat_input_names = []
@@ -2576,12 +2572,12 @@ if DO_EXPORT:
             video_concat_inputs.append(video_deepstack_feat)
             video_concat_output_names.append(f'out_deepstack_feature_{i}')
             video_concat_dynamic_axes[f'out_deepstack_feature_{i}'] = {1: 'total_len'}
-        video_concat_input_names.extend(['text_hidden_states', 'vision_hidden_states', 'segment_offsets'])
-        video_concat_inputs.extend([video_text_hidden, video_vision_hidden, video_segment_offsets])
+        video_concat_input_names.extend(['text_hidden_states', 'vision_hidden_states'])
+        video_concat_inputs.extend([video_text_hidden, video_vision_hidden])
         video_concat_output_names.append('concat_hidden_states')
 
         torch.onnx.export(
-            LLM_CONCAT_VIDEO(video_num_temporal_frames, video_frame_seqlen, hidden_size, deepstack_features_len, MAX_SEQ_LEN),
+            LLM_CONCAT_VIDEO(video_segment_offsets, video_frame_seqlen, hidden_size, deepstack_features_len, MAX_SEQ_LEN),
             tuple(video_concat_inputs),
             onnx_model_Concat_Video,
             input_names=video_concat_input_names,
@@ -3307,13 +3303,12 @@ def build_prompt_and_mm_types(query, mode, num_frames=0, frame_seqlen=0, fps=2.0
     Returns:
         tokens: int32 numpy array [1, seq_len]
         mm_token_type_ids: list of int (0=text, 1=image, 2=video)
-        segment_offsets: list of int (index of the first video placeholder token per frame)
     """
     if mode == 'text':
         prompt = f"<|im_start|>user\n{query}<|im_end|>\n<|im_start|>assistant\n"
         tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
         mm_token_type_ids = [0] * tokens.shape[-1]
-        return tokens, mm_token_type_ids, []
+        return tokens, mm_token_type_ids
 
     elif mode == 'image':
         # Multi-image prompt: <|im_start|>user\n[<|vision_start|><|vision_end|>]*N query<|im_end|>\n<|im_start|>assistant\n
@@ -3322,8 +3317,7 @@ def build_prompt_and_mm_types(query, mode, num_frames=0, frame_seqlen=0, fps=2.0
         tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
         # mm_token_type_ids: all text (image tokens are inserted at runtime via concat, not in token stream)
         mm_token_type_ids = [0] * tokens.shape[-1]
-        # No segment_offsets needed — LLM_CONCAT uses a static pre-computed pattern
-        return tokens, mm_token_type_ids, []
+        return tokens, mm_token_type_ids
 
     elif mode == 'video':
         # Build video prompt with timestamp-separated frames
@@ -3369,18 +3363,7 @@ def build_prompt_and_mm_types(query, mode, num_frames=0, frame_seqlen=0, fps=2.0
             else:
                 mm_token_type_ids.append(0)  # text (including vision_start/end markers)
 
-        # Compute segment_offsets as the positions of the first video_pad in each frame.
-        # LLM_CONCAT_VIDEO replaces each placeholder span in-place, so these offsets are
-        # valid for both the tokenized prompt and the post-concat hidden-state layout.
-        segment_offsets = []
-        pad_count = 0
-        for idx, tid in enumerate(token_ids):
-            if tid == video_pad_id:
-                if pad_count % frame_seqlen == 0:
-                    segment_offsets.append(idx)
-                pad_count += 1
-
-        return tokens, mm_token_type_ids, segment_offsets
+        return tokens, mm_token_type_ids
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3410,20 +3393,20 @@ for INPUT_MODE, current_query in test_modes:
     if INPUT_MODE == 'video':
         video_grid_t_runtime = VIDEO_NUM_FRAMES // TEMPORAL_PATCH_SIZE
         video_frame_seqlen_runtime = (VIDEO_HEIGHT_FACTOR * 2 * VIDEO_WIDTH_FACTOR * 2) // (2 * 2)
-        tokens, mm_token_type_ids, segment_offsets = build_prompt_and_mm_types(
+        tokens, mm_token_type_ids = build_prompt_and_mm_types(
             current_query, 'video',
             num_frames=video_grid_t_runtime,
             frame_seqlen=video_frame_seqlen_runtime,
             fps=VIDEO_FPS
         )
     elif INPUT_MODE == 'image':
-        tokens, mm_token_type_ids, segment_offsets = build_prompt_and_mm_types(
+        tokens, mm_token_type_ids = build_prompt_and_mm_types(
             current_query, 'image',
             num_images=num_test_images,
             image_seqlen=image_seqlen_runtime
         )
     else:
-        tokens, mm_token_type_ids, segment_offsets = build_prompt_and_mm_types(current_query, 'text')
+        tokens, mm_token_type_ids = build_prompt_and_mm_types(current_query, 'text')
 
     num_prefill = tokens.shape[-1]
 
@@ -3635,7 +3618,7 @@ for INPUT_MODE, current_query in test_modes:
         # Re-build prompt with fixed timestamps (must match export-time rotary table structure)
         video_grid_t_runtime = len(frame_indices) // TEMPORAL_PATCH_SIZE
         video_frame_seqlen_runtime = (VIDEO_HEIGHT_FACTOR * 2 * VIDEO_WIDTH_FACTOR * 2) // (2 * 2)
-        tokens, mm_token_type_ids, segment_offsets = build_prompt_and_mm_types(
+        tokens, mm_token_type_ids = build_prompt_and_mm_types(
             current_query, 'video',
             num_frames=video_grid_t_runtime,
             frame_seqlen=video_frame_seqlen_runtime,
@@ -3751,10 +3734,6 @@ for INPUT_MODE, current_query in test_modes:
             binding_Concat_Video.bind_ortvalue_input(in_name_Concat_Video[i], outputs_Vision[i])
         binding_Concat_Video.bind_ortvalue_input(in_name_Concat_Video[deepstack_features_len], hidden_states)
         binding_Concat_Video.bind_ortvalue_input(in_name_Concat_Video[deepstack_features_len + 1], outputs_Vision[deepstack_features_len])
-        segment_offsets_ort = onnxruntime.OrtValue.ortvalue_from_numpy(
-            np.array(segment_offsets, dtype=np.int32), device_type, DEVICE_ID
-        )
-        binding_Concat_Video.bind_ortvalue_input(in_name_Concat_Video[deepstack_features_len + 2], segment_offsets_ort)
         bind_ort_out(binding_Concat_Video, out_name_Concat_Video, _ort_device_type)
         run(ort_session_Concat_Video, binding_Concat_Video)
         outputs_Concat = binding_Concat_Video.get_outputs()
