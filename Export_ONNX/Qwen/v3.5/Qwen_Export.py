@@ -15,26 +15,26 @@ from PIL import Image
 from onnxruntime.capi import _pybind_state as C
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-download_path                    = r"/home/DakeQQ/Downloads/Qwen3.5-0.8B"                  # Set the folder path where the Qwen3.5 dense model project downloaded.
-onnx_model_Embed                 = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx"      # Assign a path where the exported Qwen model stored.
-onnx_model_Vision                = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Vision.onnx"
-onnx_model_Image_Preprocess      = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Image_Preprocess.onnx"
-onnx_model_Video_Preprocess      = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Video_Preprocess.onnx"
-onnx_model_Concat_Image          = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat_Image.onnx"
-onnx_model_Concat_Video          = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat_Video.onnx"
-onnx_model_Rotary_Image_Prefill  = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Image_Prefill.onnx"
-onnx_model_Rotary_Image_Decode   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Image_Decode.onnx"
-onnx_model_Rotary_Video_Prefill  = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Video_Prefill.onnx"
-onnx_model_Rotary_Video_Decode   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Video_Decode.onnx"
-onnx_model_Rotary_Text_Prefill   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Prefill.onnx"
-onnx_model_Rotary_Text_Decode    = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Decode.onnx"
-onnx_model_Main                  = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx"
-onnx_model_Greedy                = r"/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx"
-onnx_model_First_Beam            = r"/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx"
-onnx_model_Second_Beam           = r"/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx"
-onnx_model_Penalty               = r"/home/DakeQQ/Downloads/Qwen_ONNX/Apply_Penalty.onnx"
-onnx_model_Argmax                = r"/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx"
-onnx_model_KV_Slice              = r"/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.onnx"
+download_path                    = r"/home/iamj/Downloads/Qwen3.5-0.8B"                  # Set the folder path where the Qwen3.5 dense model project downloaded.
+onnx_model_Embed                 = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Embed.onnx"      # Assign a path where the exported Qwen model stored.
+onnx_model_Vision                = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Vision.onnx"
+onnx_model_Image_Preprocess      = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Image_Preprocess.onnx"
+onnx_model_Video_Preprocess      = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Video_Preprocess.onnx"
+onnx_model_Concat_Image          = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Concat_Image.onnx"
+onnx_model_Concat_Video          = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Concat_Video.onnx"
+onnx_model_Rotary_Image_Prefill  = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Image_Prefill.onnx"
+onnx_model_Rotary_Image_Decode   = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Image_Decode.onnx"
+onnx_model_Rotary_Video_Prefill  = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Video_Prefill.onnx"
+onnx_model_Rotary_Video_Decode   = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Video_Decode.onnx"
+onnx_model_Rotary_Text_Prefill   = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Text_Prefill.onnx"
+onnx_model_Rotary_Text_Decode    = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Text_Decode.onnx"
+onnx_model_Main                  = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Main.onnx"
+onnx_model_Greedy                = r"/home/iamj/Downloads/Qwen_ONNX/Greedy_Search.onnx"
+onnx_model_First_Beam            = r"/home/iamj/Downloads/Qwen_ONNX/First_Beam_Search.onnx"
+onnx_model_Second_Beam           = r"/home/iamj/Downloads/Qwen_ONNX/Second_Beam_Search.onnx"
+onnx_model_Penalty               = r"/home/iamj/Downloads/Qwen_ONNX/Apply_Penalty.onnx"
+onnx_model_Argmax                = r"/home/iamj/Downloads/Qwen_ONNX/Argmax.onnx"
+onnx_model_KV_Slice              = r"/home/iamj/Downloads/Qwen_ONNX/KV_Slice.onnx"
 
 # Test Input
 TEST_IMAGE                       = [r"./psyduck.png"]                                     # List of image paths for multi-image support. Use [] for text-only.
@@ -1217,6 +1217,29 @@ def is_valid_image_path(path):
     valid_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".raw"}
     _, ext = os.path.splitext(path)
     return ext.lower() in valid_extensions
+
+
+def load_image_letterbox(path, target_h, target_w):
+    """Load one image into a fixed-size canvas without stretching its aspect ratio."""
+    resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC")
+    with Image.open(path) as image:
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        src_w, src_h = image.size
+        scale = min(target_w / max(src_w, 1), target_h / max(src_h, 1))
+        resize_w = max(1, min(target_w, int(round(src_w * scale))))
+        resize_h = max(1, min(target_h, int(round(src_h * scale))))
+        if image.size != (resize_w, resize_h):
+            image = image.resize((resize_w, resize_h), resampling)
+
+        # Use a neutral gray canvas so padding stays near zero after fused 127.5-based normalization.
+        canvas = Image.new("RGB", (target_w, target_h), (128, 128, 128))
+        offset_x = (target_w - resize_w) // 2
+        offset_y = (target_h - resize_h) // 2
+        canvas.paste(image, (offset_x, offset_y))
+
+    return np.ascontiguousarray(np.asarray(canvas, dtype=np.uint8).transpose(2, 0, 1))
 
 def sample_video_frames(
     video_path,
@@ -3903,11 +3926,13 @@ for INPUT_MODE, current_query in test_modes:
         # Load and preprocess images
         images = []
         for img_path in valid_images[:num_runtime_images]:
-            with Image.open(img_path) as img:
-                img = img.resize((input_image_size[1], input_image_size[0]))
-                if img.mode != "RGB":
-                    img = img.convert("RGB")
-                images.append(np.transpose(np.array(img).astype(np.uint8), (2, 0, 1)))
+            images.append(
+                load_image_letterbox(
+                    img_path,
+                    input_image_size[0],
+                    input_image_size[1],
+                )
+            )
 
         # Keep the exported fixed-slot image contract stable by padding unused image
         # slots with a neutral gray image that stays close to zero after normalization.
