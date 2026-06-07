@@ -18,9 +18,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 download_path                    = r"/home/DakeQQ/Downloads/Qwen3.5-0.8B"                  # Set the folder path where the Qwen3.5 dense model project downloaded.
 onnx_model_Embed                 = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx"      # Assign a path where the exported Qwen model stored.
 onnx_model_Vision                = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Vision.onnx"
-onnx_model_Concat                = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat.onnx"
-onnx_model_Rotary_Vision_Prefill = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Vision_Prefill.onnx"
-onnx_model_Rotary_Vision_Decode  = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Vision_Decode.onnx"
+onnx_model_Image_Preprocess      = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Image_Preprocess.onnx"
+onnx_model_Video_Preprocess      = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Video_Preprocess.onnx"
+onnx_model_Concat_Image          = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat_Image.onnx"
+onnx_model_Concat_Video          = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat_Video.onnx"
+onnx_model_Rotary_Image_Prefill  = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Image_Prefill.onnx"
+onnx_model_Rotary_Image_Decode   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Image_Decode.onnx"
+onnx_model_Rotary_Video_Prefill  = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Video_Prefill.onnx"
+onnx_model_Rotary_Video_Decode   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Video_Decode.onnx"
 onnx_model_Rotary_Text_Prefill   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Prefill.onnx"
 onnx_model_Rotary_Text_Decode    = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Decode.onnx"
 onnx_model_Main                  = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx"
@@ -32,8 +37,9 @@ onnx_model_Argmax                = r"/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onn
 onnx_model_KV_Slice              = r"/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.onnx"
 
 # Test Input
-TEST_IMAGE                       = r"./psyduck.png"                                       # Test image for the exported onnx model.
-TEST_QUERY                       = "Describe this image."                                 # Test query for the exported onnx model. Change it for text-only runs as needed.
+TEST_IMAGE                       = [r"./psyduck.png"]                                     # List of image paths for multi-image support. Use [] for text-only.
+TEST_VIDEO                       = r"./test_video_8s.mp4"                                 # Path to test video file. Leave empty to disable video mode.
+TEST_QUERY                       = ["Describe this image.", "Describe this video."]       # [image_query, video_query]
 ENABLE_THINKING                  = False                                                  # Enable thinking mode in generation.
 
 # Model Config
@@ -42,14 +48,24 @@ PREVENT_F16_OVERFLOW             = False                                        
 STOP_TOKEN                       = [248044]                                               # Qwen3.5 stop token ids
 MAX_SEQ_LEN                      = 4096                                                   # Max context length. Can not edit after export.
 
-# Vision Config
+# Image Vision Config
 HEIGHT_FACTOR                    = 25                                                     # Adjust this value to determine the resize shape and vision resolution.
 WIDTH_FACTOR                     = 25                                                     # Adjust this value to determine the resize shape and vision resolution.
 IMAGE_RESIZE                     = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]                # 32 = self.patch_size * self.merge_size
 INPUT_IMAGE_SIZE                 = [960, 960]                                             # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
-VISION_BATCH_SIZE                = 1                                                      # Set the number of images for the vision LLM, whether DYNAMIC_IMAGE_SHAPE is True or False.
+VISION_BATCH_SIZE                = 1                                                      # Maximum number of images supported in multi-image mode.
 DYNAMIC_IMAGE_SHAPE              = False                                                  # Allow for a dynamic number of image inputs. (Experiment features, may cause errors)
-INPUT_IMAGE_DIM                  = 5                                                      # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
+
+# Video Vision Config
+VIDEO_FPS                        = 2.0                                                    # Frame sampling rate from source video.
+VIDEO_MAX_FRAMES                 = 768                                                    # Max frames before temporal patching.
+VIDEO_MIN_FRAMES                 = 4                                                      # Min frames.
+VIDEO_NUM_FRAMES                 = 8                                                      # Actual frames used. Must be even and divisible by TEMPORAL_PATCH_SIZE.
+VIDEO_HEIGHT_FACTOR              = 10                                                     # Video height factor (grid_h = factor * merge_size).
+VIDEO_WIDTH_FACTOR               = 18                                                     # Video width factor (grid_w = factor * merge_size).
+VIDEO_RESIZE                     = [VIDEO_HEIGHT_FACTOR * 32, VIDEO_WIDTH_FACTOR * 32]    # Target frame spatial size.
+INPUT_VIDEO_SIZE                 = [720, 1280]                                            # Input video frame shape (H, W).
+DYNAMIC_VIDEO_SHAPE              = False                                                  # Allow dynamic video frame count/spatial.
 
 # KV cache quantization
 KV_QUANT_DTYPE                   = "F16"                                                  # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
@@ -126,7 +142,22 @@ VISION_PATCH_SIZE              = int(VISION_CONFIG["patch_size"])
 VISION_TEMPORAL_PATCH_SIZE     = int(VISION_CONFIG["temporal_patch_size"])
 VISION_SPATIAL_MERGE_SIZE      = int(VISION_CONFIG["spatial_merge_size"])
 VISION_OUT_HIDDEN_SIZE         = int(VISION_CONFIG["out_hidden_size"])
-VISION_EMBED_SIZE              = HEIGHT_FACTOR * WIDTH_FACTOR * VISION_BATCH_SIZE
+
+# Multimodal token IDs
+IMAGE_TOKEN_ID                 = int(MODEL_CONFIG.get("image_token_id", 248056))
+VIDEO_TOKEN_ID                 = int(MODEL_CONFIG.get("video_token_id", 248057))
+VISION_START_TOKEN_ID          = int(MODEL_CONFIG.get("vision_start_token_id", 248053))
+VISION_END_TOKEN_ID            = int(MODEL_CONFIG.get("vision_end_token_id", 248054))
+
+# Derived vision constants
+IMAGE_SEQLEN_PER_IMAGE         = HEIGHT_FACTOR * WIDTH_FACTOR
+VISION_EMBED_SIZE              = IMAGE_SEQLEN_PER_IMAGE * VISION_BATCH_SIZE
+TEMPORAL_PATCH_SIZE            = VISION_TEMPORAL_PATCH_SIZE
+
+# Video derived constants
+VIDEO_GRID_T                   = VIDEO_NUM_FRAMES // VISION_TEMPORAL_PATCH_SIZE
+VIDEO_FRAME_SEQLEN             = VIDEO_HEIGHT_FACTOR * VIDEO_WIDTH_FACTOR
+VIDEO_TOTAL_VISION_TOKENS      = VIDEO_GRID_T * VIDEO_FRAME_SEQLEN
 
 SCALE_DTYPE_TORCH = torch.float16 if USE_FLOAT16_SCALE_BIAS else torch.float32
 
@@ -224,9 +255,107 @@ def build_text_prompt(query: str) -> str:
     return f"<|im_start|>user\n{query}<|im_end|>\n{build_assistant_prompt_prefix()}"
 
 
-def build_multimodal_prompt(query: str) -> str:
-    """Build a multimodal chat prompt with a vision placeholder."""
-    return f"<|im_start|>user\n<|vision_start|><|vision_end|>{query}<|im_end|>\n{build_assistant_prompt_prefix()}"
+def build_image_prompt(query: str, num_images: int = 1) -> str:
+    """Build a compact multi-image chat prompt for static image concat."""
+    vision_placeholders = "<|vision_start|><|vision_end|>" * num_images
+    return f"<|im_start|>user\n{vision_placeholders}{query}<|im_end|>\n{build_assistant_prompt_prefix()}"
+
+
+def build_video_timestamps(num_frames: int, fps: float = 2.0, frame_indices=None) -> List[float]:
+    """Build deterministic timestamps for each exported video segment."""
+    if frame_indices is not None:
+        indices = list(frame_indices)
+        if not indices:
+            return [0.0] * num_frames
+        if len(indices) < num_frames * VISION_TEMPORAL_PATCH_SIZE:
+            indices.extend([indices[-1]] * (num_frames * VISION_TEMPORAL_PATCH_SIZE - len(indices)))
+        timestamps = []
+        for frame_index in range(num_frames):
+            start = frame_index * VISION_TEMPORAL_PATCH_SIZE
+            end = start + VISION_TEMPORAL_PATCH_SIZE
+            window = indices[start:end]
+            timestamps.append(sum(window) / max(len(window), 1) / max(fps, 1e-6))
+        return timestamps
+
+    return [frame_index * VISION_TEMPORAL_PATCH_SIZE / fps for frame_index in range(num_frames)]
+
+
+def build_video_prompt(
+    query: str,
+    num_frames: int,
+    frame_seqlen: int,
+    fps: float = 2.0,
+    frame_indices=None,
+) -> str:
+    """Build a video chat prompt with explicit video_pad placeholder spans."""
+    parts = ["<|im_start|>user\n"]
+    for timestamp in build_video_timestamps(num_frames, fps, frame_indices):
+        parts.append(f"<{timestamp:.1f} seconds>")
+        parts.append("<|vision_start|>")
+        parts.append("<|video_pad|>" * frame_seqlen)
+        parts.append("<|vision_end|>")
+    parts.append(f"{query}<|im_end|>\n{build_assistant_prompt_prefix()}")
+    return "".join(parts)
+
+
+def build_mm_token_type_ids(token_ids_flat, mode: str | None = None):
+    """Build mm_token_type_ids from token IDs. 0=text, 1=image, 2=video."""
+    mm_types = []
+    for tid in token_ids_flat:
+        tid_int = int(tid)
+        if tid_int == IMAGE_TOKEN_ID and mode in (None, "image"):
+            mm_types.append(1)
+        elif tid_int == VIDEO_TOKEN_ID and mode in (None, "video"):
+            mm_types.append(2)
+        else:
+            mm_types.append(0)
+    return mm_types
+
+
+def build_video_segment_offsets(token_ids_flat, frame_seqlen: int):
+    """Find the token index of the first video_pad token in each frame block."""
+    offsets = []
+    i = 0
+    while i < len(token_ids_flat):
+        if int(token_ids_flat[i]) == VIDEO_TOKEN_ID:
+            offsets.append(i)
+            i += frame_seqlen
+        else:
+            i += 1
+    return offsets
+
+
+def build_prompt_and_mm_types(
+    query,
+    mode,
+    num_frames=0,
+    frame_seqlen=0,
+    fps=2.0,
+    frame_indices=None,
+    num_images=1,
+    image_seqlen=0,
+):
+    """Build runtime prompt tokens plus modality metadata for text, image, and video."""
+    del image_seqlen
+
+    if mode == "text":
+        prompt = build_text_prompt(query)
+        tokens = tokenizer(prompt, return_tensors="np")["input_ids"].astype(np.int32)
+        return tokens, [0] * tokens.shape[-1]
+
+    if mode == "image":
+        prompt = build_image_prompt(query, num_images)
+        tokens = tokenizer(prompt, return_tensors="np")["input_ids"].astype(np.int32)
+        return tokens, [0] * tokens.shape[-1]
+
+    if mode == "video":
+        prompt = build_video_prompt(query, num_frames, frame_seqlen, fps, frame_indices)
+        tokens = tokenizer(prompt, return_tensors="np")["input_ids"].astype(np.int32)
+        token_ids_flat = tokens[0].tolist()
+        mm_token_type_ids = build_mm_token_type_ids(token_ids_flat, "video")
+        return tokens, mm_token_type_ids
+
+    raise ValueError(f"Unsupported mode: {mode}")
 
 
 def compute_prompt_head_len(tokenizer) -> int:
@@ -234,6 +363,30 @@ def compute_prompt_head_len(tokenizer) -> int:
     prefix = "<|im_start|>user\n<|vision_start|>"
     tokens = tokenizer(prefix, return_tensors="np")["input_ids"]
     return int(tokens.shape[-1])
+
+
+def compute_between_len(tokenizer) -> int:
+    """Measure the token span between consecutive images."""
+    between = "<|vision_end|><|vision_start|>"
+    tokens = tokenizer(between, return_tensors="np")["input_ids"]
+    return int(tokens.shape[-1])
+
+
+def build_export_image_prompt(query: str, num_images: int, image_seqlen: int) -> str:
+    """Build export-time representative image prompt with expanded image_pad tokens."""
+    parts = ["<|im_start|>user\n"]
+    for i in range(num_images):
+        parts.append("<|vision_start|>")
+        parts.append("<|image_pad|>" * image_seqlen)
+        parts.append("<|vision_end|>")
+    parts.append(f"{query}<|im_end|>\n{build_assistant_prompt_prefix()}")
+    return "".join(parts)
+
+
+def build_export_video_prompt(query: str, num_frames: int, frame_seqlen: int, fps: float = 2.0) -> str:
+    """Build export-time representative video prompt (same format as runtime)."""
+    return build_video_prompt(query, num_frames, frame_seqlen, fps)
+
 
 
 _is_rotary_kv = KV_QUANT_DTYPE in (
@@ -1065,6 +1218,74 @@ def is_valid_image_path(path):
     _, ext = os.path.splitext(path)
     return ext.lower() in valid_extensions
 
+def sample_video_frames(
+    video_path,
+    target_fps,
+    num_frames,
+    min_frames,
+    max_frames,
+    frame_size,
+):
+    """Sample frames at the configured FPS, then clamp or pad to the export contract."""
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError(
+            "Video mode requires opencv-python (cv2). Install with: pip install opencv-python"
+        ) from exc
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Unable to open video file: {video_path}")
+
+    try:
+        src_fps = float(cap.get(cv2.CAP_PROP_FPS))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            raise RuntimeError(f"Unable to determine frame count for video: {video_path}")
+        if src_fps <= 0:
+            src_fps = float(target_fps)
+
+        frame_step = max(src_fps / max(float(target_fps), 1e-6), 1.0)
+        candidate_indices = np.arange(0, total_frames, frame_step, dtype=np.float64).astype(np.int64)
+        if candidate_indices.size == 0:
+            candidate_indices = np.array([0], dtype=np.int64)
+        if candidate_indices.size < min_frames:
+            candidate_indices = np.linspace(0, total_frames - 1, min_frames, dtype=np.int64)
+        if candidate_indices.size > max_frames:
+            candidate_indices = candidate_indices[:max_frames]
+
+        if candidate_indices.size >= num_frames:
+            sampled_indices = candidate_indices[
+                np.linspace(0, candidate_indices.size - 1, num_frames, dtype=np.int64)
+            ]
+        else:
+            sampled_indices = np.concatenate(
+                [
+                    candidate_indices,
+                    np.full(num_frames - candidate_indices.size, candidate_indices[-1], dtype=np.int64),
+                ]
+            )
+
+        frames = []
+        for frame_index in sampled_indices.tolist():
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = cv2.resize(frame, (frame_size[1], frame_size[0]))
+            frames.append(np.transpose(frame.astype(np.uint8), (2, 0, 1)))
+
+        if not frames:
+            raise RuntimeError(f"Unable to decode any frames from video: {video_path}")
+        while len(frames) < num_frames:
+            frames.append(frames[-1])
+
+        return np.stack(frames[:num_frames], axis=0), sampled_indices.tolist()
+    finally:
+        cap.release()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TorchScript helpers for dynamic linear-attention recurrence
@@ -1122,8 +1343,194 @@ class LLM_EMBED(torch.nn.Module):
         return self.embed_tokens(input_ids)
 
 
+class LLM_IMAGE_PREPROCESS(torch.nn.Module):
+    """Preprocess N images into packed patches ready for the shared vision encoder.
+    Accepts: pixel_values [N, 1, 3, H, W] or [N, 3, H, W] uint8/float (0-255 range)
+    Returns: (pixel_values_patches, pos_embeds, rotary_cos, rotary_sin, attention_mask)
+    """
+
+    def __init__(self, visual, height_factor, width_factor, num_images, dynamic_shape=False):
+        super().__init__()
+        self.patch_size = VISION_PATCH_SIZE
+        self.merge_size = VISION_SPATIAL_MERGE_SIZE
+        self.temporal_patch_size = VISION_TEMPORAL_PATCH_SIZE // 2
+        self.height_factor = height_factor
+        self.width_factor = width_factor
+        self.num_images = num_images
+        self.dynamic_shape = dynamic_shape
+        self.target_h = height_factor * self.patch_size * self.merge_size
+        self.target_w = width_factor * self.patch_size * self.merge_size
+        self.grid_h = height_factor * self.merge_size
+        self.grid_w = width_factor * self.merge_size
+        self.seq_per_image = self.grid_h * self.grid_w
+
+        # Precompute position embeddings for all images
+        grid_thw = torch.tensor([[1, self.grid_h, self.grid_w]], dtype=torch.int32)
+        single_pos = visual.fast_pos_embed_interpolate(grid_thw)  # [seq_per_image, embed_dim]
+        # Tile for num_images
+        pos_embeds = single_pos.unsqueeze(0).repeat(1, num_images, 1)
+        self.register_buffer("pos_embeds", pos_embeds.half())
+
+        # Precompute rotary for vision encoder
+        rotary_pos_emb = visual.rot_pos_emb(grid_thw).float()  # [seq_per_image, head_dim/2]
+        # Tile for num_images (each image gets same rotary)
+        rotary_pos_emb = rotary_pos_emb.repeat(num_images, 1)
+        rotary_pos_emb = rotary_pos_emb.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        cos = rotary_pos_emb.cos()
+        sin = rotary_pos_emb.sin()
+        self.register_buffer("rotary_cos", torch.cat([cos, cos], dim=-1).half())
+        self.register_buffer("rotary_sin", torch.cat([-sin, sin], dim=-1).half())
+
+        # Block-diagonal attention mask: images don't attend to each other
+        total_seq = self.seq_per_image * num_images
+        mask = torch.zeros(1, 1, total_seq, total_seq, dtype=torch.int8)
+        for img_idx in range(num_images):
+            start = img_idx * self.seq_per_image
+            end = start + self.seq_per_image
+            mask[..., start:end, :start] = -128
+            mask[..., start:end, end:] = -128
+        self.register_buffer("attention_mask", mask)
+
+    def forward(self, pixel_values):
+        # Handle 5D input [N, 1, 3, H, W]
+        if pixel_values.dim() == 5:
+            pixel_values = pixel_values.squeeze(1)
+        # pixel_values: [N, 3, H, W]
+        batch_size = pixel_values.shape[0] if self.dynamic_shape else self.num_images
+        pixel_values = pixel_values.float()
+
+        # Resize if needed
+        if self.dynamic_shape or list(pixel_values.shape[-2:]) != [self.target_h, self.target_w]:
+            pixel_values = F.interpolate(
+                pixel_values, size=[self.target_h, self.target_w],
+                mode="bilinear", align_corners=False
+            )
+
+        # Spatial patching: [N, 3, H, W] -> patches
+        pixel_values = pixel_values.reshape(
+            batch_size, 3,
+            self.height_factor, self.merge_size, self.patch_size,
+            self.width_factor, self.merge_size, self.patch_size,
+        )
+        pixel_values = pixel_values.permute(0, 2, 5, 3, 6, 1, 4, 7)
+        # [N, hf, wf, merge, merge, 3, ps, ps]
+        pixel_values = pixel_values.reshape(-1, 3, self.temporal_patch_size, self.patch_size, self.patch_size)
+        # Duplicate temporal dimension for images (temporal_patch_size=2, single frame duplicated)
+        pixel_values = torch.cat([pixel_values, pixel_values], dim=2)
+        # [total_patches, 3, tps, ps, ps]
+
+        if self.dynamic_shape:
+            seq_len = batch_size * self.seq_per_image
+            pos_embeds = self.pos_embeds[:, :seq_len]
+            rotary_cos = self.rotary_cos[..., :seq_len]
+            rotary_sin = self.rotary_sin[..., :seq_len]
+            attention_mask = self.attention_mask[..., :seq_len, :seq_len]
+        else:
+            pos_embeds = self.pos_embeds
+            rotary_cos = self.rotary_cos
+            rotary_sin = self.rotary_sin
+            attention_mask = self.attention_mask
+
+        return pixel_values, pos_embeds, rotary_cos, rotary_sin, attention_mask
+
+
+class LLM_VIDEO_PREPROCESS(torch.nn.Module):
+    """Preprocess video frames into packed patches ready for the shared vision encoder.
+    Accepts: video_frames [num_frames, 3, H, W] uint8/float (0-255 range)
+    Returns: (pixel_values_patches, pos_embeds, rotary_cos, rotary_sin, attention_mask)
+    """
+
+    def __init__(self, visual, num_frames, height_factor, width_factor, dynamic_shape=False):
+        super().__init__()
+        self.patch_size = VISION_PATCH_SIZE
+        self.merge_size = VISION_SPATIAL_MERGE_SIZE
+        self.temporal_patch_size = VISION_TEMPORAL_PATCH_SIZE
+        self.num_frames = num_frames
+        self.height_factor = height_factor
+        self.width_factor = width_factor
+        self.dynamic_shape = dynamic_shape
+        self.target_h = height_factor * self.patch_size * self.merge_size
+        self.target_w = width_factor * self.patch_size * self.merge_size
+        self.grid_h = height_factor * self.merge_size
+        self.grid_w = width_factor * self.merge_size
+        self.grid_t = num_frames // self.temporal_patch_size
+        self.frame_seqlen = self.grid_h * self.grid_w
+        self.total_seq = self.grid_t * self.frame_seqlen
+
+        # Precompute position embeddings for video
+        grid_thw = torch.tensor([[self.grid_t, self.grid_h, self.grid_w]], dtype=torch.int32)
+        pos_embeds = visual.fast_pos_embed_interpolate(grid_thw).unsqueeze(0)
+        self.register_buffer("pos_embeds", pos_embeds.half())
+
+        # Precompute rotary for vision encoder
+        rotary_pos_emb = visual.rot_pos_emb(grid_thw).float()
+        rotary_pos_emb = rotary_pos_emb.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        cos = rotary_pos_emb.cos()
+        sin = rotary_pos_emb.sin()
+        self.register_buffer("rotary_cos", torch.cat([cos, cos], dim=-1).half())
+        self.register_buffer("rotary_sin", torch.cat([-sin, sin], dim=-1).half())
+
+        # Block-diagonal attention mask: each temporal group attends only to itself
+        mask = torch.zeros(1, 1, self.total_seq, self.total_seq, dtype=torch.int8)
+        for t in range(self.grid_t):
+            start = t * self.frame_seqlen
+            end = start + self.frame_seqlen
+            mask[:, :, start:end, :start] = -128
+            mask[:, :, start:end, end:] = -128
+        self.register_buffer("attention_mask", mask)
+
+    def forward(self, video_frames):
+        # video_frames: [num_frames, 3, H, W]
+        video_frames = video_frames.float()
+
+        # Resize if needed
+        if list(video_frames.shape[-2:]) != [self.target_h, self.target_w]:
+            video_frames = F.interpolate(
+                video_frames, size=[self.target_h, self.target_w],
+                mode="bilinear", align_corners=False
+            )
+
+        # Compute actual grid_t for dynamic shape
+        grid_t = video_frames.shape[0] // self.temporal_patch_size if self.dynamic_shape else self.grid_t
+
+        # Spatial decomposition
+        # Must keep the dims <= 8 or ONNX RUntime-CUDA will error out
+        video_frames = video_frames.reshape(
+            grid_t, self.temporal_patch_size * 3,
+            self.height_factor, self.merge_size, self.patch_size,
+            self.width_factor, self.merge_size, self.patch_size,
+        )
+        # Permute: [grid_t, hf, wf, merge, merge, tps, 3, ps, ps]
+        video_frames = video_frames.permute(0, 2, 5, 3, 6, 1, 4, 7)
+        # Reshape to patches: [total_patches, 3, tps, ps, ps]
+        video_frames = video_frames.reshape(-1, self.temporal_patch_size, 3, self.patch_size, self.patch_size).transpose(1, 2)
+
+        if self.dynamic_shape:
+            total_seq = grid_t * self.frame_seqlen
+            pos_embeds = self.pos_embeds[:, :total_seq]
+            rotary_cos = self.rotary_cos[..., :total_seq]
+            rotary_sin = self.rotary_sin[..., :total_seq]
+            attention_mask = self.attention_mask[..., :total_seq, :total_seq]
+        else:
+            pos_embeds = self.pos_embeds
+            rotary_cos = self.rotary_cos
+            rotary_sin = self.rotary_sin
+            attention_mask = self.attention_mask
+
+        return video_frames, pos_embeds, rotary_cos, rotary_sin, attention_mask
+
+
 class LLM_VISION(torch.nn.Module):
-    """Run the Qwen3.5 vision tower and return merged visual embeddings."""
+    """Shared vision encoder for both image and video inputs.
+    Inputs:
+        pixel_values: [total_patches, 3, temporal_patch_size, patch_size, patch_size]
+        pos_embeds: [1, seq_len, embed_dim]
+        rotary_cos: [1, 1, 1, seq_len, head_dim*2]
+        rotary_sin: [1, 1, 1, seq_len, head_dim*2]
+        attention_mask: [1, 1, seq_len, seq_len]
+    Returns:
+        vision_hidden_states: [1, seq_len, out_hidden_size]
+    """
 
     def __init__(self, llm):
         super().__init__()
@@ -1135,30 +1542,21 @@ class LLM_VISION(torch.nn.Module):
         self.head_dim_half = self.head_dim // 2
         self.patch_size = VISION_PATCH_SIZE
         self.merge_size = VISION_SPATIAL_MERGE_SIZE
-        self.image_hidden_len = HEIGHT_FACTOR * self.merge_size * WIDTH_FACTOR * self.merge_size
 
-        self.register_buffer("means", torch.tensor([127.5], dtype=torch.float32).view(1, 1, 1, 1, 1))
-        self.register_buffer("inv_std", torch.tensor([1.0 / 127.5], dtype=torch.float32).view(1, 1, 1, 1, 1))
-
-        grid_thw = torch.tensor([[1, HEIGHT_FACTOR * self.merge_size, WIDTH_FACTOR * self.merge_size]], dtype=torch.int32)
-        pos_embeds = self.visual.fast_pos_embed_interpolate(grid_thw).unsqueeze(0)
-        self.register_buffer("pos_embeds", pos_embeds)
-
-        rotary_pos_emb = (
-            self.visual.rot_pos_emb(grid_thw)
-            .float()
-            .unsqueeze(0)
-            .unsqueeze(0)
-            .unsqueeze(0)
-        )
-        cos = rotary_pos_emb.cos()
-        sin = rotary_pos_emb.sin()
-        self.register_buffer("rotary_pos_emb_cos", torch.cat([cos, cos], dim=-1))
-        self.register_buffer("rotary_pos_emb_sin", torch.cat([-sin, sin], dim=-1))
-
+        # Fuse normalization into Conv3d weights and bias
+        norm_scale = 1.0 / 127.5
         scaling = self.head_dim**-0.25
-        norm_scale = float(self.inv_std.item())
         with torch.no_grad():
+            patch_embed = self.visual.patch_embed
+            # Fuse pixel normalization (divide by 127.5) into Conv3d weights
+            patch_embed.proj.weight.data.mul_(norm_scale)
+            # Fuse mean subtraction (127.5) into Conv3d bias
+            if patch_embed.proj.bias is not None:
+                patch_embed.proj.bias.data -= 127.5 * patch_embed.proj.weight.data.flatten(1).sum(dim=1)
+            else:
+                bias_val = -127.5 * patch_embed.proj.weight.data.flatten(1).sum(dim=1)
+                patch_embed.proj.bias = torch.nn.Parameter(bias_val)
+
             for block in self.visual.blocks:
                 qk_out = block.attn.qkv.out_features - self.visual.patch_embed.embed_dim
                 block.attn.qkv.weight.data[:qk_out].mul_(scaling)
@@ -1166,33 +1564,6 @@ class LLM_VISION(torch.nn.Module):
                 self.fuse_norm(block.norm1, block.attn.qkv)
                 self.fuse_norm(block.norm2, block.mlp.linear_fc1)
             self.fuse_norm(self.visual.merger.norm, self.visual.merger.linear_fc1)
-
-            patch_embed = self.visual.patch_embed
-            if patch_embed.temporal_patch_size > 1:
-                fused_weight = patch_embed.proj.weight.data.sum(dim=2, keepdim=True)
-                fused_bias = (
-                    patch_embed.proj.bias.data.clone()
-                    if patch_embed.proj.bias is not None
-                    else None
-                )
-                fused_proj = torch.nn.Conv3d(
-                    patch_embed.in_channels,
-                    patch_embed.embed_dim,
-                    kernel_size=(1, self.patch_size, self.patch_size),
-                    stride=(1, self.patch_size, self.patch_size),
-                    bias=fused_bias is not None,
-                )
-                fused_proj = fused_proj.to(
-                    device=patch_embed.proj.weight.device,
-                    dtype=patch_embed.proj.weight.dtype,
-                )
-                fused_proj.weight.data.copy_(fused_weight * norm_scale)
-                if fused_bias is not None:
-                    fused_proj.bias.data.copy_(fused_bias)
-                patch_embed.proj = fused_proj
-                patch_embed.temporal_patch_size = 1
-            else:
-                patch_embed.proj.weight.data.mul_(norm_scale)
 
     def fuse_norm(self, norm, linear):
         """Absorb an affine norm into the following linear projection."""
@@ -1213,55 +1584,33 @@ class LLM_VISION(torch.nn.Module):
         x = x.flip(-2)
         return x.view(2, batch_size, self.num_heads, -1, self.head_dim)
 
-    def forward(self, pixel_values):
-        if INPUT_IMAGE_DIM != 5:
-            pixel_values = pixel_values.unsqueeze(1)
+    def forward(self, pixel_values, pos_embeds, rotary_cos, rotary_sin, attention_mask):
+        batch_size = 1  # Vision encoder always processes as batch=1
 
-        batch_size = pixel_values.shape[0] if DYNAMIC_IMAGE_SHAPE else VISION_BATCH_SIZE
-        pixel_values = pixel_values.float()
+        # Cast float16 inputs back to float32
+        pos_embeds = pos_embeds.float()
+        rotary_cos = rotary_cos.float()
+        rotary_sin = rotary_sin.float()
+        attention_mask = attention_mask.float()
 
-        if DYNAMIC_IMAGE_SHAPE or list(pixel_values.shape[-2:]) != IMAGE_RESIZE:
-            pixel_values = pixel_values.squeeze(1)
-            pixel_values = F.interpolate(
-                pixel_values, size=IMAGE_RESIZE, mode="bilinear", align_corners=False
-            )
-            pixel_values = pixel_values.unsqueeze(1)
-
-        pixel_values = pixel_values - self.means
-        pixel_values = pixel_values.reshape(
-            batch_size,
-            1,
-            1,
-            3,
-            HEIGHT_FACTOR,
-            self.merge_size,
-            self.patch_size,
-            WIDTH_FACTOR,
-            self.merge_size,
-            self.patch_size,
-        )
-        pixel_values = pixel_values.permute(0, 1, 4, 7, 5, 8, 3, 2, 6, 9)
-        pixel_values = pixel_values.reshape(-1, 3, 1, self.patch_size, self.patch_size)
-
+        # Conv3d patch embedding (normalization already fused into weights/bias)
         vision_hidden_states = self.visual.patch_embed.proj(pixel_values)
-        if DYNAMIC_IMAGE_SHAPE:
-            vision_hidden_states = vision_hidden_states.view(batch_size, -1, self.visual.patch_embed.embed_dim)
-        else:
-            vision_hidden_states = vision_hidden_states.view(batch_size, self.image_hidden_len, self.visual.patch_embed.embed_dim)
-        if batch_size != 1:
-            vision_hidden_states = vision_hidden_states + self.pos_embeds.expand(batch_size, -1, -1)
-        else:
-            vision_hidden_states = vision_hidden_states + self.pos_embeds
+        vision_hidden_states = vision_hidden_states.view(1, -1, self.visual.patch_embed.embed_dim)
 
+        # Add position embeddings
+        vision_hidden_states = vision_hidden_states + pos_embeds
+
+        # Transformer blocks
         for block in self.visual.blocks:
             hidden_states_norm = block.norm1(vision_hidden_states)
             qkv = block.attn.qkv(hidden_states_norm)
             qkv = qkv.reshape(batch_size, -1, 3, self.num_heads, self.head_dim)
             qkv = qkv.permute(2, 0, 3, 1, 4)
             qk, value = qkv.split([2, 1], dim=0)
-            qk = qk * self.rotary_pos_emb_cos + self.rotate_half(qk, batch_size) * self.rotary_pos_emb_sin
+            qk = qk * rotary_cos + self.rotate_half(qk, batch_size) * rotary_sin
             query, key = qk.split([1, 1], dim=0)
             attn = torch.matmul(query, key.transpose(-1, -2))
+            attn = attn + attention_mask
             attn = torch.softmax(attn, dim=-1)
             attn = torch.matmul(attn, value)
             attn = attn.transpose(2, 3).reshape(batch_size, -1, block.attn.proj.in_features)
@@ -1272,6 +1621,7 @@ class LLM_VISION(torch.nn.Module):
             mlp_out = block.mlp.linear_fc2(mlp_out)
             vision_hidden_states = vision_hidden_states + mlp_out
 
+        # Merger
         vision_hidden_states = self.visual.merger.norm(vision_hidden_states)
         vision_hidden_states = vision_hidden_states.view(batch_size, -1, self.visual.merger.hidden_size)
         vision_hidden_states = self.visual.merger.linear_fc1(vision_hidden_states)
@@ -1280,89 +1630,136 @@ class LLM_VISION(torch.nn.Module):
         return vision_hidden_states
 
 
-class LLM_CONCAT(torch.nn.Module):
-    """Insert vision embeddings between the prompt head and text tail."""
+class LLM_CONCAT_IMAGE(torch.nn.Module):
+    """Insert image vision embeddings into text embeddings at known positions.
+    Layout: [head] [vis_0] [between] [vis_1] ... [vis_N-1] [tail]
+    """
 
-    def __init__(self, prompt_head_len: int):
+    def __init__(self, num_images: int, image_seqlen: int, prompt_head_len: int = 4, between_len: int = 2):
         super().__init__()
+        self.num_images = num_images
+        self.image_seqlen = image_seqlen
         self.prompt_head_len = prompt_head_len
+        self.between_len = between_len
+        # Pre-compute vision slice boundaries per image
+        self._vis_starts = tuple(i * image_seqlen for i in range(num_images))
+        self._vis_ends = tuple(i * image_seqlen + image_seqlen for i in range(num_images))
+        # Pre-compute text between-slice boundaries
+        self._text_starts = tuple(prompt_head_len + i * between_len for i in range(max(num_images - 1, 0)))
+        self._text_ends = tuple(prompt_head_len + i * between_len + between_len for i in range(max(num_images - 1, 0)))
+        # Pre-compute tail start position
+        self._tail_start = prompt_head_len + max(num_images - 1, 0) * between_len
 
     def forward(self, text_hidden_states, vision_hidden_states):
-        if text_hidden_states.shape[0] != 1:
-            vision_hidden_states = vision_hidden_states.expand(text_hidden_states.shape[0], -1, HIDDEN_SIZE)
-        return torch.cat(
-            [
-                text_hidden_states[:, : self.prompt_head_len],
-                vision_hidden_states,
-                text_hidden_states[:, self.prompt_head_len :],
-            ],
-            dim=1,
-        )
+        pieces = [text_hidden_states[:, :self.prompt_head_len]]
+        for img_idx in range(self.num_images):
+            pieces.append(vision_hidden_states[:, self._vis_starts[img_idx]:self._vis_ends[img_idx]])
+            if img_idx < self.num_images - 1:
+                pieces.append(text_hidden_states[:, self._text_starts[img_idx]:self._text_ends[img_idx]])
+        pieces.append(text_hidden_states[:, self._tail_start:])
+        return torch.cat(pieces, dim=1)
 
 
-class ROTARY_VISION_PREFILL(torch.nn.Module):
-    """Precompute mRoPE rotary embeddings and the causal mask for vision prefill."""
+class LLM_CONCAT_VIDEO(torch.nn.Module):
+    """Replace fixed exported video_pad placeholder spans with vision features.
 
-    def __init__(
-        self,
-        llm,
-        width_factor: int,
-        height_factor: int,
-        prompt_head_len: int,
-        max_seq_len: int,
-    ):
+    The exported video prompt places all frame placeholders before the free-form
+    text tail, so the insertion offsets are deterministic for a given export
+    configuration. Baking those offsets into the module removes a traced tensor
+    input and avoids Python branching on tensor values during export.
+    """
+
+    def __init__(self, segment_offsets: List[int], frame_seqlen: int):
         super().__init__()
-        total_max = max_seq_len + width_factor * height_factor + prompt_head_len
-        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, total_max, total_max, dtype=torch.int8))) * -128
+        self.segment_offsets = tuple(int(offset) for offset in segment_offsets)
+        self.num_temporal_groups = len(self.segment_offsets)
+        self.frame_seqlen = frame_seqlen
+        # Pre-compute vision slice boundaries per temporal group
+        self._vis_starts = tuple(f * frame_seqlen for f in range(self.num_temporal_groups))
+        self._vis_ends = tuple(f * frame_seqlen + frame_seqlen for f in range(self.num_temporal_groups))
+        # Pre-compute text cursor positions after each frame insertion
+        self._text_cursors = tuple(offset + frame_seqlen for offset in self.segment_offsets)
 
-        cos, sin = self._build_rotary_table(llm, width_factor, height_factor, prompt_head_len, max_seq_len)
+    def forward(self, text_hidden_states, vision_hidden_states):
+        pieces = []
+        text_cursor = 0
+        for f in range(self.num_temporal_groups):
+            offset = self.segment_offsets[f]
+            if offset > text_cursor:
+                pieces.append(text_hidden_states[:, text_cursor:offset])
+            pieces.append(vision_hidden_states[:, self._vis_starts[f]:self._vis_ends[f]])
+            text_cursor = self._text_cursors[f]
+        # Remaining text after all frames. A zero-length tail is safe and keeps
+        # the exported path shape-driven instead of branch-driven.
+        pieces.append(text_hidden_states[:, text_cursor:])
+        return torch.cat(pieces, dim=1)
+
+
+class ROTARY_IMAGE_PREFILL(torch.nn.Module):
+    """Precompute mRoPE rotary embeddings and causal mask for image prefill."""
+
+    def __init__(self, llm, tokenizer, num_images, image_seqlen, max_seq_len):
+        super().__init__()
+        # Build export-time representative prompt
+        query = "Q"
+        export_prompt = build_export_image_prompt(query, num_images, image_seqlen)
+        token_ids = tokenizer(export_prompt, return_tensors="np")["input_ids"][0]
+        mm_types = build_mm_token_type_ids(token_ids, "image")
+
+        cos, sin = self._build_rotary_table(llm, mm_types, num_images, image_seqlen, max_seq_len)
+        total_max = len(mm_types) + max_seq_len
         self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
         self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, total_max, total_max, dtype=torch.int8))) * -128
 
     @staticmethod
-    def _build_rotary_table(
-        llm,
-        width_factor: int,
-        height_factor: int,
-        prompt_head_len: int,
-        max_seq_len: int,
-    ):
-        vision_embed_size = width_factor * height_factor
-        prefix_plus_vision = prompt_head_len + vision_embed_size
-        tail_start = prompt_head_len + max(width_factor, height_factor)
+    def _build_rotary_table(llm, mm_types, num_images, image_seqlen, max_seq_len):
+        """Build 3-channel position IDs following upstream get_rope_index semantics."""
+        seq_len = len(mm_types)
+        merge_size = VISION_SPATIAL_MERGE_SIZE
+        grid_h = HEIGHT_FACTOR  # after merge
+        grid_w = WIDTH_FACTOR   # after merge
 
-        position_ids = torch.arange(prefix_plus_vision, dtype=torch.float32).repeat(
-            3, 1, 1
-        )
-        position_ids[0, :, prompt_head_len:prefix_plus_vision] = prompt_head_len
+        # Build position_ids [3, 1, total_len]
+        total_len = seq_len + max_seq_len
+        position_ids = torch.zeros(3, 1, total_len, dtype=torch.float32)
 
-        row_start = prompt_head_len
-        for start in range(prompt_head_len, prefix_plus_vision, width_factor):
-            position_ids[1, :, start : start + width_factor] = row_start
-            row_start += 1
+        current_pos = 0
+        i = 0
+        while i < seq_len:
+            if mm_types[i] == 0:
+                # Text token
+                position_ids[:, 0, i] = current_pos
+                current_pos += 1
+                i += 1
+            elif mm_types[i] == 1:
+                # Image segment
+                img_start = i
+                img_end = img_start + image_seqlen
+                # Temporal channel: constant
+                position_ids[0, 0, img_start:img_end] = current_pos
+                # Height channel
+                h_positions = torch.arange(grid_h, dtype=torch.float32).repeat_interleave(grid_w) + current_pos
+                position_ids[1, 0, img_start:img_end] = h_positions
+                # Width channel
+                w_positions = torch.arange(grid_w, dtype=torch.float32).repeat(grid_h) + current_pos
+                position_ids[2, 0, img_start:img_end] = w_positions
+                current_pos += max(grid_h, grid_w)
+                i = img_end
+            else:
+                position_ids[:, 0, i] = current_pos
+                current_pos += 1
+                i += 1
 
-        width_positions = torch.arange(
-            prompt_head_len, prompt_head_len + width_factor, dtype=torch.float32
-        )
-        for start in range(prompt_head_len, prefix_plus_vision, width_factor):
-            position_ids[2, :, start : start + width_factor] = width_positions
-
-        fill_tail_position = torch.arange(
-            tail_start, tail_start + max_seq_len, dtype=torch.float32
-        ).repeat(3, 1, 1)
-        position_ids = torch.cat(
-            [position_ids[:, :, :prefix_plus_vision], fill_tail_position], dim=-1
-        )
+        # Fill decode tail
+        tail_positions = torch.arange(max_seq_len, dtype=torch.float32) + current_pos
+        position_ids[:, 0, seq_len:] = tail_positions
 
         rotary_module = llm.model.language_model.rotary_emb
-        inv_freq_expanded = (
-            rotary_module.inv_freq[None, :, None].float().expand(3, -1, 1)
-        )
+        inv_freq_expanded = rotary_module.inv_freq[None, :, None].float().expand(3, -1, 1)
         freqs = inv_freq_expanded @ position_ids
         freqs = freqs.transpose(-1, -2).unsqueeze(1)
-        freqs = rotary_module.apply_interleaved_mrope(
-            freqs, rotary_module.mrope_section
-        )
+        freqs = rotary_module.apply_interleaved_mrope(freqs, rotary_module.mrope_section)
         return freqs.cos(), freqs.sin()
 
     def forward(self, ids_len, history_len):
@@ -1373,19 +1770,109 @@ class ROTARY_VISION_PREFILL(torch.nn.Module):
         return rotary_cos, rotary_sin, attention_mask, kv_seq_len
 
 
-class ROTARY_VISION_DECODE(torch.nn.Module):
-    """Provide mRoPE rotary embeddings for one decode step with vision context."""
+class ROTARY_IMAGE_DECODE(torch.nn.Module):
+    """Provide mRoPE rotary embeddings for one decode step with image context."""
 
-    def __init__(
-        self,
-        llm,
-        width_factor: int,
-        height_factor: int,
-        prompt_head_len: int,
-        max_seq_len: int,
-    ):
+    def __init__(self, llm, tokenizer, num_images, image_seqlen, max_seq_len):
         super().__init__()
-        cos, sin = ROTARY_VISION_PREFILL._build_rotary_table(llm, width_factor, height_factor, prompt_head_len, max_seq_len)
+        cos, sin = ROTARY_IMAGE_PREFILL._build_rotary_table(
+            llm, build_mm_token_type_ids(
+                tokenizer(build_export_image_prompt("Q", num_images, image_seqlen), return_tensors="np")["input_ids"][0],
+                "image"
+            ), num_images, image_seqlen, max_seq_len
+        )
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
+
+    def forward(self, kv_seq_len):
+        kv_seq_len_next = kv_seq_len + 1
+        rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len].float()
+        return rotary_cos, rotary_sin, kv_seq_len_next
+
+
+class ROTARY_VIDEO_PREFILL(torch.nn.Module):
+    """Precompute mRoPE rotary embeddings and causal mask for video prefill."""
+
+    def __init__(self, llm, tokenizer, num_frames, frame_seqlen, max_seq_len, fps=2.0):
+        super().__init__()
+        query = "Q"
+        export_prompt = build_export_video_prompt(query, num_frames, frame_seqlen, fps)
+        token_ids = tokenizer(export_prompt, return_tensors="np")["input_ids"][0]
+        mm_types = build_mm_token_type_ids(token_ids, "video")
+
+        cos, sin = self._build_rotary_table(llm, mm_types, num_frames, frame_seqlen, max_seq_len)
+        total_max = len(mm_types) + max_seq_len
+        self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
+        self.attention_mask = (1 - torch.tril(torch.ones(1, 1, 1, total_max, total_max, dtype=torch.int8))) * -128
+
+    @staticmethod
+    def _build_rotary_table(llm, mm_types, num_frames, frame_seqlen, max_seq_len):
+        """Build 3-channel position IDs for video following upstream get_rope_index."""
+        seq_len = len(mm_types)
+        merge_size = VISION_SPATIAL_MERGE_SIZE
+        grid_h = VIDEO_HEIGHT_FACTOR  # after merge
+        grid_w = VIDEO_WIDTH_FACTOR   # after merge
+
+        total_len = seq_len + max_seq_len
+        position_ids = torch.zeros(3, 1, total_len, dtype=torch.float32)
+
+        current_pos = 0
+        i = 0
+        while i < seq_len:
+            if mm_types[i] == 0:
+                position_ids[:, 0, i] = current_pos
+                current_pos += 1
+                i += 1
+            elif mm_types[i] == 2:
+                # Video frame segment
+                frame_start = i
+                frame_end = frame_start + frame_seqlen
+                # Temporal channel: constant for this frame
+                position_ids[0, 0, frame_start:frame_end] = current_pos
+                # Height channel
+                h_positions = torch.arange(grid_h, dtype=torch.float32).repeat_interleave(grid_w) + current_pos
+                position_ids[1, 0, frame_start:frame_end] = h_positions
+                # Width channel
+                w_positions = torch.arange(grid_w, dtype=torch.float32).repeat(grid_h) + current_pos
+                position_ids[2, 0, frame_start:frame_end] = w_positions
+                current_pos += max(grid_h, grid_w)
+                i = frame_end
+            else:
+                position_ids[:, 0, i] = current_pos
+                current_pos += 1
+                i += 1
+
+        # Fill decode tail
+        tail_positions = torch.arange(max_seq_len, dtype=torch.float32) + current_pos
+        position_ids[:, 0, seq_len:] = tail_positions
+
+        rotary_module = llm.model.language_model.rotary_emb
+        inv_freq_expanded = rotary_module.inv_freq[None, :, None].float().expand(3, -1, 1)
+        freqs = inv_freq_expanded @ position_ids
+        freqs = freqs.transpose(-1, -2).unsqueeze(1)
+        freqs = rotary_module.apply_interleaved_mrope(freqs, rotary_module.mrope_section)
+        return freqs.cos(), freqs.sin()
+
+    def forward(self, ids_len, history_len):
+        kv_seq_len = ids_len + history_len
+        rotary_cos = self.cos_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        rotary_sin = self.sin_rotary_pos_emb[:, history_len:kv_seq_len].float()
+        attention_mask = self.attention_mask[..., :ids_len, :kv_seq_len].float()
+        return rotary_cos, rotary_sin, attention_mask, kv_seq_len
+
+
+class ROTARY_VIDEO_DECODE(torch.nn.Module):
+    """Provide mRoPE rotary embeddings for one decode step with video context."""
+
+    def __init__(self, llm, tokenizer, num_frames, frame_seqlen, max_seq_len, fps=2.0):
+        super().__init__()
+        query = "Q"
+        export_prompt = build_export_video_prompt(query, num_frames, frame_seqlen, fps)
+        token_ids = tokenizer(export_prompt, return_tensors="np")["input_ids"][0]
+        mm_types = build_mm_token_type_ids(token_ids, "video")
+        cos, sin = ROTARY_VIDEO_PREFILL._build_rotary_table(llm, mm_types, num_frames, frame_seqlen, max_seq_len)
         self.register_buffer("cos_rotary_pos_emb", torch.cat([cos, cos], dim=-1).half().unsqueeze(2).unsqueeze(2))
         self.register_buffer("sin_rotary_pos_emb", torch.cat([-sin, sin], dim=-1).half().unsqueeze(2).unsqueeze(2))
 
@@ -1439,7 +1926,6 @@ class ROTARY_TEXT_DECODE(torch.nn.Module):
         rotary_cos = self.cos_rotary_pos_emb[:, kv_seq_len].float()
         rotary_sin = self.sin_rotary_pos_emb[:, kv_seq_len].float()
         return rotary_cos, rotary_sin, kv_seq_len_next
-
 
 class LLM_MAIN(torch.nn.Module):
     """Main transformer module for Qwen3.5 export and ORT inference.
@@ -2348,6 +2834,7 @@ if DO_EXPORT:
     with torch.inference_mode():
         model, tokenizer = load_model_and_tokenizer()
         prompt_head_len = compute_prompt_head_len(tokenizer)
+        between_len = compute_between_len(tokenizer)
 
         for note in normalize_kv_quant_settings(HEAD_DIM):
             print(f"\n{note}")
@@ -2376,6 +2863,7 @@ if DO_EXPORT:
         state_dynamic_axes = {**full_dynamic_axes, **linear_dynamic_axes}
         total_state_tensors = len(state_input_names)
 
+        # ── Export LLM_Embed ──
         input_ids = torch.ones((1, ids_len_dummy), dtype=torch.int32)
         torch.onnx.export(
             LLM_EMBED(model).eval(),
@@ -2393,62 +2881,133 @@ if DO_EXPORT:
         del input_ids
         gc.collect()
 
-        pixel_values = torch.randint(
-            0,
-            255,
-            size=(VISION_BATCH_SIZE, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]),
+        # ── Export LLM_Image_Preprocess ──
+        pixel_values_img = torch.randint(
+            0, 255,
+            size=(VISION_BATCH_SIZE, 1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]),
             dtype=torch.uint8,
         )
-        if INPUT_IMAGE_DIM != 4:
-            pixel_values = pixel_values.unsqueeze(1)
-        vision_dynamic_axes = {
-            "pixel_values": {0: "batch_size", -2: "height", -1: "width"},
-            "vision_hidden_states": {1: "vision_embed_len"},
-        }
+        img_preprocess = LLM_IMAGE_PREPROCESS(
+            model.model.visual, HEIGHT_FACTOR, WIDTH_FACTOR,
+            VISION_BATCH_SIZE, DYNAMIC_IMAGE_SHAPE
+        ).eval()
         torch.onnx.export(
-            LLM_VISION(model).eval(),
-            (pixel_values,),
-            onnx_model_Vision,
+            img_preprocess,
+            (pixel_values_img,),
+            onnx_model_Image_Preprocess,
             input_names=["pixel_values"],
-            output_names=["vision_hidden_states"],
-            dynamic_axes=vision_dynamic_axes if DYNAMIC_IMAGE_SHAPE else None,
+            output_names=["pixel_values_patches", "pos_embeds", "rotary_cos", "rotary_sin", "attention_mask"],
+            dynamic_axes={"pixel_values": {0: "num_images"}} if DYNAMIC_IMAGE_SHAPE else None,
             opset_version=OPSET,
             dynamo=False,
         )
-        del pixel_values
+        del pixel_values_img
         gc.collect()
 
-        text_hidden_states = torch.ones(
-            (1, ids_len_dummy, HIDDEN_SIZE), dtype=torch.float32
+        # ── Export LLM_Video_Preprocess ──
+        video_frames = torch.randint(
+            0, 255,
+            size=(VIDEO_NUM_FRAMES, 3, INPUT_VIDEO_SIZE[0], INPUT_VIDEO_SIZE[1]),
+            dtype=torch.uint8,
         )
-        vision_hidden_states = torch.ones(
-            (1, VISION_EMBED_SIZE, HIDDEN_SIZE), dtype=torch.float32
-        )
-        concat_dynamic_axes = {
-            "text_hidden_states": {1: "ids_len"},
-            "concat_hidden_states": {1: "total_len"},
-        }
-        if DYNAMIC_IMAGE_SHAPE:
-            concat_dynamic_axes["vision_hidden_states"] = {1: "vision_embed_len"}
+        vid_preprocess = LLM_VIDEO_PREPROCESS(
+            model.model.visual, VIDEO_NUM_FRAMES, VIDEO_HEIGHT_FACTOR, VIDEO_WIDTH_FACTOR, DYNAMIC_VIDEO_SHAPE
+        ).eval()
         torch.onnx.export(
-            LLM_CONCAT(prompt_head_len).eval(),
+            vid_preprocess,
+            (video_frames,),
+            onnx_model_Video_Preprocess,
+            input_names=["video_frames"],
+            output_names=["pixel_values_patches", "pos_embeds", "rotary_cos", "rotary_sin", "attention_mask"],
+            opset_version=OPSET,
+            dynamo=False,
+        )
+        del video_frames, vid_preprocess
+        gc.collect()
+
+        # ── Export shared LLM_Vision ──
+        # Use image patches as representative input
+        img_preprocess_for_vis = LLM_IMAGE_PREPROCESS(
+            model.model.visual, HEIGHT_FACTOR, WIDTH_FACTOR,
+            VISION_BATCH_SIZE, False
+        ).eval()
+        dummy_img = torch.randint(0, 255, size=(VISION_BATCH_SIZE, 1, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]), dtype=torch.uint8)
+        with torch.no_grad():
+            pv_patches, pos_emb, rot_cos, rot_sin, attn_mask = img_preprocess_for_vis(dummy_img)
+        vision_model = LLM_VISION(model).eval()
+        torch.onnx.export(
+            vision_model,
+            (pv_patches, pos_emb, rot_cos, rot_sin, attn_mask),
+            onnx_model_Vision,
+            input_names=["pixel_values", "pos_embeds", "rotary_cos", "rotary_sin", "attention_mask"],
+            output_names=["vision_hidden_states"],
+            dynamic_axes={
+                "pixel_values": {0: "total_patches"},
+                "pos_embeds": {1: "vision_seq_len"},
+                "rotary_cos": {3: "vision_seq_len"},
+                "rotary_sin": {3: "vision_seq_len"},
+                "attention_mask": {2: "vision_seq_len", 3: "vision_seq_len"},
+                "vision_hidden_states": {1: "vision_seq_len"},
+            },
+            opset_version=OPSET,
+            dynamo=False,
+        )
+        del pv_patches, pos_emb, rot_cos, rot_sin, attn_mask, dummy_img, img_preprocess_for_vis, vision_model
+        gc.collect()
+
+        # ── Export LLM_Concat_Image ──
+        text_hidden_states = torch.ones((1, ids_len_dummy, HIDDEN_SIZE), dtype=torch.float32)
+        vision_hidden_states = torch.ones((1, VISION_EMBED_SIZE, HIDDEN_SIZE), dtype=torch.float32)
+        concat_image = LLM_CONCAT_IMAGE(VISION_BATCH_SIZE, IMAGE_SEQLEN_PER_IMAGE, prompt_head_len, between_len).eval()
+        torch.onnx.export(
+            concat_image,
             (text_hidden_states, vision_hidden_states),
-            onnx_model_Concat,
+            onnx_model_Concat_Image,
             input_names=["text_hidden_states", "vision_hidden_states"],
             output_names=["concat_hidden_states"],
-            dynamic_axes=concat_dynamic_axes,
+            dynamic_axes={
+                "text_hidden_states": {1: "ids_len"},
+                "concat_hidden_states": {1: "total_len"},
+            },
             opset_version=OPSET,
             dynamo=False,
         )
-        del text_hidden_states, vision_hidden_states
+        del concat_image
         gc.collect()
 
+        # ── Export LLM_Concat_Video ──
+        # Build a representative tokenized video prompt so traced offsets match
+        # the in-place placeholder replacement semantics used at runtime.
+        video_export_prompt = build_export_video_prompt("Describe this video.", VIDEO_GRID_T, VIDEO_FRAME_SEQLEN, VIDEO_FPS)
+        video_prompt_tokens = tokenizer(video_export_prompt, return_tensors="np")["input_ids"][0]
+        video_text_len = int(video_prompt_tokens.shape[0])
+        text_hidden_video = torch.ones((1, video_text_len, HIDDEN_SIZE), dtype=torch.float32)
+        vision_hidden_video = torch.ones((1, VIDEO_TOTAL_VISION_TOKENS, HIDDEN_SIZE), dtype=torch.float32)
+        video_segment_offsets = build_video_segment_offsets(
+            video_prompt_tokens.tolist(), VIDEO_FRAME_SEQLEN
+        )
+        concat_video = LLM_CONCAT_VIDEO(video_segment_offsets, VIDEO_FRAME_SEQLEN).eval()
         torch.onnx.export(
-            ROTARY_VISION_PREFILL(
-                model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, MAX_SEQ_LEN
-            ).eval(),
+            concat_video,
+            (text_hidden_video, vision_hidden_video),
+            onnx_model_Concat_Video,
+            input_names=["text_hidden_states", "vision_hidden_states"],
+            output_names=["concat_hidden_states"],
+            dynamic_axes={
+                "text_hidden_states": {1: "ids_len"},
+                "concat_hidden_states": {1: "total_len"},
+            },
+            opset_version=OPSET,
+            dynamo=False,
+        )
+        del text_hidden_states, vision_hidden_states, text_hidden_video, vision_hidden_video, video_segment_offsets, concat_video, video_prompt_tokens
+        gc.collect()
+
+        # ── Export Rotary modules ──
+        torch.onnx.export(
+            ROTARY_IMAGE_PREFILL(model, tokenizer, VISION_BATCH_SIZE, IMAGE_SEQLEN_PER_IMAGE, MAX_SEQ_LEN).eval(),
             (ids_len, history_len),
-            onnx_model_Rotary_Vision_Prefill,
+            onnx_model_Rotary_Image_Prefill,
             input_names=["ids_len", "history_len"],
             output_names=["rotary_cos", "rotary_sin", "attention_mask", "kv_seq_len"],
             dynamic_axes={
@@ -2461,11 +3020,34 @@ if DO_EXPORT:
         )
 
         torch.onnx.export(
-            ROTARY_VISION_DECODE(
-                model, WIDTH_FACTOR, HEIGHT_FACTOR, prompt_head_len, MAX_SEQ_LEN
-            ).eval(),
+            ROTARY_IMAGE_DECODE(model, tokenizer, VISION_BATCH_SIZE, IMAGE_SEQLEN_PER_IMAGE, MAX_SEQ_LEN).eval(),
             (kv_seq_len,),
-            onnx_model_Rotary_Vision_Decode,
+            onnx_model_Rotary_Image_Decode,
+            input_names=["kv_seq_len"],
+            output_names=["rotary_cos", "rotary_sin", "kv_seq_len_next"],
+            opset_version=OPSET,
+            dynamo=False,
+        )
+
+        torch.onnx.export(
+            ROTARY_VIDEO_PREFILL(model, tokenizer, VIDEO_GRID_T, VIDEO_FRAME_SEQLEN, MAX_SEQ_LEN, VIDEO_FPS).eval(),
+            (ids_len, history_len),
+            onnx_model_Rotary_Video_Prefill,
+            input_names=["ids_len", "history_len"],
+            output_names=["rotary_cos", "rotary_sin", "attention_mask", "kv_seq_len"],
+            dynamic_axes={
+                "rotary_cos": {1: "ids_len"},
+                "rotary_sin": {1: "ids_len"},
+                "attention_mask": {3: "ids_len", 4: "kv_seq_len"},
+            },
+            opset_version=OPSET,
+            dynamo=False,
+        )
+
+        torch.onnx.export(
+            ROTARY_VIDEO_DECODE(model, tokenizer, VIDEO_GRID_T, VIDEO_FRAME_SEQLEN, MAX_SEQ_LEN, VIDEO_FPS).eval(),
+            (kv_seq_len,),
+            onnx_model_Rotary_Video_Decode,
             input_names=["kv_seq_len"],
             output_names=["rotary_cos", "rotary_sin", "kv_seq_len_next"],
             opset_version=OPSET,
@@ -2497,6 +3079,7 @@ if DO_EXPORT:
             dynamo=False,
         )
 
+        # ── Export LLM_Main ──
         ids_len_main_dummy = ids_len_dummy + VISION_EMBED_SIZE
         hidden_states = torch.ones(
             (batch_size, ids_len_main_dummy, HIDDEN_SIZE), dtype=torch.float32
@@ -2538,6 +3121,7 @@ if DO_EXPORT:
         del model_main, hidden_states, rotary_cos, rotary_sin, attention_mask
         gc.collect()
 
+        # ── Export decoding modules ──
         save_id_in = torch.zeros((BEAM_SIZE, 4), dtype=torch.int32)
         torch.onnx.export(
             GREEDY_SEARCH().eval(),
@@ -2678,8 +3262,6 @@ if DO_EXPORT:
 
     print("Export done. Starting ORT runtime.")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
 # ORT Runtime Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 def bind_ort_in_buf(binding, names, values):
@@ -2882,6 +3464,7 @@ kv_device = "cpu" if device_type == "dml" else device_type
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # Load ONNX Sessions
 # ══════════════════════════════════════════════════════════════════════════════
 # --- Embed ---
@@ -2890,29 +3473,87 @@ binding_Embed     = ort_session_Embed.io_binding()
 in_name_Embed     = get_in_names(ort_session_Embed)[0]
 out_name_Embed    = get_out_names(ort_session_Embed)[0]
 
-# --- Vision ---
+# --- Image Preprocess ---
+ort_session_Image_Preprocess = create_session(onnx_model_Image_Preprocess, **packed_settings)
+binding_Image_Preprocess     = ort_session_Image_Preprocess.io_binding()
+in_name_Image_Preprocess     = get_in_names(ort_session_Image_Preprocess)[0]
+out_name_Image_Preprocess    = get_out_names(ort_session_Image_Preprocess)
+
+# --- Video Preprocess ---
+ort_session_Video_Preprocess = create_session(onnx_model_Video_Preprocess, **packed_settings)
+binding_Video_Preprocess     = ort_session_Video_Preprocess.io_binding()
+in_name_Video_Preprocess     = get_in_names(ort_session_Video_Preprocess)[0]
+out_name_Video_Preprocess    = get_out_names(ort_session_Video_Preprocess)
+
+# --- Vision (shared) ---
 ort_session_Vision = create_session(onnx_model_Vision, **packed_settings)
 binding_Vision     = ort_session_Vision.io_binding()
-in_name_Vision     = get_in_names(ort_session_Vision)[0]
+in_name_Vision     = get_in_names(ort_session_Vision)
 out_name_Vision    = get_out_names(ort_session_Vision)[0]
-vision_dtype = np.float16 if "float16" in ort_session_Vision._outputs_meta[0].type else np.float32
 
-# --- Concat ---
-ort_session_Concat = create_session(onnx_model_Concat, **packed_settings)
-binding_Concat     = ort_session_Concat.io_binding()
-in_name_Concat     = get_in_names(ort_session_Concat)
-out_name_Concat    = get_out_names(ort_session_Concat)[0]
+# --- Concat Image ---
+ort_session_Concat_Image = create_session(onnx_model_Concat_Image, **packed_settings)
+binding_Concat_Image     = ort_session_Concat_Image.io_binding()
+in_name_Concat_Image     = get_in_names(ort_session_Concat_Image)
+out_name_Concat_Image    = get_out_names(ort_session_Concat_Image)[0]
 
-# --- Rotary Vision (Prefill + Decode) ---
-ort_session_Rotary_Vision_Prefill = create_session(onnx_model_Rotary_Vision_Prefill, **packed_settings)
-binding_Rotary_Vision_Prefill  = ort_session_Rotary_Vision_Prefill.io_binding()
-in_name_Rotary_Vision_Prefill  = get_in_names(ort_session_Rotary_Vision_Prefill)
-out_name_Rotary_Vision_Prefill = get_out_names(ort_session_Rotary_Vision_Prefill)
+# Read vision config from exported ONNX model metadata
+vision_batch_size = ort_session_Image_Preprocess._inputs_meta[0].shape[0]
+vision_embed_size = ort_session_Concat_Image._inputs_meta[1].shape[1]
 
-ort_session_Rotary_Vision_Decode = create_session(onnx_model_Rotary_Vision_Decode, **packed_settings)
-binding_Rotary_Vision_Decode  = ort_session_Rotary_Vision_Decode.io_binding()
-in_name_Rotary_Vision_Decode  = get_in_names(ort_session_Rotary_Vision_Decode)[0]
-out_name_Rotary_Vision_Decode = get_out_names(ort_session_Rotary_Vision_Decode)
+_img_meta_shape = ort_session_Image_Preprocess._inputs_meta[0].shape
+_img_h, _img_w = _img_meta_shape[3], _img_meta_shape[4]
+if isinstance(_img_h, int) and isinstance(_img_w, int):
+    input_image_size = [_img_h, _img_w]
+else:
+    _test_imgs = TEST_IMAGE if isinstance(TEST_IMAGE, list) else [TEST_IMAGE]
+    _first_valid = next((p for p in _test_imgs if is_valid_image_path(p)), None)
+    if _first_valid:
+        with Image.open(_first_valid) as _img:
+            input_image_size = [_img.height, _img.width]
+    else:
+        input_image_size = INPUT_IMAGE_SIZE
+
+_vid_meta_shape = ort_session_Video_Preprocess._inputs_meta[0].shape
+_vid_h, _vid_w = _vid_meta_shape[2], _vid_meta_shape[3]
+if isinstance(_vid_h, int) and isinstance(_vid_w, int):
+    input_video_size = [_vid_h, _vid_w]
+else:
+    if TEST_VIDEO and os.path.exists(TEST_VIDEO):
+        import cv2 as _cv2
+        _cap = _cv2.VideoCapture(TEST_VIDEO)
+        input_video_size = [int(_cap.get(_cv2.CAP_PROP_FRAME_HEIGHT)), int(_cap.get(_cv2.CAP_PROP_FRAME_WIDTH))]
+        _cap.release()
+    else:
+        input_video_size = INPUT_VIDEO_SIZE
+
+# --- Concat Video ---
+ort_session_Concat_Video = create_session(onnx_model_Concat_Video, **packed_settings)
+binding_Concat_Video     = ort_session_Concat_Video.io_binding()
+in_name_Concat_Video     = get_in_names(ort_session_Concat_Video)
+out_name_Concat_Video    = get_out_names(ort_session_Concat_Video)[0]
+
+# --- Rotary Image (Prefill + Decode) ---
+ort_session_Rotary_Image_Prefill = create_session(onnx_model_Rotary_Image_Prefill, **packed_settings)
+binding_Rotary_Image_Prefill  = ort_session_Rotary_Image_Prefill.io_binding()
+in_name_Rotary_Image_Prefill  = get_in_names(ort_session_Rotary_Image_Prefill)
+out_name_Rotary_Image_Prefill = get_out_names(ort_session_Rotary_Image_Prefill)
+
+ort_session_Rotary_Image_Decode = create_session(onnx_model_Rotary_Image_Decode, **packed_settings)
+binding_Rotary_Image_Decode  = ort_session_Rotary_Image_Decode.io_binding()
+in_name_Rotary_Image_Decode  = get_in_names(ort_session_Rotary_Image_Decode)[0]
+out_name_Rotary_Image_Decode = get_out_names(ort_session_Rotary_Image_Decode)
+
+# --- Rotary Video (Prefill + Decode) ---
+ort_session_Rotary_Video_Prefill = create_session(onnx_model_Rotary_Video_Prefill, **packed_settings)
+binding_Rotary_Video_Prefill  = ort_session_Rotary_Video_Prefill.io_binding()
+in_name_Rotary_Video_Prefill  = get_in_names(ort_session_Rotary_Video_Prefill)
+out_name_Rotary_Video_Prefill = get_out_names(ort_session_Rotary_Video_Prefill)
+
+ort_session_Rotary_Video_Decode = create_session(onnx_model_Rotary_Video_Decode, **packed_settings)
+binding_Rotary_Video_Decode  = ort_session_Rotary_Video_Decode.io_binding()
+in_name_Rotary_Video_Decode  = get_in_names(ort_session_Rotary_Video_Decode)[0]
+out_name_Rotary_Video_Decode = get_out_names(ort_session_Rotary_Video_Decode)
 
 # --- Rotary Text (Prefill + Decode) ---
 ort_session_Rotary_Text_Prefill = create_session(onnx_model_Rotary_Text_Prefill, **packed_settings)
@@ -2971,9 +3612,6 @@ kv_dtype_str = in_meta_Main[0].type
 hidden_dtype_Main = np.float16 if "float16" in in_meta_Main[num_keys_values_Main].type else np.float32
 
 vocab_size = ort_session_Main._outputs_meta[num_keys_values_Main].shape[1]
-vision_embed_size = ort_session_Vision._outputs_meta[0].shape[1]
-if not isinstance(vision_embed_size, (int, np.integer)):
-    vision_embed_size = VISION_BATCH_SIZE * WIDTH_FACTOR * HEIGHT_FACTOR
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2995,39 +3633,23 @@ if "uint8" in kv_dtype_str or "int8" in kv_dtype_str or "int32" in kv_dtype_str:
         )
         k_scales_Main = create_ort_with_meta_shape(
             in_meta_Main_by_name[in_name_Main_key_scales[0]],
-            scale_dtype_Main,
-            kv_device,
-            DEVICE_ID,
-            seq_axis=-1,
+            scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=-1,
         )
         v_scales_Main = create_ort_with_meta_shape(
             in_meta_Main_by_name[in_name_Main_value_scales[0]],
-            scale_dtype_Main,
-            kv_device,
-            DEVICE_ID,
-            seq_axis=3,
+            scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=3,
         )
         k_biases_Main = (
             create_ort_with_meta_shape(
                 in_meta_Main_by_name[in_name_Main_key_biases[0]],
-                scale_dtype_Main,
-                kv_device,
-                DEVICE_ID,
-                seq_axis=-1,
-            )
-            if in_name_Main_key_biases
-            else None
+                scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=-1,
+            ) if in_name_Main_key_biases else None
         )
         v_biases_Main = (
             create_ort_with_meta_shape(
                 in_meta_Main_by_name[in_name_Main_value_biases[0]],
-                scale_dtype_Main,
-                kv_device,
-                DEVICE_ID,
-                seq_axis=3,
-            )
-            if in_name_Main_value_biases
-            else None
+                scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=3,
+            ) if in_name_Main_value_biases else None
         )
     else:
         k_scales_Main = None
@@ -3042,442 +3664,542 @@ else:
     v_biases_Main = None
 
 past_keys_Main = create_ort_with_meta_shape(
-    in_meta_Main_by_name[in_name_Main_keys[0]],
-    kv_dtype_Main,
-    kv_device,
-    DEVICE_ID,
-    seq_axis=-1,
+    in_meta_Main_by_name[in_name_Main_keys[0]], kv_dtype_Main, kv_device, DEVICE_ID, seq_axis=-1,
 )
 past_values_Main = create_ort_with_meta_shape(
-    in_meta_Main_by_name[in_name_Main_values[0]],
-    kv_dtype_Main,
-    kv_device,
-    DEVICE_ID,
-    seq_axis=3,
+    in_meta_Main_by_name[in_name_Main_values[0]], kv_dtype_Main, kv_device, DEVICE_ID, seq_axis=3,
 )
 past_conv_states_Main = (
     create_ort_with_meta_shape(
-        in_meta_Main_by_name[in_name_Main_conv_states[0]],
-        np.float16,
-        kv_device,
-        DEVICE_ID,
-    )
-    if in_name_Main_conv_states
-    else None
+        in_meta_Main_by_name[in_name_Main_conv_states[0]], np.float16, kv_device, DEVICE_ID,
+    ) if in_name_Main_conv_states else None
 )
 past_recurrent_states_Main = (
     create_ort_with_meta_shape(
-        in_meta_Main_by_name[in_name_Main_recurrent_states[0]],
-        np.float16,
-        kv_device,
-        DEVICE_ID,
-    )
-    if in_name_Main_recurrent_states
-    else None
+        in_meta_Main_by_name[in_name_Main_recurrent_states[0]], np.float16, kv_device, DEVICE_ID,
+    ) if in_name_Main_recurrent_states else None
 )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Tokenizer and prompt construction
+# Determine mode and build prompt
 # ══════════════════════════════════════════════════════════════════════════════
 tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
 STOP_TOKEN_SET = set(STOP_TOKEN)
 
-if is_valid_image_path(TEST_IMAGE):
-    prompt = build_multimodal_prompt(TEST_QUERY)
-else:
-    prompt = build_text_prompt(TEST_QUERY)
 
-tokens = tokenizer(prompt, return_tensors="np")["input_ids"].astype(np.int32)
-num_prefill = tokens.shape[-1]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Shared OrtValue buffers
-# ══════════════════════════════════════════════════════════════════════════════
-input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
-ids_len          = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
-init_history_len = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
-topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DEVICE_ID)
-beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
-
-attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1), hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf = create_ort_with_shape(out_meta_Rotary_Text_Decode[0].shape, hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf = create_ort_with_shape(out_meta_Rotary_Text_Decode[1].shape, hidden_dtype_Main, device_type, DEVICE_ID)
-hidden_states_buf = create_ort_with_meta_shape(
-    in_meta_Main[num_keys_values_Main],
-    hidden_dtype_Main,
-    device_type,
-    DEVICE_ID,
-    batch_size=BEAM_SIZE,
-    seq_axis=1,
-    seq_len=1,
-)
-save_id_buf = create_ort_with_shape((BEAM_SIZE, 0), np.int32, device_type, DEVICE_ID)
-prefill_logits_buf = create_ort_with_shape((1, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
-decode_logits_buf = create_ort_with_shape((BEAM_SIZE, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
-max_idx_buf = create_ort_with_shape((1, 1), np.int32, device_type, DEVICE_ID)
-
-if isinstance(ort_session_Vision._outputs_meta[0].shape[1], int):
-    fixed_vision_shape = True
-    vision_hidden_states_buf = create_ort_with_shape(ort_session_Vision._outputs_meta[0].shape, vision_dtype, device_type, DEVICE_ID)
-    binding_Vision.bind_ortvalue_output(out_name_Vision, vision_hidden_states_buf)
-    binding_Concat.bind_ortvalue_input(in_name_Concat[1], vision_hidden_states_buf)
-else:
-    fixed_vision_shape = False
+def is_valid_video_path(path):
+    """Return True when path exists and has a video-like extension."""
+    if not path or not os.path.exists(path):
+        return False
+    valid_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
+    _, ext = os.path.splitext(path)
+    return ext.lower() in valid_extensions
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Decode head sessions
-# ══════════════════════════════════════════════════════════════════════════════
-if USE_BEAM_SEARCH:
-    print("\nBeam Search does not display immediate decoding results...")
+# Determine test modes
+test_image_paths = TEST_IMAGE if isinstance(TEST_IMAGE, list) else ([TEST_IMAGE] if TEST_IMAGE else [])
+valid_images = [p for p in test_image_paths if is_valid_image_path(p)]
+num_runtime_images = min(len(valid_images), vision_batch_size)
 
-    ort_session_First_Beam     = create_session(onnx_model_First_Beam, **packed_settings)
-    binding_First_Beam         = ort_session_First_Beam.io_binding()
-    in_name_First_Beam         = get_in_names(ort_session_First_Beam)
-    out_name_First_Beam        = get_out_names(ort_session_First_Beam)
-    in_name_First_Beam_parts   = in_name_First_Beam[:num_keys_values_Main_plus_1]
-    out_name_First_Beam_parts  = out_name_First_Beam[:num_keys_values_Main_plus_1]
-    out_name_First_Beam_others = out_name_First_Beam[num_keys_values_Main_plus_1:]
-
-    ort_session_Second_Beam     = create_session(onnx_model_Second_Beam, **packed_settings)
-    binding_Second_Beam         = ort_session_Second_Beam.io_binding()
-    in_name_Second_Beam         = get_in_names(ort_session_Second_Beam)
-    out_name_Second_Beam        = get_out_names(ort_session_Second_Beam)
-    in_name_Second_Beam_parts   = in_name_Second_Beam[:num_keys_values_Main_plus_1]
-    out_name_Second_Beam_parts  = out_name_Second_Beam[:num_keys_values_Main_plus_1]
-    out_name_Second_Beam_others = out_name_Second_Beam[num_keys_values_Main_plus_1:]
-
-    beam_ids_buf = create_ort_with_shape((BEAM_SIZE, 1), np.int32, device_type, DEVICE_ID)
-    beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
-    bind_ort_in_buf(
-        binding_First_Beam,
-        in_name_First_Beam[num_keys_values_Main_plus_1:num_keys_values_Main_plus_3],
-        [save_id_buf, beam_size],
-    )
-    bind_ort_in_buf(
-        binding_Second_Beam,
-        in_name_Second_Beam[num_keys_values_Main_plus_3:],
-        [beam_size, topK],
-    )
-else:
-    ort_session_Greedy = create_session(onnx_model_Greedy, **packed_settings)
-    binding_Greedy     = ort_session_Greedy.io_binding()
-    in_name_Greedy     = get_in_names(ort_session_Greedy)
-    out_name_Greedy    = get_out_names(ort_session_Greedy)
-    binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id_buf)
-
-    ort_session_Argmax = create_session(onnx_model_Argmax, **packed_settings)
-    binding_Argmax     = ort_session_Argmax.io_binding()
-    in_name_Argmax     = get_in_names(ort_session_Argmax)[0]
-    out_name_Argmax    = get_out_names(ort_session_Argmax)[0]
-    save_id_list       = []
+test_modes = []
+if valid_images:
+    test_modes.append(("image", TEST_QUERY[0] if isinstance(TEST_QUERY, list) else TEST_QUERY))
+if is_valid_video_path(TEST_VIDEO):
+    test_modes.append(("video", TEST_QUERY[1] if len(TEST_QUERY) > 1 else TEST_QUERY[0]))
+if not test_modes:
+    test_modes.append(("text", TEST_QUERY[0] if isinstance(TEST_QUERY, list) else TEST_QUERY))
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Penalty session
-# ══════════════════════════════════════════════════════════════════════════════
-if USE_PENALTY:
-    ort_session_Penalty = create_session(onnx_model_Penalty, **packed_settings)
-    binding_Penalty     = ort_session_Penalty.io_binding()
-    in_name_Penalty     = get_in_names(ort_session_Penalty)
-    out_name_Penalty    = get_out_names(ort_session_Penalty)[0]
-    penalty_dtype = (
-        np.float16
-        if "float16" in ort_session_Penalty._inputs_meta[2].type
-        else np.float32
-    )
-    penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
-    penalty_range = create_ort_with_data([PENALTY_RANGE], np.int64, device_type, DEVICE_ID)
-    bind_ort_in_buf(binding_Penalty, in_name_Penalty[2:], [penalty_value, penalty_range])
+for INPUT_MODE, current_query in test_modes:
+    print(f"\n{'═' * 56}")
+    print(f"  Running test: mode={INPUT_MODE}, query=\"{current_query}\"")
+    print(f"{'═' * 56}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Image validation and vision input preparation
-# ══════════════════════════════════════════════════════════════════════════════
-if is_valid_image_path(TEST_IMAGE):
-    image = Image.open(TEST_IMAGE)
-    image = image.resize((INPUT_IMAGE_SIZE[1], INPUT_IMAGE_SIZE[0]))
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    pixel_values = np.transpose(np.array(image).astype(np.uint8), (2, 0, 1))
-    if len(ort_session_Vision._inputs_meta[0].shape) != 4:
-        axis = (0, 1)
+    if INPUT_MODE == "video":
+        mode = "video"
+        query = current_query
+        tokens, mm_token_type_ids = build_prompt_and_mm_types(
+            query,
+            "video",
+            num_frames=VIDEO_GRID_T,
+            frame_seqlen=VIDEO_FRAME_SEQLEN,
+            fps=VIDEO_FPS,
+        )
+    elif INPUT_MODE == "image":
+        mode = "image"
+        query = current_query
+        tokens, mm_token_type_ids = build_prompt_and_mm_types(
+            query,
+            "image",
+            num_images=vision_batch_size,
+            image_seqlen=IMAGE_SEQLEN_PER_IMAGE,
+        )
     else:
-        axis = 0
-    pixel_values = np.expand_dims(pixel_values, axis=axis)
-    use_vision = True
-    print("\nChat with image.")
-else:
-    pixel_values = None
-    use_vision = False
-    print("\nChat without image.")
+        mode = "text"
+        query = current_query
+        tokens, mm_token_type_ids = build_prompt_and_mm_types(query, "text")
 
+    num_prefill = tokens.shape[-1]
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Prefill phase
-# ══════════════════════════════════════════════════════════════════════════════
-is_prefill_step    = True
-prefill_start_time = time.time()
-prefill_elapsed    = 0.0
-decode_start_time  = prefill_start_time
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Shared OrtValue buffers (recreated for each test mode)
+    # ══════════════════════════════════════════════════════════════════════════════
+    input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device_type, DEVICE_ID)
+    ids_len          = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
+    init_history_len = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
+    topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DEVICE_ID)
+    beam_size_ort    = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
 
-binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
-bind_ort_out(binding_Embed, [out_name_Embed], _ort_device_type)
-run(ort_session_Embed, binding_Embed)
-hidden_states = binding_Embed.get_outputs()[0]
-binding_Embed.bind_ortvalue_input(in_name_Embed, max_idx_buf)
-
-generate_limit = MAX_SEQ_LEN - num_prefill
-if use_vision:
-    print("\nStart to Process the Image...")
-    vision_start_time = time.time()
-    binding_Vision.bind_ortvalue_input(
-        in_name_Vision,
-        onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, DEVICE_ID),
+    attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1), hidden_dtype_Main, device_type, DEVICE_ID)
+    rotary_cos_buf = create_ort_with_shape(out_meta_Rotary_Text_Decode[0].shape, hidden_dtype_Main, device_type, DEVICE_ID)
+    rotary_sin_buf = create_ort_with_shape(out_meta_Rotary_Text_Decode[1].shape, hidden_dtype_Main, device_type, DEVICE_ID)
+    hidden_states_buf = create_ort_with_meta_shape(
+        in_meta_Main[num_keys_values_Main],
+        hidden_dtype_Main, device_type, DEVICE_ID,
+        batch_size=BEAM_SIZE, seq_axis=1, seq_len=1,
     )
-    if not fixed_vision_shape:
-        bind_ort_out(binding_Vision, [out_name_Vision], _ort_device_type)
-    run(ort_session_Vision, binding_Vision)
-    print(
-        f"\nImage Process Complete. Time Cost: {time.time() - vision_start_time:.3f} Seconds"
+    save_id_buf = create_ort_with_shape((BEAM_SIZE, 0), np.int32, device_type, DEVICE_ID)
+    prefill_logits_buf = create_ort_with_shape((1, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
+    decode_logits_buf = create_ort_with_shape((BEAM_SIZE, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
+    max_idx_buf = create_ort_with_shape((1, 1), np.int32, device_type, DEVICE_ID)
+
+    # Reset KV state buffers for fresh generation
+    past_keys_Main = create_ort_with_meta_shape(
+        in_meta_Main_by_name[in_name_Main_keys[0]], kv_dtype_Main, kv_device, DEVICE_ID, seq_axis=-1,
     )
-
-    if not fixed_vision_shape:
-        vision_hidden_states = binding_Vision.get_outputs()[0]
-        binding_Concat.bind_ortvalue_input(in_name_Concat[1], vision_hidden_states)
-    num_prefill += vision_embed_size
-    ids_len = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
-    generate_limit -= vision_embed_size
-    binding_Concat.bind_ortvalue_input(in_name_Concat[0], hidden_states)
-    bind_ort_out(binding_Concat, [out_name_Concat], _ort_device_type)
-    run(ort_session_Concat, binding_Concat)
-    concat_hidden_states = binding_Concat.get_outputs()[0]
-
-    bind_ort_in_buf(
-        binding_Rotary_Vision_Prefill,
-        in_name_Rotary_Vision_Prefill,
-        [ids_len, init_history_len],
+    past_values_Main = create_ort_with_meta_shape(
+        in_meta_Main_by_name[in_name_Main_values[0]], kv_dtype_Main, kv_device, DEVICE_ID, seq_axis=3,
     )
-    bind_ort_out(binding_Rotary_Vision_Prefill, out_name_Rotary_Vision_Prefill, _ort_device_type)
-    run(ort_session_Rotary_Vision_Prefill, binding_Rotary_Vision_Prefill)
-    rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Vision_Prefill.get_outputs()
-    binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], concat_hidden_states)
-else:
-    bind_ort_in_buf(
-        binding_Rotary_Text_Prefill,
-        in_name_Rotary_Text_Prefill,
-        [ids_len, init_history_len],
-    )
-    bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_device_type)
-    run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
-    rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
-    binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], hidden_states)
+    if in_name_Main_conv_states:
+        past_conv_states_Main = create_ort_with_meta_shape(
+            in_meta_Main_by_name[in_name_Main_conv_states[0]], np.float16, kv_device, DEVICE_ID,
+        )
+    if in_name_Main_recurrent_states:
+        past_recurrent_states_Main = create_ort_with_meta_shape(
+            in_meta_Main_by_name[in_name_Main_recurrent_states[0]], np.float16, kv_device, DEVICE_ID,
+        )
+    if k_scales_Main is not None:
+        k_scales_Main = create_ort_with_meta_shape(
+            in_meta_Main_by_name[in_name_Main_key_scales[0]],
+            scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=-1,
+        )
+        v_scales_Main = create_ort_with_meta_shape(
+            in_meta_Main_by_name[in_name_Main_value_scales[0]],
+            scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=3,
+        )
+    if k_biases_Main is not None:
+        k_biases_Main = create_ort_with_meta_shape(
+            in_meta_Main_by_name[in_name_Main_key_biases[0]],
+            scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=-1,
+        )
+        v_biases_Main = create_ort_with_meta_shape(
+            in_meta_Main_by_name[in_name_Main_value_biases[0]],
+            scale_dtype_Main, kv_device, DEVICE_ID, seq_axis=3,
+        )
 
-if use_vision:
-    binding_Rotary_Vision_Decode.bind_ortvalue_input(in_name_Rotary_Vision_Decode, kv_seq_len)
-    bind_ort_out_buf(
-        binding_Rotary_Vision_Decode,
-        out_name_Rotary_Vision_Decode,
-        [rotary_cos_buf, rotary_sin_buf, kv_seq_len],
-    )
-    ort_session_Rotary_Decode = ort_session_Rotary_Vision_Decode
-    binding_Rotary_Decode = binding_Rotary_Vision_Decode
-else:
-    binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
-    bind_ort_out_buf(
-        binding_Rotary_Text_Decode,
-        out_name_Rotary_Text_Decode,
-        [rotary_cos_buf, rotary_sin_buf, kv_seq_len],
-    )
-    ort_session_Rotary_Decode = ort_session_Rotary_Text_Decode
-    binding_Rotary_Decode = binding_Rotary_Text_Decode
-
-bind_ort_in_buf(
-    binding_Main,
-    in_name_Main[idx_rotary_cos:],
-    [rotary_cos, rotary_sin, attention_mask],
-)
-
-for name in in_name_Main_keys:
-    binding_Main.bind_ortvalue_input(name, past_keys_Main)
-for name in in_name_Main_values:
-    binding_Main.bind_ortvalue_input(name, past_values_Main)
-if k_scales_Main is not None:
-    for name in in_name_Main_key_scales:
-        binding_Main.bind_ortvalue_input(name, k_scales_Main)
-    for name in in_name_Main_value_scales:
-        binding_Main.bind_ortvalue_input(name, v_scales_Main)
-if k_biases_Main is not None:
-    for name in in_name_Main_key_biases:
-        binding_Main.bind_ortvalue_input(name, k_biases_Main)
-    for name in in_name_Main_value_biases:
-        binding_Main.bind_ortvalue_input(name, v_biases_Main)
-if past_conv_states_Main is not None:
-    for name in in_name_Main_conv_states:
-        binding_Main.bind_ortvalue_input(name, past_conv_states_Main)
-if past_recurrent_states_Main is not None:
-    for name in in_name_Main_recurrent_states:
-        binding_Main.bind_ortvalue_input(name, past_recurrent_states_Main)
-
-bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
-binding_Main.bind_ortvalue_output(out_name_Main_logits, prefill_logits_buf)
-
-if USE_PENALTY:
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], prefill_logits_buf)
-    binding_Penalty.bind_ortvalue_output(out_name_Penalty, prefill_logits_buf)
-
-if USE_BEAM_SEARCH:
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main], prefill_logits_buf)
-elif USE_PENALTY:
-    binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], prefill_logits_buf)
-    binding_Greedy.bind_ortvalue_output(out_name_Greedy[0], max_idx_buf)
-else:
-    binding_Argmax.bind_ortvalue_input(in_name_Argmax, prefill_logits_buf)
-    binding_Argmax.bind_ortvalue_output(out_name_Argmax, max_idx_buf)
+    # Recreate IO bindings for a fresh run
+    binding_Embed = ort_session_Embed.io_binding()
+    binding_Main = ort_session_Main.io_binding()
+    binding_Vision = ort_session_Vision.io_binding()
+    binding_Image_Preprocess = ort_session_Image_Preprocess.io_binding()
+    binding_Video_Preprocess = ort_session_Video_Preprocess.io_binding()
+    binding_Concat_Image = ort_session_Concat_Image.io_binding()
+    binding_Concat_Video = ort_session_Concat_Video.io_binding()
+    binding_Rotary_Image_Prefill = ort_session_Rotary_Image_Prefill.io_binding()
+    binding_Rotary_Image_Decode = ort_session_Rotary_Image_Decode.io_binding()
+    binding_Rotary_Video_Prefill = ort_session_Rotary_Video_Prefill.io_binding()
+    binding_Rotary_Video_Decode = ort_session_Rotary_Video_Decode.io_binding()
+    binding_Rotary_Text_Prefill = ort_session_Rotary_Text_Prefill.io_binding()
+    binding_Rotary_Text_Decode = ort_session_Rotary_Text_Decode.io_binding()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Decode loop
-# ══════════════════════════════════════════════════════════════════════════════
-print(f"\nTest Question: {TEST_QUERY}\nLLM Answering:")
-
-num_decode = 0
-save_id    = None
-
-while num_decode < generate_limit:
-
-    # ── 1. Run Main Model ────────────────────────────────────────────
-    run(ort_session_Main, binding_Main)
-    outputs_Main = binding_Main.get_outputs()
-
-    # ── 2. Apply Repetition Penalty (if enabled) ─────────────────────
-    if USE_PENALTY and num_decode >= PENALTY_RANGE:
-        binding_Penalty.bind_ortvalue_input(in_name_Penalty[1], save_id)
-        run(ort_session_Penalty, binding_Penalty)
-
-    # ── 3. Token Selection ───────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Decode head sessions
+    # ══════════════════════════════════════════════════════════════════════════════
     if USE_BEAM_SEARCH:
+        print("\nBeam Search does not display immediate decoding results...")
 
-        # ── 3a. Beam Search ──────────────────────────────────────────
-        if is_prefill_step:
-            bind_ort_in_buf(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
-            bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
-            bind_ort_out_buf(binding_First_Beam, out_name_First_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
-            run(ort_session_First_Beam, binding_First_Beam)
-            outputs_Beam = binding_First_Beam.get_outputs()
-        else:
-            bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
-            bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
-            if num_decode < 2:
-                binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_2], beam_score_buf)
-            bind_ort_out_buf(binding_Second_Beam, out_name_Second_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
-            run(ort_session_Second_Beam, binding_Second_Beam)
-            outputs_Beam = binding_Second_Beam.get_outputs()
+        ort_session_First_Beam     = create_session(onnx_model_First_Beam, **packed_settings)
+        binding_First_Beam         = ort_session_First_Beam.io_binding()
+        in_name_First_Beam         = get_in_names(ort_session_First_Beam)
+        out_name_First_Beam        = get_out_names(ort_session_First_Beam)
+        in_name_First_Beam_parts   = in_name_First_Beam[:num_keys_values_Main_plus_1]
+        out_name_First_Beam_parts  = out_name_First_Beam[:num_keys_values_Main_plus_1]
+        out_name_First_Beam_others = out_name_First_Beam[num_keys_values_Main_plus_1:]
 
-        max_logits_idx = int(max_idx_buf.numpy().flat[0])
-        if max_logits_idx in STOP_TOKEN_SET:
-            break
+        ort_session_Second_Beam     = create_session(onnx_model_Second_Beam, **packed_settings)
+        binding_Second_Beam         = ort_session_Second_Beam.io_binding()
+        in_name_Second_Beam         = get_in_names(ort_session_Second_Beam)
+        out_name_Second_Beam        = get_out_names(ort_session_Second_Beam)
+        in_name_Second_Beam_parts   = in_name_Second_Beam[:num_keys_values_Main_plus_1]
+        out_name_Second_Beam_parts  = out_name_Second_Beam[:num_keys_values_Main_plus_1]
+        out_name_Second_Beam_others = out_name_Second_Beam[num_keys_values_Main_plus_1:]
 
-        save_id = outputs_Beam[num_keys_values_Main]
-        bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Beam)
-        binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_1], save_id)
+        beam_ids_buf = create_ort_with_shape((BEAM_SIZE, 1), np.int32, device_type, DEVICE_ID)
+        beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
+        bind_ort_in_buf(
+            binding_First_Beam,
+            in_name_First_Beam[num_keys_values_Main_plus_1:num_keys_values_Main_plus_3],
+            [save_id_buf, beam_size_ort],
+        )
+        bind_ort_in_buf(
+            binding_Second_Beam,
+            in_name_Second_Beam[num_keys_values_Main_plus_3:],
+            [beam_size_ort, topK],
+        )
     else:
+        ort_session_Greedy = create_session(onnx_model_Greedy, **packed_settings)
+        binding_Greedy     = ort_session_Greedy.io_binding()
+        in_name_Greedy     = get_in_names(ort_session_Greedy)
+        out_name_Greedy    = get_out_names(ort_session_Greedy)
+        binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id_buf)
 
-        # ── 3b. Greedy / Argmax ──────────────────────────────────────
-        if USE_PENALTY:
-            binding_Greedy._iobinding.bind_output(out_name_Greedy[1], _ort_device_type)
-            run(ort_session_Greedy, binding_Greedy)
-            greedy_outputs = binding_Greedy.get_outputs()
-            save_id = greedy_outputs[1]
-        else:
-            run(ort_session_Argmax, binding_Argmax)
+        ort_session_Argmax = create_session(onnx_model_Argmax, **packed_settings)
+        binding_Argmax     = ort_session_Argmax.io_binding()
+        in_name_Argmax     = get_in_names(ort_session_Argmax)[0]
+        out_name_Argmax    = get_out_names(ort_session_Argmax)[0]
+        save_id_list       = []
 
-        max_logits_idx = int(max_idx_buf.numpy().flat[0])
-        if max_logits_idx in STOP_TOKEN_SET:
-            break
 
-        if USE_PENALTY:
-            binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id)
-        else:
-            save_id_list.append(max_logits_idx)
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Penalty session
+    # ══════════════════════════════════════════════════════════════════════════════
+    if USE_PENALTY:
+        ort_session_Penalty = create_session(onnx_model_Penalty, **packed_settings)
+        binding_Penalty     = ort_session_Penalty.io_binding()
+        in_name_Penalty     = get_in_names(ort_session_Penalty)
+        out_name_Penalty    = get_out_names(ort_session_Penalty)[0]
+        penalty_dtype = (
+            np.float16
+            if "float16" in ort_session_Penalty._inputs_meta[2].type
+            else np.float32
+        )
+        penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
+        penalty_range_ort = create_ort_with_data([PENALTY_RANGE], np.int64, device_type, DEVICE_ID)
+        bind_ort_in_buf(binding_Penalty, in_name_Penalty[2:], [penalty_value, penalty_range_ort])
 
-        bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Main)
-        print(tokenizer.decode(max_logits_idx), end="", flush=True)
 
-    # ── 4. Re-bind Main KV outputs (fresh allocation each step) ──────
-    bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Prefill phase
+    # ══════════════════════════════════════════════════════════════════════════════
+    is_prefill_step    = True
+    prefill_start_time = time.time()
+    prefill_elapsed    = 0.0
+    decode_start_time  = prefill_start_time
 
-    # ── 5. Transition: prefill → decode (executes once) ──────────────
-    if is_prefill_step:
-        binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], hidden_states_buf)
-        bind_ort_in_buf(binding_Main, in_name_Main[idx_rotary_cos:], [rotary_cos_buf, rotary_sin_buf, attention_mask_buf])
-        binding_Main.bind_ortvalue_output(out_name_Main_logits, decode_logits_buf)
-        binding_Embed.bind_ortvalue_output(out_name_Embed, hidden_states_buf)
-
-        if USE_PENALTY:
-            binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], decode_logits_buf)
-            binding_Penalty.bind_ortvalue_output(out_name_Penalty, decode_logits_buf)
-
-        if USE_BEAM_SEARCH:
-            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main], decode_logits_buf)
-            binding_Embed.bind_ortvalue_input(in_name_Embed, beam_ids_buf)
-        elif USE_PENALTY:
-            binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], decode_logits_buf)
-        else:
-            binding_Argmax.bind_ortvalue_input(in_name_Argmax, decode_logits_buf)
-
-        is_prefill_step = False
-        decode_start_time = time.time()
-        prefill_elapsed = decode_start_time - prefill_start_time
-
-    # ── 6. Prepare next step: Embed + Rotary ─────────────────────────
+    binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
+    bind_ort_out(binding_Embed, [out_name_Embed], _ort_device_type)
     run(ort_session_Embed, binding_Embed)
-    run(ort_session_Rotary_Decode, binding_Rotary_Decode)
-    num_decode += 1
+    hidden_states = binding_Embed.get_outputs()[0]
+    binding_Embed.bind_ortvalue_input(in_name_Embed, max_idx_buf)
+
+    generate_limit = MAX_SEQ_LEN - num_prefill
+
+    if mode == "image":
+        print("\nStart to Process the Image(s)...")
+        vision_start_time = time.time()
+
+        # Load and preprocess images
+        images = []
+        for img_path in valid_images[:num_runtime_images]:
+            with Image.open(img_path) as img:
+                img = img.resize((input_image_size[1], input_image_size[0]))
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                images.append(np.transpose(np.array(img).astype(np.uint8), (2, 0, 1)))
+
+        # Keep the exported fixed-slot image contract stable by padding unused image
+        # slots with a neutral gray image that stays close to zero after normalization.
+        blank_image = np.full((3, input_image_size[0], input_image_size[1]), 128, dtype=np.uint8)
+        while len(images) < vision_batch_size:
+            images.append(blank_image)
+        pixel_values = np.stack(images, axis=0)  # [N, 3, H, W]
+        pixel_values = np.expand_dims(pixel_values, axis=1)  # [N, 1, 3, H, W]
+
+        # Run image preprocess
+        binding_Image_Preprocess.bind_ortvalue_input(
+            in_name_Image_Preprocess,
+            onnxruntime.OrtValue.ortvalue_from_numpy(pixel_values, device_type, DEVICE_ID),
+        )
+        bind_ort_out(binding_Image_Preprocess, out_name_Image_Preprocess, _ort_device_type)
+        run(ort_session_Image_Preprocess, binding_Image_Preprocess)
+        preprocess_outputs = binding_Image_Preprocess.get_outputs()
+
+        # Run shared vision encoder
+        for i, name in enumerate(in_name_Vision):
+            binding_Vision.bind_ortvalue_input(name, preprocess_outputs[i])
+        bind_ort_out(binding_Vision, [out_name_Vision], _ort_device_type)
+        run(ort_session_Vision, binding_Vision)
+        vision_hidden_states = binding_Vision.get_outputs()[0]
+
+        print(f"\nImage Process Complete. Time Cost: {time.time() - vision_start_time:.3f} Seconds")
+
+        # Image concat: adds vision tokens to prefill
+        num_prefill += vision_embed_size
+        ids_len = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
+        generate_limit -= vision_embed_size
+
+        binding_Concat_Image.bind_ortvalue_input(in_name_Concat_Image[0], hidden_states)
+        binding_Concat_Image.bind_ortvalue_input(in_name_Concat_Image[1], vision_hidden_states)
+        bind_ort_out(binding_Concat_Image, [out_name_Concat_Image], _ort_device_type)
+        run(ort_session_Concat_Image, binding_Concat_Image)
+        concat_hidden_states = binding_Concat_Image.get_outputs()[0]
+
+        # Image rotary prefill
+        bind_ort_in_buf(binding_Rotary_Image_Prefill, in_name_Rotary_Image_Prefill, [ids_len, init_history_len])
+        bind_ort_out(binding_Rotary_Image_Prefill, out_name_Rotary_Image_Prefill, _ort_device_type)
+        run(ort_session_Rotary_Image_Prefill, binding_Rotary_Image_Prefill)
+        rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Image_Prefill.get_outputs()
+        binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], concat_hidden_states)
+
+        # Set decode rotary
+        binding_Rotary_Image_Decode.bind_ortvalue_input(in_name_Rotary_Image_Decode, kv_seq_len)
+        bind_ort_out_buf(binding_Rotary_Image_Decode, out_name_Rotary_Image_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
+        ort_session_Rotary_Decode = ort_session_Rotary_Image_Decode
+        binding_Rotary_Decode = binding_Rotary_Image_Decode
+
+    elif mode == "video":
+        print("\nStart to Process the Video...")
+        vision_start_time = time.time()
+
+        video_frames, sampled_frame_indices = sample_video_frames(
+            TEST_VIDEO,
+            VIDEO_FPS,
+            VIDEO_NUM_FRAMES,
+            VIDEO_MIN_FRAMES,
+            VIDEO_MAX_FRAMES,
+            input_video_size,
+        )
+        del sampled_frame_indices
+
+        # Run video preprocess
+        binding_Video_Preprocess.bind_ortvalue_input(
+            in_name_Video_Preprocess,
+            onnxruntime.OrtValue.ortvalue_from_numpy(video_frames, device_type, DEVICE_ID),
+        )
+        bind_ort_out(binding_Video_Preprocess, out_name_Video_Preprocess, _ort_device_type)
+        run(ort_session_Video_Preprocess, binding_Video_Preprocess)
+        preprocess_outputs = binding_Video_Preprocess.get_outputs()
+
+        # Run shared vision encoder
+        for i, name in enumerate(in_name_Vision):
+            binding_Vision.bind_ortvalue_input(name, preprocess_outputs[i])
+        bind_ort_out(binding_Vision, [out_name_Vision], _ort_device_type)
+        run(ort_session_Vision, binding_Vision)
+        vision_hidden_states = binding_Vision.get_outputs()[0]
+
+        print(f"\nVideo Process Complete. Time Cost: {time.time() - vision_start_time:.3f} Seconds")
+
+        # Video concat: replaces pads in-place, NO change to num_prefill
+        binding_Concat_Video.bind_ortvalue_input(in_name_Concat_Video[0], hidden_states)
+        binding_Concat_Video.bind_ortvalue_input(in_name_Concat_Video[1], vision_hidden_states)
+        bind_ort_out(binding_Concat_Video, [out_name_Concat_Video], _ort_device_type)
+        run(ort_session_Concat_Video, binding_Concat_Video)
+        concat_hidden_states = binding_Concat_Video.get_outputs()[0]
+
+        # Video rotary prefill
+        bind_ort_in_buf(binding_Rotary_Video_Prefill, in_name_Rotary_Video_Prefill, [ids_len, init_history_len])
+        bind_ort_out(binding_Rotary_Video_Prefill, out_name_Rotary_Video_Prefill, _ort_device_type)
+        run(ort_session_Rotary_Video_Prefill, binding_Rotary_Video_Prefill)
+        rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Video_Prefill.get_outputs()
+        binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], concat_hidden_states)
+
+        # Set decode rotary
+        binding_Rotary_Video_Decode.bind_ortvalue_input(in_name_Rotary_Video_Decode, kv_seq_len)
+        bind_ort_out_buf(binding_Rotary_Video_Decode, out_name_Rotary_Video_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
+        ort_session_Rotary_Decode = ort_session_Rotary_Video_Decode
+        binding_Rotary_Decode = binding_Rotary_Video_Decode
+
+    else:
+        # Text-only mode
+        bind_ort_in_buf(binding_Rotary_Text_Prefill, in_name_Rotary_Text_Prefill, [ids_len, init_history_len])
+        bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_device_type)
+        run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
+        rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
+        binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], hidden_states)
+
+        binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
+        bind_ort_out_buf(binding_Rotary_Text_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
+        ort_session_Rotary_Decode = ort_session_Rotary_Text_Decode
+        binding_Rotary_Decode = binding_Rotary_Text_Decode
+
+    bind_ort_in_buf(binding_Main, in_name_Main[idx_rotary_cos:], [rotary_cos, rotary_sin, attention_mask])
+
+    for name in in_name_Main_keys:
+        binding_Main.bind_ortvalue_input(name, past_keys_Main)
+    for name in in_name_Main_values:
+        binding_Main.bind_ortvalue_input(name, past_values_Main)
+    if k_scales_Main is not None:
+        for name in in_name_Main_key_scales:
+            binding_Main.bind_ortvalue_input(name, k_scales_Main)
+        for name in in_name_Main_value_scales:
+            binding_Main.bind_ortvalue_input(name, v_scales_Main)
+    if k_biases_Main is not None:
+        for name in in_name_Main_key_biases:
+            binding_Main.bind_ortvalue_input(name, k_biases_Main)
+        for name in in_name_Main_value_biases:
+            binding_Main.bind_ortvalue_input(name, v_biases_Main)
+    if past_conv_states_Main is not None:
+        for name in in_name_Main_conv_states:
+            binding_Main.bind_ortvalue_input(name, past_conv_states_Main)
+    if past_recurrent_states_Main is not None:
+        for name in in_name_Main_recurrent_states:
+            binding_Main.bind_ortvalue_input(name, past_recurrent_states_Main)
+
+    bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
+    binding_Main.bind_ortvalue_output(out_name_Main_logits, prefill_logits_buf)
+
+    if USE_PENALTY:
+        binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], prefill_logits_buf)
+        binding_Penalty.bind_ortvalue_output(out_name_Penalty, prefill_logits_buf)
+
+    if USE_BEAM_SEARCH:
+        binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main], prefill_logits_buf)
+    elif USE_PENALTY:
+        binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], prefill_logits_buf)
+        binding_Greedy.bind_ortvalue_output(out_name_Greedy[0], max_idx_buf)
+    else:
+        binding_Argmax.bind_ortvalue_input(in_name_Argmax, prefill_logits_buf)
+        binding_Argmax.bind_ortvalue_output(out_name_Argmax, max_idx_buf)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Results
-# ══════════════════════════════════════════════════════════════════════════════
-decode_end_time = time.time()
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Decode loop
+    # ══════════════════════════════════════════════════════════════════════════════
+    print(f"\nTest Question: {query}\nLLM Answering:")
 
-if num_decode < 2:
-    prefill_elapsed = 0.0
-    decode_elapsed = 0.0
-else:
-    decode_elapsed = decode_end_time - decode_start_time
+    num_decode = 0
+    save_id    = None
 
-total_elapsed = decode_end_time - prefill_start_time
+    while num_decode < generate_limit:
 
-prefill_tokens_per_second = num_prefill / prefill_elapsed if prefill_elapsed > 0 else 0.0
-decode_tokens_per_second = num_decode / decode_elapsed if decode_elapsed > 0 else 0.0
-overall_tokens_per_second = (num_decode + 1) / total_elapsed if total_elapsed > 0 else 0.0
+        # ── 1. Run Main Model ──────────────────────────────────────────────────────
+        run(ort_session_Main, binding_Main)
+        outputs_Main = binding_Main.get_outputs()
+
+        # ── 2. Apply Repetition Penalty (if enabled) ─────────────────────
+        if USE_PENALTY and num_decode >= PENALTY_RANGE:
+            binding_Penalty.bind_ortvalue_input(in_name_Penalty[1], save_id)
+            run(ort_session_Penalty, binding_Penalty)
+
+        # ── 3. Token Selection ─────────────────────────────────────────────────────
+        if USE_BEAM_SEARCH:
+            if is_prefill_step:
+                bind_ort_in_buf(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
+                bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
+                bind_ort_out_buf(binding_First_Beam, out_name_First_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
+                run(ort_session_First_Beam, binding_First_Beam)
+                outputs_Beam = binding_First_Beam.get_outputs()
+            else:
+                bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
+                bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
+                if num_decode < 2:
+                    binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_2], beam_score_buf)
+                bind_ort_out_buf(binding_Second_Beam, out_name_Second_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
+                run(ort_session_Second_Beam, binding_Second_Beam)
+                outputs_Beam = binding_Second_Beam.get_outputs()
+
+            max_logits_idx = int(max_idx_buf.numpy().flat[0])
+            if max_logits_idx in STOP_TOKEN_SET:
+                break
+
+            save_id = outputs_Beam[num_keys_values_Main]
+            bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Beam)
+            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_1], save_id)
+        else:
+            if USE_PENALTY:
+                binding_Greedy._iobinding.bind_output(out_name_Greedy[1], _ort_device_type)
+                run(ort_session_Greedy, binding_Greedy)
+                greedy_outputs = binding_Greedy.get_outputs()
+                save_id = greedy_outputs[1]
+            else:
+                run(ort_session_Argmax, binding_Argmax)
+
+            max_logits_idx = int(max_idx_buf.numpy().flat[0])
+            if max_logits_idx in STOP_TOKEN_SET:
+                break
+
+            if USE_PENALTY:
+                binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id)
+            else:
+                save_id_list.append(max_logits_idx)
+
+            bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Main)
+            print(tokenizer.decode(max_logits_idx), end="", flush=True)
+
+        # ── 4. Re-bind Main KV outputs (fresh allocation each step) ──────
+        bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
+
+        # ── 5. Transition: prefill → decode (executes once) ──────────────
+        if is_prefill_step:
+            binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], hidden_states_buf)
+            bind_ort_in_buf(binding_Main, in_name_Main[idx_rotary_cos:], [rotary_cos_buf, rotary_sin_buf, attention_mask_buf])
+            binding_Main.bind_ortvalue_output(out_name_Main_logits, decode_logits_buf)
+            binding_Embed.bind_ortvalue_output(out_name_Embed, hidden_states_buf)
+
+            if USE_PENALTY:
+                binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], decode_logits_buf)
+                binding_Penalty.bind_ortvalue_output(out_name_Penalty, decode_logits_buf)
+
+            if USE_BEAM_SEARCH:
+                binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main], decode_logits_buf)
+                binding_Embed.bind_ortvalue_input(in_name_Embed, beam_ids_buf)
+            elif USE_PENALTY:
+                binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], decode_logits_buf)
+            else:
+                binding_Argmax.bind_ortvalue_input(in_name_Argmax, decode_logits_buf)
+
+            is_prefill_step = False
+            decode_start_time = time.time()
+            prefill_elapsed = decode_start_time - prefill_start_time
+
+        # ── 6. Prepare next step: Embed + Rotary ─────────────────────────────
+        run(ort_session_Embed, binding_Embed)
+        run(ort_session_Rotary_Decode, binding_Rotary_Decode)
+        num_decode += 1
 
 
-if USE_PENALTY or USE_BEAM_SEARCH:
-    result = (
-        tokenizer.decode(save_id.numpy().flat[:num_decode], skip_special_tokens=True)
-        if save_id is not None
-        else ""
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Results
+    # ══════════════════════════════════════════════════════════════════════════════
+    decode_end_time = time.time()
+
+    if num_decode < 2:
+        prefill_elapsed = 0.0
+        decode_elapsed = 0.0
+    else:
+        decode_elapsed = decode_end_time - decode_start_time
+
+    total_elapsed = decode_end_time - prefill_start_time
+
+    prefill_tokens_per_second = num_prefill / prefill_elapsed if prefill_elapsed > 0 else 0.0
+    decode_tokens_per_second = num_decode / decode_elapsed if decode_elapsed > 0 else 0.0
+    overall_tokens_per_second = (num_decode + 1) / total_elapsed if total_elapsed > 0 else 0.0
+
+
+    if USE_PENALTY or USE_BEAM_SEARCH:
+        result = (
+            tokenizer.decode(save_id.numpy().flat[:num_decode], skip_special_tokens=True)
+            if save_id is not None
+            else ""
+        )
+    else:
+        result = tokenizer.decode(save_id_list, skip_special_tokens=True)
+
+    print(
+        f"\n\n{chr(9472) * 56}\n"
+        f"  Generated Output\n"
+        f"{chr(9472) * 56}\n"
+        f"{result}\n"
+        f"{chr(9472) * 56}\n\n"
+        f"  Performance Summary\n"
+        f"{chr(9472) * 56}\n"
+        f"  {'Phase':<12} {'Speed':>14} {'Tokens':>8} {'Time':>10}\n"
+        f"  {chr(9472) * 48}\n"
+        f"  {'Prefill':<12} {prefill_tokens_per_second:>10.2f} t/s {num_prefill:>8d} {prefill_elapsed:>8.3f}s\n"
+        f"  {'Decode':<12} {decode_tokens_per_second:>10.2f} t/s {num_decode:>8d} {decode_elapsed:>8.3f}s\n"
+        f"  {chr(9472) * 48}\n"
+        f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
+        f"{chr(9472) * 56}\n"
     )
-else:
-    result = tokenizer.decode(save_id_list, skip_special_tokens=True)
-
-print(
-    f"\n\n{'─' * 56}\n"
-    f"  📝 Generated Output\n"
-    f"{'─' * 56}\n"
-    f"{result}\n"
-    f"{'─' * 56}\n\n"
-    f"  ⚡ Performance Summary\n"
-    f"{'─' * 56}\n"
-    f"  {'Phase':<12} {'Speed':>14} {'Tokens':>8} {'Time':>10}\n"
-    f"  {'─' * 48}\n"
-    f"  {'Prefill':<12} {prefill_tokens_per_second:>10.2f} t/s {num_prefill:>8d} {prefill_elapsed:>8.3f}s\n"
-    f"  {'Decode':<12} {decode_tokens_per_second:>10.2f} t/s {num_decode:>8d} {decode_elapsed:>8.3f}s\n"
-    f"  {'─' * 48}\n"
-    f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
-    f"{'─' * 56}\n"
-)
