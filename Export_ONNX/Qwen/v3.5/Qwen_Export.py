@@ -15,26 +15,26 @@ from PIL import Image
 from onnxruntime.capi import _pybind_state as C
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-download_path                    = r"/home/iamj/Downloads/Qwen3.5-0.8B"                  # Set the folder path where the Qwen3.5 dense model project downloaded.
-onnx_model_Embed                 = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Embed.onnx"      # Assign a path where the exported Qwen model stored.
-onnx_model_Vision                = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Vision.onnx"
-onnx_model_Image_Preprocess      = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Image_Preprocess.onnx"
-onnx_model_Video_Preprocess      = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Video_Preprocess.onnx"
-onnx_model_Concat_Image          = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Concat_Image.onnx"
-onnx_model_Concat_Video          = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Concat_Video.onnx"
-onnx_model_Rotary_Image_Prefill  = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Image_Prefill.onnx"
-onnx_model_Rotary_Image_Decode   = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Image_Decode.onnx"
-onnx_model_Rotary_Video_Prefill  = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Video_Prefill.onnx"
-onnx_model_Rotary_Video_Decode   = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Video_Decode.onnx"
-onnx_model_Rotary_Text_Prefill   = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Text_Prefill.onnx"
-onnx_model_Rotary_Text_Decode    = r"/home/iamj/Downloads/Qwen_ONNX/Rotary_Text_Decode.onnx"
-onnx_model_Main                  = r"/home/iamj/Downloads/Qwen_ONNX/LLM_Main.onnx"
-onnx_model_Greedy                = r"/home/iamj/Downloads/Qwen_ONNX/Greedy_Search.onnx"
-onnx_model_First_Beam            = r"/home/iamj/Downloads/Qwen_ONNX/First_Beam_Search.onnx"
-onnx_model_Second_Beam           = r"/home/iamj/Downloads/Qwen_ONNX/Second_Beam_Search.onnx"
-onnx_model_Penalty               = r"/home/iamj/Downloads/Qwen_ONNX/Apply_Penalty.onnx"
-onnx_model_Argmax                = r"/home/iamj/Downloads/Qwen_ONNX/Argmax.onnx"
-onnx_model_KV_Slice              = r"/home/iamj/Downloads/Qwen_ONNX/KV_Slice.onnx"
+download_path                    = r"/home/DakeQQ/Downloads/Qwen3.5-0.8B"                  # Set the folder path where the Qwen3.5 dense model project downloaded.
+onnx_model_Embed                 = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Embed.onnx"      # Assign a path where the exported Qwen model stored.
+onnx_model_Vision                = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Vision.onnx"
+onnx_model_Image_Preprocess      = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Image_Preprocess.onnx"
+onnx_model_Video_Preprocess      = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Video_Preprocess.onnx"
+onnx_model_Concat_Image          = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat_Image.onnx"
+onnx_model_Concat_Video          = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Concat_Video.onnx"
+onnx_model_Rotary_Image_Prefill  = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Image_Prefill.onnx"
+onnx_model_Rotary_Image_Decode   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Image_Decode.onnx"
+onnx_model_Rotary_Video_Prefill  = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Video_Prefill.onnx"
+onnx_model_Rotary_Video_Decode   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Video_Decode.onnx"
+onnx_model_Rotary_Text_Prefill   = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Prefill.onnx"
+onnx_model_Rotary_Text_Decode    = r"/home/DakeQQ/Downloads/Qwen_ONNX/Rotary_Text_Decode.onnx"
+onnx_model_Main                  = r"/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Main.onnx"
+onnx_model_Greedy                = r"/home/DakeQQ/Downloads/Qwen_ONNX/Greedy_Search.onnx"
+onnx_model_First_Beam            = r"/home/DakeQQ/Downloads/Qwen_ONNX/First_Beam_Search.onnx"
+onnx_model_Second_Beam           = r"/home/DakeQQ/Downloads/Qwen_ONNX/Second_Beam_Search.onnx"
+onnx_model_Penalty               = r"/home/DakeQQ/Downloads/Qwen_ONNX/Apply_Penalty.onnx"
+onnx_model_Argmax                = r"/home/DakeQQ/Downloads/Qwen_ONNX/Argmax.onnx"
+onnx_model_KV_Slice              = r"/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.onnx"
 
 # Test Input
 TEST_IMAGE                       = [r"./psyduck.png"]                                     # List of image paths for multi-image support. Use [] for text-only.
