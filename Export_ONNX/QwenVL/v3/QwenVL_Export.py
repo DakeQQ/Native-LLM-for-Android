@@ -33,9 +33,11 @@ onnx_model_KV_Slice             = r'/home/DakeQQ/Downloads/Qwen_ONNX/KV_Slice.on
 onnx_model_Video_Preprocess     = r'/home/DakeQQ/Downloads/Qwen_ONNX/LLM_Video_Preprocess.onnx'
 
 # Test Input
-TEST_IMAGE               = ["../psyduck.png", "../psyduck_2.png"]                                   # List of test images for the exported onnx model. Supports multi-image: [r"img1.png", r"img2.png"]
+TEST_IMAGE               = ["../psyduck.png"]                                   # List of test images for the exported onnx model. Supports multi-image: [r"img1.png", r"img2.png"]
 TEST_VIDEO               = r"../test_video_8s.mp4"                              # Test video path. Set non-empty to enable video mode.
-TEST_QUERY               = ["Describe this image.", "Describe this video."]     # Test query for the exported onnx model.
+DEFAULT_IMAGE_QUERY      = "Describe this image."
+DEFAULT_MULTI_IMAGE_QUERY = "Treat each image as a separate photo and describe them one by one."
+TEST_QUERY               = [DEFAULT_IMAGE_QUERY, "Describe this video."]        # Test query for the exported onnx model.
 
 # Model Config
 DO_EXPORT                = True                                     # Whether to export the ONNX models
@@ -48,7 +50,7 @@ HEIGHT_FACTOR            = 20                                       # Adjust thi
 WIDTH_FACTOR             = 20                                       # Adjust this value to determine the resize shape and vision resolution.
 IMAGE_RESIZE             = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]  # 32 = self.patch_size * self.merge_size
 INPUT_IMAGE_SIZE         = [960, 960]                               # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
-VISION_BATCH_SIZE        = 2                                        # Fixed at export time. Number of images in multi-image mode. Set >1 for multi-image support. Each image uses HEIGHT_FACTOR * WIDTH_FACTOR vision tokens.
+VISION_BATCH_SIZE        = 1                                        # Fixed at export time. Number of images in multi-image mode. Set >1 for multi-image support. Each image uses HEIGHT_FACTOR * WIDTH_FACTOR vision tokens.
 DYNAMIC_IMAGE_SHAPE      = False                                    # Allow for a dynamic number of image inputs (1..VISION_BATCH_SIZE). When False, exactly VISION_BATCH_SIZE images required.
 INPUT_IMAGE_DIM          = 5                                        # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
 
@@ -772,70 +774,7 @@ class LLM_EMBED(torch.nn.Module):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Video Preprocessing Module (exported as ONNX)
-# ══════════════════════════════════════════════════════════════════════════════
-class LLM_VIDEO_PREPROCESS(torch.nn.Module):
-    """Preprocess video frames into packed patches ready for the vision encoder.
-
-    Accepts: video_frames [num_frames, 3, H, W] uint8 (0-255 range)
-    Returns: (pixel_values_videos, pos_embeds, rotary_cos, rotary_sin, attention_mask)
-
-    All operations (resize, normalize, temporal grouping, spatial patching) are done
-    inside the ONNX graph — no numpy at inference time.
-    The auxiliary vision tensors (pos_embeds, rotary_cos, rotary_sin, attention_mask)
-    are registered as buffers and returned directly as ORT tensors.
-    """
-
-    def __init__(self, patch_size, temporal_patch_size, merge_size, target_h, target_w, pos_embeds, rotary_cos, rotary_sin, attention_mask, dynamic_shape=False):
-        super().__init__()
-        self.patch_size = patch_size
-        self.temporal_patch_size = temporal_patch_size
-        self.merge_size = merge_size
-        self.target_h = target_h
-        self.target_w = target_w
-        self.dynamic_shape = dynamic_shape
-        self.grid_h = target_h // patch_size
-        self.grid_w = target_w // patch_size
-        self.grid_h_merged = self.grid_h // merge_size
-        self.grid_w_merged = self.grid_w // merge_size
-        # Vision auxiliary tensors (pre-computed, constant for this config)
-        self.register_buffer("pos_embeds", pos_embeds)
-        self.register_buffer("rotary_cos", rotary_cos)
-        self.register_buffer("rotary_sin", rotary_sin)
-        self.register_buffer("attention_mask", attention_mask)
-
-    def forward(self, video_frames):
-        # video_frames: [num_frames, 3, H, W] uint8 or float32 (0-255)
-        video_frames = video_frames.float()
-
-        # Resize to target spatial dims: only when dynamic mode and shape mismatches
-        if self.dynamic_shape or (video_frames.shape[2] != self.target_h or video_frames.shape[3] != self.target_w):
-            video_frames = F.interpolate(
-                video_frames,
-                size=[self.target_h, self.target_w],
-                mode='bilinear',
-                align_corners=False
-            )
-
-        # Temporal + spatial patching (fused, max 8D to stay within CUDA Transpose limit):
-        # [num_frames, 3, H, W] -> [grid_t, tps*3, grid_h//merge, merge, ps, grid_w//merge, merge, ps]
-        video_frames = video_frames.reshape(
-            -1, self.temporal_patch_size * 3,
-            self.grid_h_merged, self.merge_size, self.patch_size,
-            self.grid_w_merged, self.merge_size, self.patch_size
-        )
-        # Permute (8D): [grid_t, grid_h//merge, grid_w//merge, merge, merge, tps*3, ps, ps]
-        video_frames = video_frames.permute(0, 2, 5, 3, 6, 1, 4, 7)
-        # Reshape to split tps*3 back into [tps, 3] and flatten spatial batch
-        video_frames = video_frames.reshape(-1, self.temporal_patch_size, 3, self.patch_size, self.patch_size)
-        # Swap to: [total_patches, 3, temporal_patch_size, patch_size, patch_size]
-        video_frames = video_frames.transpose(1, 2)
-
-        return video_frames, self.pos_embeds, self.rotary_cos, self.rotary_sin, self.attention_mask
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Vision Encoder Module
+# Image Preprocessing Module
 # ══════════════════════════════════════════════════════════════════════════════
 class LLM_IMAGE_PREPROCESS(torch.nn.Module):
     """Preprocess N images into packed patches matching the vision encoder input format.
@@ -869,10 +808,10 @@ class LLM_IMAGE_PREPROCESS(torch.nn.Module):
         self.grid_w_merged = self.grid_w // merge_size
         self.seq_per_image = height_factor * width_factor  # merged token count per image
         # Vision auxiliary tensors (pre-computed for num_images images, block-diagonal)
-        self.register_buffer("pos_embeds", pos_embeds)
-        self.register_buffer("rotary_cos", rotary_cos)
-        self.register_buffer("rotary_sin", rotary_sin)
-        self.register_buffer("attention_mask", attention_mask)
+        self.register_buffer("pos_embeds", pos_embeds.half())
+        self.register_buffer("rotary_cos", rotary_cos.half())
+        self.register_buffer("rotary_sin", rotary_sin.half())
+        self.register_buffer("attention_mask", attention_mask.to(torch.int8))
 
     def forward(self, pixel_values):
         # pixel_values: [N, 1, 3, H, W] or [N, 3, H, W], values 0-255
@@ -907,8 +846,8 @@ class LLM_IMAGE_PREPROCESS(torch.nn.Module):
             # Slice pre-baked aux tensors to match actual num_images
             total_seq = num_images * self.seq_per_image
             pos_embeds = self.pos_embeds[:, :total_seq]
-            rotary_cos = self.rotary_cos[..., :total_seq, :]
-            rotary_sin = self.rotary_sin[..., :total_seq, :]
+            rotary_cos = self.rotary_cos[..., :total_seq]
+            rotary_sin = self.rotary_sin[..., :total_seq]
             attention_mask = self.attention_mask[..., :total_seq, :total_seq]
         else:
             pos_embeds = self.pos_embeds
@@ -917,6 +856,83 @@ class LLM_IMAGE_PREPROCESS(torch.nn.Module):
             attention_mask = self.attention_mask
 
         return pixel_values, pos_embeds, rotary_cos, rotary_sin, attention_mask
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Video Preprocessing Module
+# ══════════════════════════════════════════════════════════════════════════════
+class LLM_VIDEO_PREPROCESS(torch.nn.Module):
+    """Preprocess video frames into packed patches ready for the vision encoder.
+
+    Accepts: video_frames [num_frames, 3, H, W] uint8 (0-255 range)
+    Returns: (pixel_values_videos, pos_embeds, rotary_cos, rotary_sin, attention_mask)
+
+    All operations (resize, normalize, temporal grouping, spatial patching) are done
+    inside the ONNX graph — no numpy at inference time.
+    The auxiliary vision tensors (pos_embeds, rotary_cos, rotary_sin, attention_mask)
+    are registered as buffers and returned directly as ORT tensors.
+    """
+
+    def __init__(self, patch_size, temporal_patch_size, merge_size, target_h, target_w, pos_embeds, rotary_cos, rotary_sin, attention_mask, dynamic_shape=False):
+        super().__init__()
+        self.patch_size = patch_size
+        self.temporal_patch_size = temporal_patch_size
+        self.merge_size = merge_size
+        self.target_h = target_h
+        self.target_w = target_w
+        self.dynamic_shape = dynamic_shape
+        self.grid_h = target_h // patch_size
+        self.grid_w = target_w // patch_size
+        self.grid_h_merged = self.grid_h // merge_size
+        self.grid_w_merged = self.grid_w // merge_size
+        self.frame_seqlen = self.grid_h_merged * self.grid_w_merged
+        # Vision auxiliary tensors (pre-computed, constant for this config)
+        self.register_buffer("pos_embeds", pos_embeds.half())
+        self.register_buffer("rotary_cos", rotary_cos.half())
+        self.register_buffer("rotary_sin", rotary_sin.half())
+        self.register_buffer("attention_mask", attention_mask.to(torch.int8))
+
+    def forward(self, video_frames):
+        # video_frames: [num_frames, 3, H, W] uint8 or float32 (0-255)
+        video_frames = video_frames.float()
+
+        # Resize to target spatial dims: only when dynamic mode and shape mismatches
+        if self.dynamic_shape or (video_frames.shape[2] != self.target_h or video_frames.shape[3] != self.target_w):
+            video_frames = F.interpolate(
+                video_frames,
+                size=[self.target_h, self.target_w],
+                mode='bilinear',
+                align_corners=False
+            )
+
+        # Temporal + spatial patching (fused, max 8D to stay within CUDA Transpose limit):
+        # [num_frames, 3, H, W] -> [grid_t, tps*3, grid_h//merge, merge, ps, grid_w//merge, merge, ps]
+        video_frames = video_frames.reshape(
+            -1, self.temporal_patch_size * 3,
+            self.grid_h_merged, self.merge_size, self.patch_size,
+            self.grid_w_merged, self.merge_size, self.patch_size
+        )
+        # Permute (8D): [grid_t, grid_h//merge, grid_w//merge, merge, merge, tps*3, ps, ps]
+        video_frames = video_frames.permute(0, 2, 5, 3, 6, 1, 4, 7)
+        # Reshape to split tps*3 back into [tps, 3] and flatten spatial batch
+        video_frames = video_frames.reshape(-1, self.temporal_patch_size, 3, self.patch_size, self.patch_size)
+        # Swap to: [total_patches, 3, temporal_patch_size, patch_size, patch_size]
+        video_frames = video_frames.transpose(1, 2)
+
+        if self.dynamic_shape:
+            grid_t = video_frames.shape[0] // (self.frame_seqlen)
+            total_seq = grid_t * self.frame_seqlen
+            pos_embeds = self.pos_embeds[:, :total_seq]
+            rotary_cos = self.rotary_cos[..., :total_seq]
+            rotary_sin = self.rotary_sin[..., :total_seq]
+            attention_mask = self.attention_mask[..., :total_seq, :total_seq]
+        else:
+            pos_embeds = self.pos_embeds
+            rotary_cos = self.rotary_cos
+            rotary_sin = self.rotary_sin
+            attention_mask = self.attention_mask
+
+        return video_frames, pos_embeds, rotary_cos, rotary_sin, attention_mask
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1019,6 +1035,11 @@ class LLM_VISION(torch.nn.Module):
             attention_mask: [1, 1, seq_len, seq_len]
         """
 
+        # Cast float16 inputs back to float32
+        pos_embeds = pos_embeds.float()
+        rotary_cos = rotary_cos.float()
+        rotary_sin = rotary_sin.float()
+        attention_mask = attention_mask.float()
 
         # Patch embedding via Conv3d
         vision_hidden_states = self.llm.model.visual.patch_embed.proj(pixel_values)
@@ -2383,7 +2404,7 @@ if DO_EXPORT:
             dynamic_shape=DYNAMIC_IMAGE_SHAPE,
             num_images=VISION_BATCH_SIZE
         )
-        pixel_values_dummy = torch.randint(0, 255, (VISION_BATCH_SIZE, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]), dtype=torch.float32)
+        pixel_values_dummy = torch.randint(0, 255, (VISION_BATCH_SIZE, 3, INPUT_IMAGE_SIZE[0], INPUT_IMAGE_SIZE[1]), dtype=torch.uint8)
         if INPUT_IMAGE_DIM != 4:
             pixel_values_dummy = pixel_values_dummy.unsqueeze(1)
         image_preprocess_dynamic_axes = None
@@ -2435,7 +2456,7 @@ if DO_EXPORT:
 
         torch.onnx.export(
             vision_model,
-            (dummy_patches, image_pos_embeds, image_rotary_cos, image_rotary_sin, image_attn_mask),
+            (dummy_patches, image_pos_embeds.half(), image_rotary_cos.half(), image_rotary_sin.half(), image_attn_mask.to(torch.int8)),
             onnx_model_Vision,
             input_names=['pixel_values', 'pos_embeds', 'rotary_cos', 'rotary_sin', 'attention_mask'],
             output_names=vision_output_names,
@@ -2954,6 +2975,35 @@ def is_valid_image_path(path):
     return ext.lower() in valid_extensions
 
 
+def load_image_letterbox(path, target_h, target_w):
+    """Load one image into a fixed-size canvas without stretching its aspect ratio."""
+    resampling = getattr(getattr(Image, 'Resampling', Image), 'BICUBIC')
+    with Image.open(path) as image:
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        src_w, src_h = image.size
+        scale = min(target_w / max(src_w, 1), target_h / max(src_h, 1))
+        resize_w = max(1, min(target_w, int(round(src_w * scale))))
+        resize_h = max(1, min(target_h, int(round(src_h * scale))))
+        if image.size != (resize_w, resize_h):
+            image = image.resize((resize_w, resize_h), resampling)
+
+        # Use a neutral background so padding stays near zero after the fused (x / 255 - 0.5) / 0.5 normalization.
+        canvas = Image.new('RGB', (target_w, target_h), (127, 127, 127))
+        offset_x = (target_w - resize_w) // 2
+        offset_y = (target_h - resize_h) // 2
+        canvas.paste(image, (offset_x, offset_y))
+
+    return np.ascontiguousarray(np.asarray(canvas, dtype=np.uint8).transpose(2, 0, 1))
+
+
+def normalize_image_query(query, num_images):
+    if num_images > 1 and query.strip() == DEFAULT_IMAGE_QUERY:
+        return DEFAULT_MULTI_IMAGE_QUERY
+    return query
+
+
 def bind_ort_in_buf(binding, names, values):
     """Bind OrtValue inputs by name."""
     for name, val in zip(names, values):
@@ -3132,11 +3182,46 @@ binding_Image_Preprocess     = ort_session_Image_Preprocess.io_binding()
 in_name_Image_Preprocess     = get_in_names(ort_session_Image_Preprocess)[0]
 out_name_Image_Preprocess    = get_out_names(ort_session_Image_Preprocess)
 
+# --- Video Preprocess (for metadata reading) ---
+ort_session_Video_Preprocess_meta = create_session(onnx_model_Video_Preprocess, **packed_settings)
+
 # --- Concat (Multi-Image mode — static graph, no segment_offsets) ---
 ort_session_Concat = create_session(onnx_model_Concat_Image, **packed_settings)
 binding_Concat     = ort_session_Concat.io_binding()
 in_name_Concat     = get_in_names(ort_session_Concat)
 out_name_Concat    = get_out_names(ort_session_Concat)
+
+# Read vision config from exported ONNX model metadata
+vision_batch_size = ort_session_Image_Preprocess._inputs_meta[0].shape[0]
+vision_embed_size_from_concat = ort_session_Concat._inputs_meta[-1].shape[1]
+image_seqlen_from_meta = vision_embed_size_from_concat // vision_batch_size if isinstance(vision_embed_size_from_concat, int) and isinstance(vision_batch_size, int) else WIDTH_FACTOR * HEIGHT_FACTOR
+
+_img_meta_shape = ort_session_Image_Preprocess._inputs_meta[0].shape
+_img_h, _img_w = _img_meta_shape[-2], _img_meta_shape[-1]
+if isinstance(_img_h, int) and isinstance(_img_w, int):
+    input_image_size = [_img_h, _img_w]
+else:
+    _test_imgs = TEST_IMAGE if isinstance(TEST_IMAGE, list) else [TEST_IMAGE]
+    _first_valid = next((p for p in _test_imgs if is_valid_image_path(p)), None)
+    if _first_valid:
+        with Image.open(_first_valid) as _img:
+            input_image_size = [_img.height, _img.width]
+    else:
+        input_image_size = INPUT_IMAGE_SIZE
+
+_vid_meta_shape = ort_session_Video_Preprocess_meta._inputs_meta[0].shape
+_vid_h, _vid_w = _vid_meta_shape[2], _vid_meta_shape[3]
+if isinstance(_vid_h, int) and isinstance(_vid_w, int):
+    input_video_size = [_vid_h, _vid_w]
+else:
+    if TEST_VIDEO and os.path.exists(TEST_VIDEO):
+        import cv2 as _cv2
+        _cap = _cv2.VideoCapture(TEST_VIDEO)
+        input_video_size = [int(_cap.get(_cv2.CAP_PROP_FRAME_HEIGHT)), int(_cap.get(_cv2.CAP_PROP_FRAME_WIDTH))]
+        _cap.release()
+    else:
+        input_video_size = INPUT_VIDEO_SIZE
+del ort_session_Video_Preprocess_meta
 
 # --- Rotary Image (Prefill + Decode) ---
 ort_session_Rotary_Image_Prefill = create_session(onnx_model_Rotary_Image_Prefill, **packed_settings)
@@ -3312,6 +3397,7 @@ def build_prompt_and_mm_types(query, mode, num_frames=0, frame_seqlen=0, fps=2.0
 
     elif mode == 'image':
         # Multi-image prompt: <|im_start|>user\n[<|vision_start|><|vision_end|>]*N query<|im_end|>\n<|im_start|>assistant\n
+        query = normalize_image_query(query, num_images)
         vision_markers = "<|vision_start|><|vision_end|>" * num_images
         prompt = f"<|im_start|>user\n{vision_markers}{query}<|im_end|>\n<|im_start|>assistant\n"
         tokens = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
@@ -3381,7 +3467,7 @@ if not test_modes:
     test_modes.append(('text', "Hello! How are you?"))
 
 num_test_images = len(valid_image_paths)
-image_seqlen_runtime = WIDTH_FACTOR * HEIGHT_FACTOR  # merged vision tokens per image
+image_seqlen_runtime = image_seqlen_from_meta
 
 
 for INPUT_MODE, current_query in test_modes:
@@ -3415,7 +3501,7 @@ for INPUT_MODE, current_query in test_modes:
     # ══════════════════════════════════════════════════════════════════════════════
     # SHARED ORTVALUE BUFFERS
     # ══════════════════════════════════════════════════════════════════════════════
-    vision_embed_size = num_test_images * WIDTH_FACTOR * HEIGHT_FACTOR
+    vision_embed_size = num_test_images * image_seqlen_from_meta
 
     # --- Recreate IO bindings for a fresh run ---
     binding_Embed  = ort_session_Embed.io_binding()
@@ -3557,7 +3643,7 @@ for INPUT_MODE, current_query in test_modes:
 
         # Determine output spatial dimensions (apply resize target if static shape)
         if not DYNAMIC_VIDEO_SHAPE:
-            out_h, out_w = INPUT_VIDEO_SIZE
+            out_h, out_w = input_video_size
         else:
             out_h, out_w = stream.codec_context.height, stream.codec_context.width
 
@@ -3660,21 +3746,15 @@ for INPUT_MODE, current_query in test_modes:
         vision_embed_size = video_grid_t_runtime * video_frame_seqlen_runtime
 
     elif INPUT_MODE == 'image':
-        # Load and preprocess images — pre-allocate buffer, avoid per-image list append + stack
-        target_h, target_w = INPUT_IMAGE_SIZE
+        # Load images into a fixed canvas without stretching aspect ratio.
+        target_h, target_w = input_image_size
         if INPUT_IMAGE_DIM != 4:
-            pixel_values = np.empty((num_test_images, 1, 3, target_h, target_w), dtype=np.float32)
+            pixel_values = np.empty((num_test_images, 1, 3, target_h, target_w), dtype=np.uint8)
         else:
-            pixel_values = np.empty((num_test_images, 3, target_h, target_w), dtype=np.float32)
+            pixel_values = np.empty((num_test_images, 3, target_h, target_w), dtype=np.uint8)
 
         for i, img_path in enumerate(valid_image_paths):
-            image = Image.open(img_path)
-            if image.size != (target_w, target_h):
-                image = image.resize((target_w, target_h), Image.BILINEAR)
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            # Write directly into pre-allocated buffer — [3, H, W] in CHW float32
-            chw = np.ascontiguousarray(np.array(image, dtype=np.float32).transpose(2, 0, 1))
+            chw = load_image_letterbox(img_path, target_h, target_w)
             if INPUT_IMAGE_DIM != 4:
                 pixel_values[i, 0] = chw
             else:
