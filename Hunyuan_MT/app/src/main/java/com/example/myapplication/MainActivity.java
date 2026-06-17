@@ -4,6 +4,8 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.res.AssetManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -36,6 +38,12 @@ public class MainActivity extends AppCompatActivity {
     private static ChatAdapter chatAdapter;
     private static List<ChatMessage> messages;
     private static String usrInputText = "";
+    // Dedicated main-thread handler used ONLY for streaming token batches from the native decode loop,
+    // so removeCallbacksAndMessages(null) can drop stale tokens on cancel without touching other work.
+    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+    // Current generation worker; joined before a new one starts so the native inference state is never
+    // shared between two generations (the native side is a single global, non-reentrant context).
+    private LLMThread llmThread;
     private static final String file_name_vocab_A = "vocab_Hunyuan_MT.txt";
     // private static final String file_name_vocab_B = "vocab_DeepSeek_Qwen.txt";
     private static final String first_talk = "请输入问题 Enter Questions";
@@ -45,6 +53,11 @@ public class MainActivity extends AppCompatActivity {
     private static boolean clear_flag = false;
     private static boolean chatting = false;
     private static String target_language = "英语-English";
+
+    // Execution Provider Types
+    private static final int EP_CPU = 0;      // Default CPU execution provider
+    private static final int EP_XNNPACK = 1;  // XNNPACK execution provider (optimized for mobile CPU)
+    private static final int EP_QNN = 2;      // QNN execution provider (Qualcomm NPU/HTP)
 
     private static final String[] languageList = {
             "阿拉伯语-Arabic", "孟加拉语-Bengali", "缅甸语-Burmese", "粤语-Cantonese",
@@ -126,9 +139,9 @@ public class MainActivity extends AppCompatActivity {
                 addHistory(ChatMessage.TYPE_SERVER, low_memory_mode_error);
                 throw new RuntimeException(e);
             }
-            success = Load_Models_A(null, false, true);
+            success = Load_Models_A(null, EP_CPU, true);
         } else {
-            success = Load_Models_A(mgr, false, false);
+            success = Load_Models_A(mgr, EP_CPU, false);
         }
         if (success) {
             Copy_from_Asset_to_Cache(file_name_vocab_A, mgr);
@@ -142,27 +155,46 @@ public class MainActivity extends AppCompatActivity {
 
 
 
-    @SuppressLint("NotifyDataSetChanged")
+    // Cached C++ -> Java streaming entry point. The native decode loop invokes this (batched) from the
+    // LLMThread; we marshal to the main Looper because addHistory mutates the RecyclerView. The chatting
+    // gate drops any token batches that arrive after a Clear/cancel so they cannot leak into the UI.
+    private static void onTokenStream(String text) {
+        mainHandler.post(() -> {
+            if (chatting) {
+                addHistory(ChatMessage.TYPE_SERVER, text);
+            }
+        });
+    }
+
     private static void addHistory(int messageType, String result) {
         int lastMessageIndex = messages.size() - 1;
         if (lastMessageIndex >= 0 && messages.get(lastMessageIndex).type() == messageType) {
+            // Append to the current bubble and rebind ONLY that row (O(changed row)) instead of the
+            // whole list, so streaming a long reply does not re-bind every RecyclerView item per batch.
             messages.set(lastMessageIndex, new ChatMessage(messageType, messages.get(lastMessageIndex).content() + result));
+            chatAdapter.notifyItemChanged(lastMessageIndex);
+            answerView.smoothScrollToPosition(lastMessageIndex);
         } else {
             messages.add(new ChatMessage(messageType, result));
+            int newIndex = messages.size() - 1;
+            chatAdapter.notifyItemInserted(newIndex);
+            answerView.smoothScrollToPosition(newIndex);
         }
-        chatAdapter.notifyDataSetChanged();
-        answerView.smoothScrollToPosition(lastMessageIndex + 1);
     }
 
     @SuppressLint("NotifyDataSetChanged")
     private void clearHistory(){
+        // Cancel any in-flight generation (g_cancel) and gate out its remaining streamed token posts
+        // (chatting=false), then drop those stale posts from the dedicated handler before clearing.
+        Stop_LLM();
+        chatting = false;
+        mainHandler.removeCallbacksAndMessages(null);
         inputBox.setText("");
         usrInputText = "";
         messages.clear();
         chatAdapter.notifyDataSetChanged();
         answerView.smoothScrollToPosition(0);
         clear_flag = true;
-        chatting = false;
         showToast(MainActivity.this, "已清除 Cleared",false);
     }
 
@@ -179,52 +211,58 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private class LLMThread extends Thread {
-        private String LLM_Talk = "";
-        private int response_count = 0;
+    private static class LLMThread extends Thread {
         private final String language = target_language.split("-")[1];
-        private final String input_str = "<｜hy_begin▁of▁sentence｜><｜hy_User｜>Translate the following segment into " + language + ", without additional explanation. \n\n" + usrInputText + "<｜hy_place▁holder▁no▁8｜>"; // Only for Hunyuan_MT-1.8B
-        @SuppressLint("DefaultLocale")
+        private final String zh_language = target_language.split("-")[0];
+        private final String input_str;
+
+        {
+            // HunYuan-MT2: Use Chinese prompt when Chinese is involved, English prompt otherwise
+            if (language.equals("Chinese") || language.equals("Chinese (Traditional)") || zh_language.contains("中文")) {
+                input_str = "<｜hy_begin▁of▁sentence｜><｜hy_User｜>将以下文本翻译为" + zh_language + "，注意只需要输出翻译后的结果，不要额外解释：\n\n" + usrInputText + "<｜hy_Assistant｜>";
+            } else {
+                input_str = "<｜hy_begin▁of▁sentence｜><｜hy_User｜>Translate the following text into " + language + ". Note that you should only output the translated result without any additional explanation:\n\n" + usrInputText + "<｜hy_Assistant｜>";
+            }
+        }
         @Override
         public void run() {
-            // Fixed: Added target_language Argument
-            LLM_Talk = Run_LLM(input_str, true, clear_flag);
+            // ONE native call now performs prefill + the ENTIRE decode loop, streaming tokens to the UI
+            // through onTokenStream() (batched in C++). It returns either "Over_Inputs" or the final
+            // "\n\nDecode: X token/s" line, which we append once. No per-token JNI round-trip remains.
+            final String result = Run_LLM(input_str, clear_flag);
             usrInputText = "";
             if (clear_flag) {
                 clear_flag = false;
             }
-            chatting = true;
-            long start_time = System.currentTimeMillis();
-            while (chatting) {
-                runOnUiThread(() -> {
-                    switch (LLM_Talk) {
-                        case "END" -> {
-                            if (chatting) {  // Java multithreading may not stop immediately. Therefore, use a switch to prevent repeat print.
-                                chatting = false;
-                                addHistory(ChatMessage.TYPE_SERVER, "\n\nDecode: " + String.format("%.4f", ((float) 1000 * response_count / (System.currentTimeMillis() - start_time))) + " token/s");
-                            }
-                        }
-                        case "Over_Inputs" -> {
-                            if (chatting) {
-                                chatting = false;
-                                addHistory(ChatMessage.TYPE_SERVER, over_inputs);
-                            }
-                        }
-                        default -> {
-                            addHistory(ChatMessage.TYPE_SERVER, LLM_Talk);
-                            response_count += 1;
-                        }
+            mainHandler.post(() -> {
+                if (chatting) {
+                    if ("Over_Inputs".equals(result)) {
+                        addHistory(ChatMessage.TYPE_SERVER, over_inputs);
+                    } else if (result != null && !result.isEmpty()) {
+                        addHistory(ChatMessage.TYPE_SERVER, result);
                     }
-                });
-                // Fixed: Added target_language Argument
-                LLM_Talk = Run_LLM(usrInputText, false, clear_flag);
-            }
+                }
+                chatting = false;
+            });
         }
     }
 
     @SuppressLint("SetTextI18n")
     private void startLLM() {
-        LLMThread llmThread = new LLMThread();
+        // Cancel + reap any in-flight generation so the native inference state is free before we launch a
+        // new one (otherwise the native re-entrancy guard would drop this query), then drop the previous
+        // generation's stale streamed token posts so they cannot leak into the new conversation.
+        Stop_LLM();
+        if (llmThread != null) {
+            try {
+                llmThread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        mainHandler.removeCallbacksAndMessages(null);
+        chatting = true;
+        llmThread = new LLMThread();
         llmThread.start();
     }
 
@@ -270,6 +308,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private native boolean Pre_Process();
-    private native boolean Load_Models_A(AssetManager assetManager, boolean USE_XNNPACK, boolean LOW_MEMORY_MODE);
-    private static native String Run_LLM(String QUERY, boolean ADD_PROMPT, boolean CLEAR);
+    /**
+     * Load ONNX models with specified execution provider.
+     * @param assetManager Asset manager for loading model from assets (null for low memory mode)
+     * @param EP_TYPE Execution provider type: EP_CPU(0), EP_XNNPACK(1), EP_QNN(2)
+     * @param LOW_MEMORY_MODE Enable low memory mode (requires external data format)
+     * @return true if model loaded successfully
+     */
+    private native boolean Load_Models_A(AssetManager assetManager, int EP_TYPE, boolean LOW_MEMORY_MODE);
+    // Runs prefill + the full decode loop in C++, streaming tokens via onTokenStream(); returns the
+    // final "Decode: X token/s" line (or "Over_Inputs"). One call per reply.
+    private static native String Run_LLM(String QUERY, boolean CLEAR);
+    // Requests cooperative cancellation of an in-flight Run_LLM (sets the native g_cancel flag).
+    private static native void Stop_LLM();
 }

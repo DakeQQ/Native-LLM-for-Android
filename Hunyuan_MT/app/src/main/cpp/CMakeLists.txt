@@ -49,7 +49,7 @@ add_compile_options(
 
 )
 
-add_library(${CMAKE_PROJECT_NAME} SHARED project.cpp tokenizer.cpp)
+add_library(${CMAKE_PROJECT_NAME} SHARED project.cpp tokenizer.cpp unicode.cpp unicode_data.cpp)
 
 add_library(
         omp
