@@ -45,12 +45,10 @@ public class MainActivity extends AppCompatActivity {
     // shared between two generations (the native side is a single global, non-reentrant context).
     private LLMThread llmThread;
     private static final String file_name_vocab_A = "vocab_Hunyuan_MT.txt";
-    // private static final String file_name_vocab_B = "vocab_DeepSeek_Qwen.txt";
     private static final String first_talk = "请输入问题 Enter Questions";
     private static final String load_failed = "模型加载失败。\nModel loading failed.";
     private static final String over_inputs = "一次输入太多单词 \nInput too many words at once.";
     private static final String low_memory_mode_error = "低内存模式必须使用外部数据格式，例如 '*.onnx + ONNX文件数据'。\nThe low_memory_mode must use an external data format, such as '*.onnx + onnx_data_file.'";
-    private static boolean clear_flag = false;
     private static boolean chatting = false;
     private static String target_language = "英语-English";
 
@@ -145,7 +143,6 @@ public class MainActivity extends AppCompatActivity {
         }
         if (success) {
             Copy_from_Asset_to_Cache(file_name_vocab_A, mgr);
-            // Copy_from_Asset_to_Cache(file_name_vocab_B, mgr);
             Pre_Process();
             Start_Chat();
         } else {
@@ -194,7 +191,6 @@ public class MainActivity extends AppCompatActivity {
         messages.clear();
         chatAdapter.notifyDataSetChanged();
         answerView.smoothScrollToPosition(0);
-        clear_flag = true;
         showToast(MainActivity.this, "已清除 Cleared",false);
     }
 
@@ -229,11 +225,8 @@ public class MainActivity extends AppCompatActivity {
             // ONE native call now performs prefill + the ENTIRE decode loop, streaming tokens to the UI
             // through onTokenStream() (batched in C++). It returns either "Over_Inputs" or the final
             // "\n\nDecode: X token/s" line, which we append once. No per-token JNI round-trip remains.
-            final String result = Run_LLM(input_str, clear_flag);
+            final String result = Run_LLM(input_str);
             usrInputText = "";
-            if (clear_flag) {
-                clear_flag = false;
-            }
             mainHandler.post(() -> {
                 if (chatting) {
                     if ("Over_Inputs".equals(result)) {
@@ -318,7 +311,7 @@ public class MainActivity extends AppCompatActivity {
     private native boolean Load_Models_A(AssetManager assetManager, int EP_TYPE, boolean LOW_MEMORY_MODE);
     // Runs prefill + the full decode loop in C++, streaming tokens via onTokenStream(); returns the
     // final "Decode: X token/s" line (or "Over_Inputs"). One call per reply.
-    private static native String Run_LLM(String QUERY, boolean CLEAR);
+    private static native String Run_LLM(String QUERY);
     // Requests cooperative cancellation of an in-flight Run_LLM (sets the native g_cancel flag).
     private static native void Stop_LLM();
 }

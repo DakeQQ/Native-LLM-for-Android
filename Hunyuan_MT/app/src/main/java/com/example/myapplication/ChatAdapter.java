@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.List;
@@ -29,12 +30,20 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ViewHolder> {
         ChatMessage message = messages.get(position);
         holder.messageText.setTextSize(MainActivity.font_size);
         holder.messageText.setText(message.content());
-        int backgroundColorRes = 0;
+        // Apply the rounded bubble drawable + matching high-contrast text colour per role.
+        // (Setting a flat colour resource here would override the rounded drawable.)
         switch (message.type()) {
-            case ChatMessage.TYPE_USER -> backgroundColorRes = R.color.userMessageBackground;
-            case ChatMessage.TYPE_SERVER -> backgroundColorRes = R.color.serverMessageBackground;
+            case ChatMessage.TYPE_USER -> {
+                holder.messageText.setBackgroundResource(R.drawable.user_message_background);
+                holder.messageText.setTextColor(
+                        ContextCompat.getColor(holder.itemView.getContext(), R.color.textPrimary));
+            }
+            case ChatMessage.TYPE_SERVER -> {
+                holder.messageText.setBackgroundResource(R.drawable.server_message_background);
+                holder.messageText.setTextColor(
+                        ContextCompat.getColor(holder.itemView.getContext(), R.color.textOnYellow));
+            }
         }
-        holder.messageText.setBackgroundResource(backgroundColorRes);
     }
     @Override
     public int getItemCount() {

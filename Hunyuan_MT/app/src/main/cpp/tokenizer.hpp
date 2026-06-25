@@ -239,6 +239,14 @@ public:
     std::vector<int> encode(const std::string& str);
     virtual std::string decode(int id) = 0;
     virtual std::string decode(const std::vector<int>& ids);
+    // Zero-copy single-token decode for the streaming hot path: returns a reference to the token's raw
+    // bytes when the backend stores them contiguously (Tiktoken overrides this to hand back its decoder
+    // table entry with no copy). The default routes through decode(int) using a caller-owned scratch
+    // string so backends that synthesize their text keep working unchanged.
+    virtual const std::string& decode_id(int id, std::string& scratch) {
+        scratch = decode(id);
+        return scratch;
+    }
     // chat template
     std::string apply_chat_template(const ChatMessages& messages, bool add_generation_prompt = true) const;
     std::string apply_chat_template(const std::string& user_content, const std::string& system_prompt = "") const;
@@ -321,6 +329,7 @@ class Tiktoken : public Tokenizer {
 public:
     Tiktoken() = default;
     virtual std::string decode(int id) override;
+    virtual const std::string& decode_id(int id, std::string& scratch) override;
 protected:
     virtual bool load_vocab(std::ifstream& file) override;
     virtual void encode(const std::string& str, std::vector<int>& ids) override;

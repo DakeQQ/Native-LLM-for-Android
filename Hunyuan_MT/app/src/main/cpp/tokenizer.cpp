@@ -7,10 +7,6 @@
 
 #define MNN_OPEN_TIME_TRACE 1
 #include "tokenizer.hpp"
-#ifdef LLM_USE_JINJA
-#include "jinja.hpp"
-#include "../ujson.hpp"
-#endif
 #include <fstream>
 #include <sstream>
 #include <queue>
@@ -563,6 +559,16 @@ std::string Tiktoken::decode(int id) {
     return decoder_[id];
 }
 
+const std::string& Tiktoken::decode_id(int id, std::string& scratch) {
+    // Zero-copy: hand back a const reference straight into the decoder table (no per-token copy).
+    // Out-of-range ids fall back to an empty scratch string, matching decode(int)'s "" return.
+    if (id < 0 || id >= static_cast<int>(decoder_.size())) {
+        scratch.clear();
+        return scratch;
+    }
+    return decoder_[id];
+}
+
 bool BertTokenizer::load_vocab(std::ifstream& tok_file) {
     std::string line;
     std::getline(tok_file, line);
@@ -1007,12 +1013,39 @@ std::string HuggingfaceTokenizer::decode(int id) {
     if (id < 0 || id >= static_cast<int>(decoder_.size())) {
         return "";
     }
+    // Fold the UTF-8 decode and the byte-level (GPT-2) code-point -> byte un-mapping into ONE pass
+    // over the token's stored bytes. The previous version first materialised an intermediate
+    // std::wstring (a heap allocation per call, on a path hit once per generated token) only to walk
+    // its code points; decoding inline drops that allocation. Each code point yields at most one
+    // output byte, so the token's byte length is a safe upper bound for the single reservation.
     const std::string& decode_utf8 = decoder_[id];   // reference, no copy
-    std::wstring w = utf8_to_wstring(decode_utf8.data(), decode_utf8.size());
     std::string r;
-    r.reserve(w.size());
-    for (wchar_t c : w) {
-        int16_t b = (c >= 0 && c < 512) ? u2b_[c] : -1;   // single array probe (no double map lookup)
+    r.reserve(decode_utf8.size());
+    const auto* p = reinterpret_cast<const unsigned char*>(decode_utf8.data());
+    const unsigned char* const end = p + decode_utf8.size();
+    while (p < end) {
+        const unsigned char c = *p;
+        int32_t cp;   // -1 marks "no byte" (truncated sequence, or a code point outside u2b_)
+        if (c < 0x80) {
+            cp = c;
+            ++p;
+        } else if (c < 0xE0) {
+            cp = (p + 1 < end) ? (((c & 0x1F) << 6) | (p[1] & 0x3F)) : -1;
+            p += 2;
+        } else if (c < 0xF0) {
+            cp = (p + 2 < end) ? (((c & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F)) : -1;
+            p += 3;
+        } else if (c < 0xF8) {
+            // 4-byte code points are all > 0xFFFF and never occur in the byte-level alphabet (every
+            // byte maps to a code point < 0x144), so they map back to no byte: skip, matching the
+            // old path where u2b_[cp] with cp >= 512 yielded -1.
+            cp = -1;
+            p += 4;
+        } else {
+            cp = -1;
+            ++p;
+        }
+        const int16_t b = (cp >= 0 && cp < 512) ? u2b_[cp] : -1;   // single array probe
         if (b >= 0) {
             r.push_back(static_cast<char>(b));
         }
@@ -1039,42 +1072,11 @@ std::string Tokenizer::apply_chat_template(const ChatMessages& messages, bool ad
         }
         return result;
     }
-#ifdef LLM_USE_JINJA
-    jinja::json default_ctx = jinja::json::object();
-    default_ctx["eos_token"] = chat_template_eos_;
-    if (!chat_template_bos_.empty()) {
-        default_ctx["bos_token"] = chat_template_bos_;
-    }
-    jinja::Template tpl(chat_template_, default_ctx);
-    jinja::json msgs = jinja::json::array();
-    for (const auto& m : messages) {
-        if (m.first == "json") {
-            auto parsed = jinja::json::parse(m.second);
-            if (parsed.is_object()) {
-                msgs.push_back(parsed);
-                continue;
-            }
-        }
-        jinja::json msg = jinja::json::object();
-        msg["role"] = m.first;
-        msg["content"] = m.second;
-        msgs.push_back(msg);
-    }
-    jinja::json extra_ctx = jinja::json::object();
-    if (!chat_template_context_.empty()) {
-        auto parsed = jinja::json::parse(chat_template_context_);
-        if (parsed.is_object()) {
-            extra_ctx = parsed;
-        }
-    }
-    return tpl.apply_chat_template(msgs, add_generation_prompt, jinja::json::array(), extra_ctx);
-#else
     std::string result;
     for (const auto& m : messages) {
         result += m.second;
     }
     return result;
-#endif
 }
 
 std::string Tokenizer::apply_chat_template(const std::string& user_content, const std::string& system_prompt) const {

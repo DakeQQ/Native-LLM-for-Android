@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Deep-space navy gradient backdrop for the whole screen. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:type="linear"
+        android:angle="115"
+        android:startColor="@color/bgDark"
+        android:centerColor="@color/bgDarkAlt"
+        android:endColor="@color/bgDark" />
+</shape>
