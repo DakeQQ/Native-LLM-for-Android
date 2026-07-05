@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Draggable "rebuild trigger" marker on the memory bar (the usage that fires a boundary rebuild). Solid
+     red core + a theme-adaptive outline (textPrimary flips dark/light) so it stays visible on the red fill. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/memoryBarRed" />
+    <corners android:radius="3dp" />
+    <stroke
+        android:width="1.5dp"
+        android:color="@color/textPrimary" />
+</shape>

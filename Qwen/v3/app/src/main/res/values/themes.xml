@@ -1,0 +1,33 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- ===== Energy theme · high-contrast Blue / Amber, Light + Dark ===== -->
+    <!-- DayNight base = LIGHT mode (this file); the dark override lives in      -->
+    <!-- res/values-night/themes.xml. Colours resolve per qualifier from the    -->
+    <!-- matching colors.xml, so only the system-bar icon polarity is set here. -->
+    <style name="Theme.NativeLLM" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Electric blue primary -->
+        <item name="colorPrimary">@color/electricBlue</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/electricBlueDeep</item>
+        <!-- Energy accent -->
+        <item name="colorSecondary">@color/energyYellow</item>
+        <item name="colorOnSecondary">@color/textOnYellow</item>
+        <item name="colorTertiary">@color/energyYellow</item>
+        <!-- Surfaces -->
+        <item name="android:colorBackground">@color/bgDark</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/textPrimary</item>
+        <item name="colorControlHighlight">@color/electricBlueGlow</item>
+        <!-- System bars — transparent so the ambient backdrop bleeds edge-to-edge. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Dark bar icons on the light backdrop (flipped in values-night). -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+    </style>
+
+    <!-- Circular crop for the avatar (ShapeableImageView). -->
+    <style name="ShapeAppearance.Circle" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
+    </style>
+</resources>

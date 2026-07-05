@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="ui_corner_radius">8dp</dimen>
+    <dimen name="ui_corner_radius_inner">7dp</dimen>
+    <dimen name="ui_corner_radius_small">6dp</dimen>
+    <dimen name="ui_corner_radius_tiny">4dp</dimen>
+</resources>

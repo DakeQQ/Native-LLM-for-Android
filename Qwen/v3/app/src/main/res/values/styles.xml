@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tech-style decode slider. The thumb is a "circle bar head": a hollow energy-yellow ring
+         around a deep-navy core that floats clear of the track via a gap, with a soft yellow glow
+         halo blooming on touch. Track is a thin rounded rail; no ticks / value bubble / stop dot. -->
+    <style name="Widget.App.Slider" parent="Widget.Material3.Slider">
+        <item name="labelBehavior">gone</item>
+        <item name="tickVisible">false</item>
+        <!-- Track rail -->
+        <item name="trackHeight">4dp</item>
+        <item name="trackInsideCornerSize">2dp</item>
+        <item name="trackColorActive">@color/energyYellow</item>
+        <item name="trackColorInactive">@color/sliderTrackInactive</item>
+        <item name="trackStopIndicatorSize">0dp</item>
+        <!-- Circle bar head: hollow yellow ring + deep-navy core, lifted off the track by a gap.
+             thumbWidth/thumbHeight (equal -> a true circle) MUST be set: they override thumbRadius,
+             and the Material3 default (4dp x 44dp) renders as a thin vertical "line". -->
+        <item name="thumbWidth">18dp</item>
+        <item name="thumbHeight">18dp</item>
+        <item name="thumbColor">@color/sliderThumbCore</item>
+        <item name="thumbStrokeColor">@color/energyYellow</item>
+        <item name="thumbStrokeWidth">3dp</item>
+        <item name="thumbElevation">2dp</item>
+        <item name="thumbTrackGapSize">4dp</item>
+        <!-- Glow halo -->
+        <item name="haloColor">@color/sliderHalo</item>
+        <item name="haloRadius">18dp</item>
+    </style>
+</resources>

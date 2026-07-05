@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static energy field: one linear gradient plus two inset hairlines. No runtime blur, bitmap, or
+     animation; light/dark modes swap colors through resources. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="315"
+                android:startColor="@color/bgDark"
+                android:centerColor="@color/bgDark"
+                android:endColor="@color/bgDarkAlt" />
+        </shape>
+    </item>
+    <item
+        android:gravity="top"
+        android:height="2dp"
+        android:left="28dp"
+        android:right="28dp"
+        android:top="116dp">
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="0"
+                android:startColor="@android:color/transparent"
+                android:centerColor="@color/blueGlow"
+                android:endColor="@android:color/transparent" />
+        </shape>
+    </item>
+    <item
+        android:gravity="bottom"
+        android:height="2dp"
+        android:left="54dp"
+        android:right="54dp"
+        android:bottom="92dp">
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="0"
+                android:startColor="@android:color/transparent"
+                android:centerColor="@color/yellowGlow"
+                android:endColor="@android:color/transparent" />
+        </shape>
+    </item>
+</layer-list>

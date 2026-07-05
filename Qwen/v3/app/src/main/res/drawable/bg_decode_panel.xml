@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Frosted-glass controls panel that hosts the decode-strategy sliders: translucent fill, a
+     luminous hairline border and a faint top sheen for a glassy edge. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="270"
+                android:startColor="@color/glassFill"
+                android:endColor="@color/glassFillStrong" />
+            <corners android:radius="@dimen/ui_corner_radius" />
+            <stroke
+                android:width="1dp"
+                android:color="@color/glassStroke" />
+        </shape>
+    </item>
+    <item
+        android:gravity="top"
+        android:height="30dp"
+        android:left="1dp"
+        android:right="1dp"
+        android:top="1dp">
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="270"
+                android:startColor="@color/glassHighlight"
+                android:endColor="@android:color/transparent" />
+            <corners
+                android:topLeftRadius="@dimen/ui_corner_radius_inner"
+                android:topRightRadius="@dimen/ui_corner_radius_inner" />
+        </shape>
+    </item>
+</layer-list>
