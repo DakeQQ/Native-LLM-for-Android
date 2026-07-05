@@ -1,5 +1,10 @@
 # Native-LLM-for-Android
 
+Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main)
+
+### Qwen3-1.7B / 4096 Context
+![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
+
 ## Overview
 Demonstration of running a native Large Language Model (LLM) on Android devices. Currently supported models include:
 
@@ -29,24 +34,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - 2025/04/05：Update Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`.
 - 2025/02/22：Support loading with low memory mode: `Qwen`, `QwenVL`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B (Please using `Qwen v2.5 Qwen_Export.py`)
-
-## Getting Started
-1. **Download Models:**
-   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main)
-
-2. **Setup Instructions:**
-   - Place the downloaded model files into the `assets` folder.
-   - Decompress the `*.so` files stored in the `libs/arm64-v8a` folder.
-
-3. **Model Notes:**
-   - Demo models are converted from HuggingFace or ModelScope and optimized for extreme execution speed.
-   - Inputs and outputs may differ slightly from the original models.
-   - For Qwen2VL / Qwen2.5VL, adjust the key variables to match the model parameters.
-      - `GLRender.java: Line 37, 38, 39`
-      - `project.h: Line 14, 15, 16, 35, 36, 41, 59, 60`
-
-4. **ONNX Export Considerations:**
-   - It is recommended to use dynamic axes and q4f32 quantization.
    
 ## Tokenizer Files
 - The `tokenizer.cpp` and `tokenizer.hpp` files are sourced from the [mnn-llm repository](https://github.com/alibaba/MNN/tree/master/transformers/llm/engine/src).
@@ -132,9 +119,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 ### Qwen2VL-2B / 1024 Context
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_QwenVL.gif?raw=true)
 
-### Qwen2-1.5B / 1024 Context
-![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
-
 ## 概述
 
 展示在 Android 设备上运行原生大型语言模型 (LLM) 的示范。目前支持的模型包括：
@@ -165,25 +149,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - 2025/04/05: 更新 Qwen2.5, InternVL-Mono `q4f32` + `dynamic_axes`。
 - 2025/02/22：支持低内存模式加载: `Qwen`, `QwenVL`, `MiniCPM_2B_single`; Set `low_memory_mode = true` in `MainActivity.java`.
 - 2025/02/07：**DeepSeek-R1-Distill-Qwen**: 1.5B （请使用 `Qwen v2.5 Qwen_Export.py`）。
-
-## 入门指南
-
-1. **下载模型：**
-   - Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main)
-
-2. **设置说明：**
-   - 将下载的模型文件放入 `assets` 文件夹。
-   - 解压存储在 `libs/arm64-v8a` 文件夹中的 `*.so` 文件。
-
-3. **模型说明：**
-   - 演示模型是从 HuggingFace 或 ModelScope 转换而来，并针对极限执行速度进行了优化。
-   - 输入和输出可能与原始模型略有不同。
-   - 对于Qwen2VL / Qwen2.5VL，请调整关键变量以匹配模型参数。
-      - `GLRender.java: Line 37, 38, 39`
-      - `project.h: Line 14, 15, 16, 35, 36, 41, 59, 60`
-
-4. **ONNX 导出注意事项：**
-   - 推荐使用动态轴以及`q4f32`量化。
 
 ## 分词器文件
 
