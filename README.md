@@ -1,6 +1,6 @@
 # Native-LLM-for-Android
 
-Quick Try: [Qwen3-1.7B-Android](https://huggingface.co/H5N1AIDS/Qwen_Android_ONNX_Runtime/tree/main)
+Quick Try: [Qwen3-1.7B-Android](https://drive.google.com/file/d/11K-ldQJmDITUk5pEmfKSpFXLxmGEl8jF/view?usp=drive_link)
 
 ### Qwen3-1.7B / 4096 Context
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
