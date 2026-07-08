@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument(
         "--tokenizer-folder",
         type=Path,
-        default=Path(r"/home/DakeQQ/Downloads/Qwen3-0.6B"),
+        default=Path(r"/home/iamj/Downloads/Qwen3-0.6B"),
         help="HF checkpoint/tokenizer folder used to tokenize the demo prompt.",
     )
     return parser.parse_args()
@@ -443,8 +443,9 @@ bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_dev
 run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
 rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
 
+kv_seq_len_next = create_ort_with_shape(tuple(kv_seq_len.shape()), np.int64, device_type, DEVICE_ID)
 binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
-bind_ort_out_buf(binding_Rotary_Text_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
+bind_ort_out_buf(binding_Rotary_Text_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len_next])
 
 bind_ort_in_buf(binding_Main, in_name_Main_others, [hidden_states, rotary_cos, rotary_sin, attention_mask])
 
@@ -571,6 +572,8 @@ while num_decode < generate_limit:
 
     run(ort_session_Embed, binding_Embed)
     run(ort_session_Rotary_Text_Decode, binding_Rotary_Text_Decode)
+
+    kv_seq_len.update_inplace(kv_seq_len_next)
     num_decode += 1
 
 
