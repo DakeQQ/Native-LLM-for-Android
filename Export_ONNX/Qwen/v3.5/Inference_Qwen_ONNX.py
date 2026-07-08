@@ -1,11 +1,3 @@
-"""Standalone ONNX Runtime inference for the Qwen3.5-VL multimodal (image/video/text) split graphs.
-
-This mirrors the ORT runtime that used to live at the tail of Export_Qwen.py, but loads all model
-geometry from the exported LLM_Metadata.onnx carrier (stamped by Export_Qwen.py) instead of
-re-deriving it from the source checkpoint. Run Export_Qwen.py (v3.5) first to produce the graphs,
-then point --model-folder at the exported Qwen_ONNX directory.
-"""
-
 import argparse
 import os
 import time
@@ -24,7 +16,7 @@ def parse_args():
     parser.add_argument(
         "--model-folder",
         type=Path,
-        default=Path(__file__).resolve().parent / "Qwen_Optimized",
+        default=Path(__file__).resolve().parent / "Qwen_ONNX",
         help="Folder containing the split ONNX graphs exported by Export_Qwen.py.",
     )
     parser.add_argument(
@@ -97,7 +89,7 @@ BEAM_SIZE       = 3                                             # Beam size; mus
 # Runtime config
 ORT_LOG                  = False                                # Enable ONNX Runtime logging for debugging.
 ORT_FP16                 = False                                # Auto-set from LLM_Metadata.onnx (activations_fp16).
-ORT_Accelerate_Providers = []                                   # ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+ORT_Accelerate_Providers = ["CUDAExecutionProvider"]                                   # ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS              = 0                                    # 0 = auto
 DEVICE_ID                = 0                                    # Device ID for GPU
 
@@ -543,7 +535,7 @@ elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
         'tunable_op_enable':                  '0',
         'tunable_op_tuning_enable':           '0',
         'tunable_op_max_tuning_duration_ms':  10,
-        'do_copy_in_default_stream':          '1',
+        'do_copy_in_default_stream':          '0',
         'enable_cuda_graph':                  '0',                # Disable to avoid loading error with some models; can be re-enabled if not an issue
         'prefer_nhwc':                        '0',
         'enable_skip_layer_norm_strict_mode': '0',
@@ -1126,11 +1118,11 @@ for INPUT_MODE, current_query in test_modes:
         rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Image_Prefill.get_outputs()
         binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], concat_hidden_states)
 
-        # Set decode rotary
-        binding_Rotary_Image_Decode.bind_ortvalue_input(in_name_Rotary_Image_Decode, kv_seq_len)
-        bind_ort_out_buf(binding_Rotary_Image_Decode, out_name_Rotary_Image_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
+        # Set decode rotary (session/names only; ping-pong counter bound after the branches)
         ort_session_Rotary_Decode = ort_session_Rotary_Image_Decode
         binding_Rotary_Decode = binding_Rotary_Image_Decode
+        in_name_Rotary_Decode = in_name_Rotary_Image_Decode
+        out_name_Rotary_Decode = out_name_Rotary_Image_Decode
 
     elif mode == "video":
         print("\nStart to Process the Video...")
@@ -1178,11 +1170,11 @@ for INPUT_MODE, current_query in test_modes:
         rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Video_Prefill.get_outputs()
         binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], concat_hidden_states)
 
-        # Set decode rotary
-        binding_Rotary_Video_Decode.bind_ortvalue_input(in_name_Rotary_Video_Decode, kv_seq_len)
-        bind_ort_out_buf(binding_Rotary_Video_Decode, out_name_Rotary_Video_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
+        # Set decode rotary (session/names only; ping-pong counter bound after the branches)
         ort_session_Rotary_Decode = ort_session_Rotary_Video_Decode
         binding_Rotary_Decode = binding_Rotary_Video_Decode
+        in_name_Rotary_Decode = in_name_Rotary_Video_Decode
+        out_name_Rotary_Decode = out_name_Rotary_Video_Decode
 
     else:
         # Text-only mode
@@ -1192,12 +1184,16 @@ for INPUT_MODE, current_query in test_modes:
         rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
         binding_Main.bind_ortvalue_input(in_name_Main[num_keys_values_Main], hidden_states)
 
-        binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
-        bind_ort_out_buf(binding_Rotary_Text_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len])
         ort_session_Rotary_Decode = ort_session_Rotary_Text_Decode
         binding_Rotary_Decode = binding_Rotary_Text_Decode
+        in_name_Rotary_Decode = in_name_Rotary_Text_Decode
+        out_name_Rotary_Decode = out_name_Rotary_Text_Decode
 
     bind_ort_in_buf(binding_Main, in_name_Main[idx_rotary_cos:], [rotary_cos, rotary_sin, attention_mask])
+
+    kv_seq_len_next = create_ort_with_shape(tuple(kv_seq_len.shape()), np.int64, device_type, DEVICE_ID)
+    binding_Rotary_Decode.bind_ortvalue_input(in_name_Rotary_Decode, kv_seq_len)
+    bind_ort_out_buf(binding_Rotary_Decode, out_name_Rotary_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len_next])
 
     for name in in_name_Main_keys:
         binding_Main.bind_ortvalue_input(name, past_keys_Main)
@@ -1333,6 +1329,8 @@ for INPUT_MODE, current_query in test_modes:
         # ── 6. Prepare next step: Embed + Rotary ─────────────────────────────
         run(ort_session_Embed, binding_Embed)
         run(ort_session_Rotary_Decode, binding_Rotary_Decode)
+
+        kv_seq_len.update_inplace(kv_seq_len_next)
         num_decode += 1
 
 
