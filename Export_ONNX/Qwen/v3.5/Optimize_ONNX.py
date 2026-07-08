@@ -29,9 +29,9 @@ from onnxruntime.quantization import (
 # --- Folders / source model (edit these three to target a different model) ----
 # The LLM_* module names in MODEL_PLANS are shared across the exported model family.
 _SCRIPT_DIR                    = Path(__file__).resolve().parent
-ORIGINAL_FOLDER_PATH           = str(_SCRIPT_DIR / "Qwen_ONNX")         # Folder holding the exported *.onnx modules.
-QUANTED_FOLDER_PATH            = str(_SCRIPT_DIR / "Qwen_Optimized")    # Destination folder for the results.
-DOWNLOAD_PATH                  = r"/home/DakeQQ/Downloads/Qwen3-1.7B"   # Model dir (attention fusion); "NONE" to skip.
+ORIGINAL_FOLDER_PATH           = str(_SCRIPT_DIR / "Qwen_ONNX")             # Folder holding the exported *.onnx modules.
+QUANTED_FOLDER_PATH            = str(_SCRIPT_DIR / "Qwen_Optimized")        # Destination folder for the results.
+DOWNLOAD_PATH                  = r"/home/DakeQQ/Downloads/Qwen3.5-0.8B"     # Model dir (attention fusion); "NONE" to skip.
 
 # --- Weight-only quantization defaults (Q2 / Q4 / Q8 -> MatMulNBits) -----------
 WEIGHT_ONLY_ALGORITHM          = "k_quant"                           # "k_quant" | "DEFAULT" | "RTN" | "HQQ".
@@ -116,21 +116,36 @@ class Plan:
 
 
 # Per-module plan. Comment out a line to skip that module; edit "method" freely.
+# Covers the full Qwen3.5-VL export: text + image + video split graphs.
 MODEL_PLANS: dict[str, Plan] = {
-    "LLM_Metadata":      Plan(method="F32", optimize=False),
-    "LLM_Embed":         Plan(method="Q4", external=True, algo="DEFAULT", block_size=32, op_types=("Gather",), axes=(1,)),
-    "LLM_Main":          Plan(method="Q4", external=True),
-    "LLM_Greedy":        Plan(method="F32"),
-    "LLM_FirstBeam":     Plan(method="F32"),
-    "LLM_SecondBeam":    Plan(method="F32"),
-    "LLM_Penalty":       Plan(method="F32"),
-    "LLM_Argmax":        Plan(method="F32"),
-    "LLM_KV_Slice":      Plan(method="F32"),
-    "LLM_KV_Split2":     Plan(method="F32"),
-    "LLM_KV_Concat":     Plan(method="F32"),
-    "LLM_RotaryPrefill": Plan(method="F32"),
-    "LLM_RotaryDecode":  Plan(method="F32"),
-    "LLM_RopeShift":     Plan(method="F32"),
+    "LLM_Metadata":             Plan(method="F32", optimize=False),
+    # ── Weight-bearing graphs (weight-only quantized) ──
+    "LLM_Embed":                Plan(method="Q4", external=True, algo="DEFAULT", block_size=32, op_types=("Gather",), axes=(1,)),
+    "LLM_Vision":               Plan(method="DYNAMIC", external=True),
+    "LLM_Main":                 Plan(method="Q4", external=True),
+    # ── Vision preprocessing / text-vision fusion (no learnable weights) ──
+    "LLM_Image_Preprocess":     Plan(method="F32"),
+    "LLM_Video_Preprocess":     Plan(method="F32"),
+    "LLM_Concat_Image":         Plan(method="F32"),
+    "LLM_Concat_Video":         Plan(method="F32"),
+    # ── Rotary embedding generators (no weights) ──
+    "LLM_Rotary_Image_Prefill": Plan(method="F32"),
+    "LLM_Rotary_Image_Decode":  Plan(method="F32"),
+    "LLM_Rotary_Video_Prefill": Plan(method="F32"),
+    "LLM_Rotary_Video_Decode":  Plan(method="F32"),
+    "LLM_RotaryPrefill":        Plan(method="F32"),
+    "LLM_RotaryDecode":         Plan(method="F32"),
+    # ── Decoding heads / sampling (no weights) ──
+    "LLM_Greedy":               Plan(method="F32"),
+    "LLM_FirstBeam":            Plan(method="F32"),
+    "LLM_SecondBeam":           Plan(method="F32"),
+    "LLM_Penalty":              Plan(method="F32"),
+    "LLM_Argmax":               Plan(method="F32"),
+    # ── KV-cache maintenance (no weights) ──
+    "LLM_KV_Slice":             Plan(method="F32"),
+    "LLM_KV_Split2":            Plan(method="F32"),
+    "LLM_KV_Concat":            Plan(method="F32"),
+    "LLM_RopeShift":            Plan(method="F32"),
 }
 
 

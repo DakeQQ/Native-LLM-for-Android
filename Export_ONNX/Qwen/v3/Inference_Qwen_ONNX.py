@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument(
         "--tokenizer-folder",
         type=Path,
-        default=Path(r"/home/iamj/Downloads/Qwen3-0.6B"),
+        default=Path(r"/home/DakeQQ/Downloads/Qwen3-0.6B"),
         help="HF checkpoint/tokenizer folder used to tokenize the demo prompt.",
     )
     return parser.parse_args()

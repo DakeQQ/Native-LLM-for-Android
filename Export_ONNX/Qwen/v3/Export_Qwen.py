@@ -11,10 +11,10 @@ from transformers import AutoModelForCausalLM
 
 
 # Settings
-MODEL_PATH                     = r'/home/DakeQQ/Downloads/Qwen3-1.7B'  # HF checkpoint folder.
-DO_EXPORT                      = True                               # False = reuse existing ONNX files.
+MODEL_PATH                     = r'/home/DakeQQ/Downloads/Qwen3-1.7B'   # HF checkpoint folder.
+DO_EXPORT                      = True                                   # False = reuse existing ONNX files.
 OPSET                          = 20
-MAX_SEQ_LEN                    = 4096                               # Fixed at export time.
+MAX_SEQ_LEN                    = 4096                                   # Fixed at export time.
 
 # Reorder is exact; o_proj may shift quantized-KV accuracy.
 REORDER_DOWNPROJ_FOR_QUANT     = True
@@ -22,7 +22,8 @@ REORDER_OPROJ_FOR_QUANT        = False
 REORDER_KEY                    = "absmean"                          # "absmean" | "L4" | "rms" | "std".
 
 KV_QUANT_DTYPE                 = "Q8"                               # ROTARY_Q4[_CUDA] | Q8[_CUDA] | ROTARY_Q8[_CUDA] | F16 | F32
-KV_QUANT_GROUP_SIZE            = 128                                # Must divide head_dim; clamped/fallback below if needed.
+KV_QUANT_GROUP_SIZE            = 256                                # Must divide head_dim; clamped/fallback below if needed.
+COMPUTE_IN_F32                 = False                              # True: upcast the F16 KV cache and run attention math in F32. False (default): keep the KV cache in F16 and compute attention in F16 (downcast Q instead) to avoid repeatedly casting the growing KV cache. No effect on quantized KV, which is already F32.
 USE_HADAMARD                   = False                              # Q4/Q8 grouped accuracy option.
 HADAMARD_RANDOM_SEED           = 9527
 USE_CLIP                       = False                              # Clip outliers before Q4/Q8 quantization.
@@ -492,6 +493,7 @@ class ROPE_SHIFT(torch.nn.Module):
         self.head_dim      = head_dim
         self.head_dim_half = head_dim // 2
         self.num_kv_heads  = num_kv_heads
+        self.compute_in_f32 = COMPUTE_IN_F32
         inv_freq      = inv_freq.detach().float().reshape(-1)
         inv_freq_full = torch.cat([inv_freq, inv_freq], dim=0).view(1, 1, 1, head_dim, 1)
         half_sign     = torch.cat([torch.ones(self.head_dim_half), -torch.ones(self.head_dim_half)], dim=0).view(1, 1, 1, head_dim, 1)
@@ -508,17 +510,20 @@ class ROPE_SHIFT(torch.nn.Module):
     def forward(self, *all_inputs):
         shift     = all_inputs[-1].reshape(-1)  # Keep [1]; scalar Slice exports poorly.
         kv_dtype  = all_inputs[0].dtype         # Rotate in the cache dtype; cast cos/sin to match k.
+        force_f32 = self.compute_in_f32 and kv_dtype != torch.float32  # F16 cache but F32 math requested: upcast K, rotate, cast back.
         cos_tab   = self.cos_shift.index_select(0, shift)
         sin_tab   = self.sin_shift.index_select(0, shift)
-        if kv_dtype == torch.float32:
+        if kv_dtype == torch.float32 or force_f32:
             cos_tab = cos_tab.float()
             sin_tab = sin_tab.float()
 
         batch_size = all_inputs[0].shape[0]
         outputs = []
         for i in range(self.num_layers):
-            k       = all_inputs[i]
+            k       = all_inputs[i].float() if force_f32 else all_inputs[i]
             k_shift = k * cos_tab + self._flip_k(k, batch_size) * sin_tab
+            if force_f32:
+                k_shift = k_shift.to(kv_dtype)
             outputs.append(k_shift)
         return tuple(outputs)
 
@@ -1073,6 +1078,7 @@ class LLM_MAIN(torch.nn.Module):
         self.kv_quantized       = self.kv_q8 or self.kv_q8_cuda
         self.kv_any_quantized   = self.kv_quantized or self.kv_rotary
         self.kv_sym             = USE_SYM and self.kv_any_quantized
+        self.compute_in_f32     = COMPUTE_IN_F32
 
         self.kv_q8_grouped      = (self.kv_quantized or self.kv_rotary_q8) and (USE_HADAMARD or USE_SHUFFLE) and KV_QUANT_GROUP_SIZE < head_dim
 
@@ -1260,6 +1266,10 @@ class LLM_MAIN(torch.nn.Module):
         attention_mask     = all_inputs[-1]
         batch_size         = hidden_states.shape[0]
 
+        # F16 KV with COMPUTE_IN_F32 off: cast the shared mask to F16 once so attention stays in F16
+        # (Q is downcast per layer instead of upcasting the growing KV cache).
+        attn_mask_f16 = attention_mask.half() if (self.kv_f16 and not self.compute_in_f32) else None
+
         for i, layer in enumerate(self.llm.model.layers):
 
             residual      = hidden_states
@@ -1272,12 +1282,16 @@ class LLM_MAIN(torch.nn.Module):
             qk     = self._rms_norm(qk, self.qk_norm_scale, self.qk_rms_norm_eps) * layer.self_attn.qk_norm_weight
             qk_rot = qk * rotary_pos_emb_cos + self._rotate_half(qk, batch_size) * rotary_pos_emb_sin
 
+            if self.kv_f16 and not self.compute_in_f32:
+                qk_rot = qk_rot.half()   # One F16 cast feeds both Q and K; the split/reshape/view/permute below then run in F16.
+
             q, k = torch.split(qk_rot, self.qk_split_sizes, dim=-2)
             q    = q.reshape(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
             q    = q.permute(0, 2, 3, 1, 4)
 
             if self.kv_f16:
-                k = k.half()
+                if self.compute_in_f32:
+                    k = k.half()   # F16 KV storage while Q stays F32; K is upcast (k.float()) at matmul time.
                 v = v.half()
 
             k = k.permute(0, 3, 2, 4, 1)
@@ -1612,9 +1626,14 @@ class LLM_MAIN(torch.nn.Module):
                 self.save_value[i] = v
 
                 if self.kv_f16:
-                    attn = torch.matmul(q, k.float()) + attention_mask
-                    attn = torch.softmax(attn, dim=-1)
-                    attn = torch.matmul(attn, v.float())
+                    if self.compute_in_f32:
+                        attn = torch.matmul(q, k.float()) + attention_mask
+                        attn = torch.softmax(attn, dim=-1)
+                        attn = torch.matmul(attn, v.float())
+                    else:
+                        attn = torch.matmul(q, k) + attn_mask_f16
+                        attn = torch.softmax(attn, dim=-1)
+                        attn = torch.matmul(attn, v).float()
                 else:
                     attn = torch.matmul(q, k) + attention_mask
                     attn = torch.softmax(attn, dim=-1)
@@ -1700,7 +1719,7 @@ def write_onnx_metadata(onnx_path, metadata):
     onnx.save(model, onnx_path)
 
 
-if DO_EXPORT:
+if __name__ == "__main__" and DO_EXPORT:
     print('Export start ...')
     with (torch.inference_mode()):
 
@@ -2199,17 +2218,25 @@ if DO_EXPORT:
                 "producer":                    "Export_Qwen.py",
             },
             {
-                "num_layers":          num_layers,
-                "num_attention_heads": num_heads,
-                "num_key_value_heads": num_kv_heads,
-                "head_dim":            head_dim,
-                "hidden_size":         hidden_size,
-                "vocab_size":          vocab_size,
-                "max_seq_len":         MAX_SEQ_LEN,
-                "activations_fp16":    False,
-                "opset":               OPSET,
-                "reorder_downproj":    REORDER_DOWNPROJ_FOR_QUANT,
-                "reorder_oproj":       REORDER_OPROJ_FOR_QUANT,
+                "num_layers":                  num_layers,
+                "num_full_attention_layers":   num_layers,   # pure transformer: every layer is full attention
+                "num_linear_attention_layers": 0,            # no linear-attention (hybrid) layers in Qwen3
+                "num_attention_heads":         num_heads,
+                "num_key_value_heads":         num_kv_heads,
+                "head_dim":                    head_dim,
+                "hidden_size":                 hidden_size,
+                "vocab_size":                  vocab_size,
+                "max_seq_len":                 MAX_SEQ_LEN,
+                "activations_fp16":            False,
+                "compute_in_f32":              COMPUTE_IN_F32,
+                "opset":                       OPSET,
+                "reorder_downproj":            REORDER_DOWNPROJ_FOR_QUANT,
+                "reorder_oproj":               REORDER_OPROJ_FOR_QUANT,
+            },
+            {
+                # Uniform metadata schema shared with the hybrid (Qwen3.5) exporter; the Android
+                # runtime reads these to size full-attention KV vs. linear-attention state tensors.
+                "layer_types": ",".join(["full_attention"] * num_layers),
             },
             {
                 "kv_quant_dtype":          KV_QUANT_DTYPE,
@@ -2275,4 +2302,5 @@ def run_inference_demo():
     )
 
 
-run_inference_demo()
+if __name__ == "__main__":
+    run_inference_demo()
