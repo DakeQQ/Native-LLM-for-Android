@@ -65,9 +65,9 @@ inline void flush_stream(JNIEnv* env) {
 
 // KV shape helpers.
 inline static int detectKVSeqAxis(const std::vector<int64_t>& modelDims) {
-    for (size_t a = 1; a < modelDims.size(); ++a) {
+    for (int a = 1; a < modelDims.size(); ++a) {
         if (modelDims[a] <= 0) {
-            return static_cast<int>(a);
+            return a;
         }
     }
     return -1;
@@ -145,10 +145,17 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
         }
         return std::atoi(s.c_str());
     };
+    auto optInt = [&](const char* key, int fallback) -> int {
+        const std::string s = lookupModelMetadata(api, md, alloc, key);
+        return s.empty() ? fallback : std::atoi(s.c_str());
+    };
 
-    const int meta_layers      = reqInt("num_layers");
-    const int meta_kv_tensors  = reqInt("kv_num_tensors");
-    const int meta_kv_blocks   = reqInt("kv_blocks_per_layer");
+    const int meta_layers        = reqInt("num_layers");
+    // Hybrid split; defaults keep pre-hybrid (pure full-attention) exports working unchanged.
+    const int meta_full_layers   = optInt("num_full_attention_layers", meta_layers);
+    const int meta_linear_layers = optInt("num_linear_attention_layers", 0);
+    const int meta_kv_tensors    = reqInt("kv_num_tensors");
+    const int meta_kv_blocks     = reqInt("kv_blocks_per_layer");
     const int meta_max_seq_len = reqInt("max_seq_len");
     const int meta_fp16        = reqInt("activations_fp16");
     const int meta_endoftext   = reqInt("chat_endoftext_id");
@@ -162,6 +169,12 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     const int meta_think_start = reqInt("chat_think_start_id");
     const int meta_think_end   = reqInt("chat_think_end_id");
 
+    // Multimodal reservation (optional): only present when a vision model stamped these ids.
+    const int meta_image_token  = optInt("image_token_id", -1);
+    const int meta_video_token  = optInt("video_token_id", -1);
+    const int meta_vision_start = optInt("vision_start_token_id", -1);
+    const int meta_vision_end   = optInt("vision_end_token_id", -1);
+
     api->ReleaseModelMetadata(md);
     if (!ok) {
         return false;
@@ -171,13 +184,19 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
         LOGE("model metadata: num_layers=%d out of range (1..%d)", meta_layers, max_num_layers);
         return false;
     }
+    if (meta_full_layers <= 0 || meta_linear_layers < 0 ||
+        meta_full_layers + meta_linear_layers != meta_layers) {
+        LOGE("model metadata: attention-layer split invalid (layers=%d full=%d linear=%d)",
+             meta_layers, meta_full_layers, meta_linear_layers);
+        return false;
+    }
     if (meta_kv_blocks != 2 && meta_kv_blocks != 4 && meta_kv_blocks != 6) {
         LOGE("model metadata: kv_blocks_per_layer=%d (expected 2/4/6)", meta_kv_blocks);
         return false;
     }
-    if (meta_kv_tensors != meta_layers * meta_kv_blocks || meta_kv_tensors > max_keys_values) {
-        LOGE("model metadata: kv_num_tensors=%d inconsistent (layers=%d x blocks=%d; ceiling=%d)",
-             meta_kv_tensors, meta_layers, meta_kv_blocks, max_keys_values);
+    if (meta_kv_tensors != meta_full_layers * meta_kv_blocks || meta_kv_tensors > max_keys_values) {
+        LOGE("model metadata: kv_num_tensors=%d inconsistent (full_layers=%d x blocks=%d; ceiling=%d)",
+             meta_kv_tensors, meta_full_layers, meta_kv_blocks, max_keys_values);
         return false;
     }
     if (meta_max_seq_len < MIN_MEMORY_TOKENS + kDecodeRecycleHeadroom) {
@@ -185,9 +204,13 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
         return false;
     }
 
-    num_layers      = meta_layers;
-    g_kv_blocks     = meta_kv_blocks;
-    num_keys_values = meta_kv_tensors;
+    num_layers                  = meta_layers;
+    num_full_attention_layers   = meta_full_layers;
+    num_linear_attention_layers = meta_linear_layers;
+    g_kv_blocks                 = meta_kv_blocks;
+    num_keys_values             = meta_kv_tensors;
+    // num_linear_states / num_main_states / g_linear_blocks are derived from the Main graph in
+    // configureKVLayout, which is the authoritative source for the exact state-tensor count.
 
     ORT_FP16    = (meta_fp16 != 0);
     max_seq_len = meta_max_seq_len;
@@ -212,6 +235,11 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     chat_double_newline_id = meta_dbl_newline;
     chat_think_start_id    = meta_think_start;
     chat_think_end_id      = meta_think_end;
+    chat_image_token_id    = meta_image_token;
+    chat_video_token_id    = meta_video_token;
+    chat_vision_start_id   = meta_vision_start;
+    chat_vision_end_id     = meta_vision_end;
+    g_multimodal           = (meta_image_token >= 0 || meta_video_token >= 0);
     end_id_0 = chat_endoftext_id;
     end_id_1 = chat_im_end_id;
     buildChatTemplates();
@@ -288,45 +316,106 @@ bool configureKVLayout() {
              num_layers, g_kv_blocks, num_keys_values);
         return false;
     }
-    const int inCount     = static_cast<int>(m.inputNames.size());
-    const int outCount    = static_cast<int>(m.outputNames.size());
-    const int kvByInputs  = inCount - 4;     // minus hidden_states, rotary_cos, rotary_sin, attention_mask
-    const int kvByOutputs = outCount - 1;    // minus logits
-    if (kvByInputs != num_keys_values || kvByOutputs != num_keys_values) {
-        LOGE("configureKVLayout: LLM_Main I/O (inputs=%d outputs=%d -> KV=%d/%d) disagrees with model "
-             "metadata kv_num_tensors=%d", inCount, outCount, kvByInputs, kvByOutputs, num_keys_values);
+    const int inCount   = static_cast<int>(m.inputNames.size());
+    const int outCount  = static_cast<int>(m.outputNames.size());
+    // Main state block = [windowed full-attn KV] + [passthrough linear states]; then hidden/cos/sin/mask
+    // on the input side and logits on the output side.
+    const int statesByInputs  = inCount - 4;    // minus hidden_states, rotary_cos, rotary_sin, attention_mask
+    const int statesByOutputs = outCount - 1;   // minus logits
+    if (statesByInputs != statesByOutputs || statesByInputs < num_keys_values) {
+        LOGE("configureKVLayout: LLM_Main I/O (inputs=%d outputs=%d -> states=%d/%d) inconsistent with "
+             "full-attention KV count=%d", inCount, outCount, statesByInputs, statesByOutputs, num_keys_values);
         return false;
     }
+    num_main_states   = statesByInputs;
+    num_linear_states = num_main_states - num_keys_values;
+    if (num_linear_states < 0 || num_main_states > max_main_states) {
+        LOGE("configureKVLayout: linear-state count invalid (main=%d full=%d linear=%d, ceiling=%d)",
+             num_main_states, num_keys_values, num_linear_states, max_main_states);
+        return false;
+    }
+    if (num_linear_attention_layers > 0) {
+        g_linear_blocks = num_linear_states / num_linear_attention_layers;
+        if (g_linear_blocks <= 0 || g_linear_blocks * num_linear_attention_layers != num_linear_states) {
+            LOGE("configureKVLayout: linear states=%d not divisible by linear layers=%d",
+                 num_linear_states, num_linear_attention_layers);
+            return false;
+        }
+    } else if (num_linear_states != 0) {
+        LOGE("configureKVLayout: metadata declares 0 linear layers but Main carries %d extra states",
+             num_linear_states);
+        return false;
+    } else {
+        g_linear_blocks = 0;
+    }
 
-    mainHiddenIdx    = num_keys_values;
-    mainCosIdx       = num_keys_values + 1;
-    mainSinIdx       = num_keys_values + 2;
-    mainMaskIdx      = num_keys_values + 3;
-    mainLogitsOutIdx = num_keys_values;
+    mainHiddenIdx    = num_main_states;
+    mainCosIdx       = num_main_states + 1;
+    mainSinIdx       = num_main_states + 2;
+    mainMaskIdx      = num_main_states + 3;
+    mainLogitsOutIdx = num_main_states;
 
-    beamSaveIdInIdx       = num_keys_values + 1;
-    firstBeamSizeIdx      = num_keys_values + 2;
-    secondBeamPrevProbIdx = num_keys_values + 2;
-    secondBeamSizeIdx     = num_keys_values + 3;
-    secondBeamTopKIdx     = num_keys_values + 4;
-    beamSaveIdOutIdx      = num_keys_values;
-    beamScoreOutIdx       = num_keys_values + 1;
-    beamIdsOutIdx         = num_keys_values + 2;
-    beamMaxOutIdx         = num_keys_values + 3;
+    beamSaveIdInIdx       = num_main_states + 1;
+    firstBeamSizeIdx      = num_main_states + 2;
+    secondBeamPrevProbIdx = num_main_states + 2;
+    secondBeamSizeIdx     = num_main_states + 3;
+    secondBeamTopKIdx     = num_main_states + 4;
+    beamSaveIdOutIdx      = num_main_states;
+    beamScoreOutIdx       = num_main_states + 1;
+    beamIdsOutIdx         = num_main_states + 2;
+    beamMaxOutIdx         = num_main_states + 3;
 
-    kvSliceStartIdx = num_keys_values;
+    kvSliceStartIdx = num_keys_values;   // KV-management graphs act on the full-attention block only
     kvSliceEndIdx   = num_keys_values + 1;
 
     const char* modeName = (g_kv_blocks == 2) ? "F16/F32 (key,value)"
                          : (g_kv_blocks == 4) ? "symmetric quant (key,value,k_scale,v_scale)"
                                               : "asymmetric quant (key,value,k_scale,k_bias,v_scale,v_bias)";
-    LOGI("configureKVLayout: %d layers x %d KV blocks -> %d KV tensors [%s] (from model metadata)",
-         num_layers, g_kv_blocks, num_keys_values, modeName);
+    LOGI("configureKVLayout: %d layers (%d full + %d linear) x %d KV blocks -> %d KV + %d linear = %d "
+         "Main states [%s]", num_layers, num_full_attention_layers, num_linear_attention_layers,
+         g_kv_blocks, num_keys_values, num_linear_states, num_main_states, modeName);
     return true;
 }
 
 // Empty KV-cache initialization.
 static float gEmptyKVData = 0.0f;
+
+// Fixed-shape zero backing for hybrid linear-attention init states (persists for the tensors' lifetime).
+static std::array<std::vector<uint8_t>, max_linear_states> gLinearInitBacking;
+
+// Build fresh-conversation linear-attention states: full-shape zero conv/recurrent summaries.
+// No-op for pure-transformer models (num_linear_states == 0).
+static bool initLinearStates() {
+    ModelRuntime& m = getModel(LLM_Main);
+    if (m.api == nullptr || m.session == nullptr) {
+        return false;
+    }
+    const OrtApi* api = m.api;
+    for (int i = 0; i < num_linear_states; ++i) {
+        const int idx = num_keys_values + i;   // linear states follow the full-attention KV prefix
+        if (linear_state_init[i] != nullptr) {
+            api->ReleaseValue(linear_state_init[i]);
+            linear_state_init[i] = nullptr;
+        }
+        std::vector<int64_t> dims = m.inputDims[idx];
+        int64_t elems = 1;
+        for (int64_t& d : dims) {
+            if (d <= 0) { d = 1; }   // dynamic batch axis -> 1 at conversation start
+            elems *= d;
+        }
+        const size_t bytes = static_cast<size_t>(elems) * tensorElementSize(m.inputTypes[idx]);
+        gLinearInitBacking[i].assign(bytes, 0);
+        if (!createTensorWithData(api, m.ioMemoryInfo, gLinearInitBacking[i].data(), bytes,
+                                  dims, m.inputTypes[idx], &linear_state_init[i],
+                                  "CreateTensorWithDataAsOrtValue(linear_init)")) {
+            for (OrtValue*& s : linear_state_init) {
+                if (s != nullptr) { api->ReleaseValue(s); s = nullptr; }
+            }
+            return false;
+        }
+    }
+    return true;
+}
 
 bool initKVCache() {
     ModelRuntime& m = getModel(LLM_Main);
@@ -351,19 +440,15 @@ bool initKVCache() {
             return false;
         }
     }
-    return true;
+    return initLinearStates();
 }
 
 // Peak shared-arena bytes already reserved (high-water mark); reset when the arena is shrunk (Clear_Cache).
 static int64_t g_reserved_arena_bytes = 0;
 
-// Pre-grow the shared CPU arena so NO cache-touching graph triggers a mid-conversation arena growth (page
-// faults + latency spike). Every such graph shares the ONE env arena and runs sequentially: Main decode,
-// FirstBeam/SecondBeam (which expand the cache by the beam width) and the KV-management graphs (KV_Slice/
-// Split2/Concat/RopeShift). We size the reservation to the LARGEST single-graph cache working set across ALL
-// loaded models (+ one persistent batch-1 saved_kv that stays live during that run) and grow the arena once
-// via a single alloc+free. Idempotent through g_reserved_arena_bytes; only ever grows. seqCap = worst-case
-// sequence length; beamBatch = decode batch (beam width, or 1 for greedy).
+// Pre-grow the shared CPU arena so cache-heavy graphs do not grow it mid-turn. Reserve the
+// largest loaded cache I/O working set plus one persistent batch-1 saved KV; g_reserved_arena_bytes
+// makes this idempotent. seqCap is the worst-case sequence length; beamBatch is the decode batch.
 static void reserveSharedArena(int64_t seqCap, int64_t beamBatch) {
     if (!kPrewarmSharedArena || kPrewarmArenaPercent <= 0 || !gSharedEnvArenaRegistered) {
         return;
@@ -509,6 +594,31 @@ static inline void release_saved_kv() {
             kv = nullptr;
         }
     }
+}
+
+// Hybrid linear-attention passthrough state helpers (no-ops for pure-transformer models).
+static inline void release_saved_linear() {
+    if (mMain.api == nullptr) {
+        return;
+    }
+    for (OrtValue*& s : saved_linear_states) {
+        if (s != nullptr) {
+            mMain.api->ReleaseValue(s);
+            s = nullptr;
+        }
+    }
+    saved_linear_valid = false;
+}
+
+// Take ownership of a freshly-produced linear-state vector (from prefill/append) as the persisted state.
+static inline void store_saved_linear(std::vector<OrtValue*>& produced) {
+    release_saved_linear();
+    for (int i = 0; i < num_linear_states && i < static_cast<int>(produced.size()); ++i) {
+        saved_linear_states[i] = produced[i];
+        produced[i] = nullptr;
+    }
+    produced.clear();
+    saved_linear_valid = (num_linear_states > 0);
 }
 
 static inline void publishMemoryUsage() {
@@ -743,12 +853,16 @@ static bool runRopeShift(std::vector<OrtValue*>& in, int64_t shift, std::vector<
     return ok;
 }
 
-// Key-side slots: keys [0,L), k_scale [2L,3L), k_bias [3L,4L).
+// Key-side slots are laid out over full-attention layers only:
+// keys [0,L), k_scale [2L,3L), k_bias [3L,4L).
 static bool ropeShiftKeys(OrtValue** kv, int count, int64_t shift) {
     if (mRopeShift.session == nullptr || shift <= 0) {
         return false;
     }
-    const int L = num_layers;
+    const int L = num_full_attention_layers;
+    if (L <= 0 || count < L * g_kv_blocks) {
+        return false;
+    }
     std::vector<OrtValue*> keyInputs;
     keyInputs.reserve(static_cast<size_t>(3 * L));
     auto appendSlot = [&](int slot) -> bool {
@@ -862,6 +976,7 @@ inline static bool is_stop_token(int id) {
 inline static void clear_history() {
     clearAllModelBindingRefs();
     release_saved_kv();
+    release_saved_linear();
     ids_len       = 0;
     saved_kv_len  = 0;
     saved_kv_base = 0;
@@ -1015,12 +1130,16 @@ inline static void rebuild_system_prompt_ids() {
 }
 
 // Shared one-shot prefill returning KV outputs only.
-static bool runPrefillToKV(const int* idsData, int64_t tokenCount, OrtValue* const* kvInputs,
+static bool runPrefillToKV(const int* idsData, int64_t tokenCount,
+                           OrtValue* const* kvInputs, OrtValue* const* linearInputs,
                            int64_t historyLen, int64_t cacheLen,
-                           std::vector<OrtValue*>& outKV, const char* inputOpName) {
+                           std::vector<OrtValue*>& outKV, std::vector<OrtValue*>& outLinear,
+                           const char* inputOpName) {
     outKV.clear();
+    outLinear.clear();
     const OrtApi* api = mMain.api;
     if (api == nullptr || idsData == nullptr || tokenCount <= 0 || kvInputs == nullptr ||
+        (num_linear_states > 0 && linearInputs == nullptr) ||
         !ensureBinding(mEmbed) || !ensureBinding(mRotaryPrefill) || !ensureBinding(mMain)) {
         return false;
     }
@@ -1104,6 +1223,9 @@ static bool runPrefillToKV(const int* idsData, int64_t tokenCount, OrtValue* con
         for (int i = 0; i < num_keys_values; ++i) {
             bound = bindIn(mMain, i, kvInputs[i]) && bound;
         }
+        for (int i = 0; i < num_linear_states; ++i) {
+            bound = bindIn(mMain, num_keys_values + i, linearInputs[i]) && bound;
+        }
         bound = bindIn(mMain, mainHiddenIdx, hidden) && bound;
         bound = bindIn(mMain, mainCosIdx, roOut[0]) && bound;
         bound = bindIn(mMain, mainSinIdx, roOut[1]) && bound;
@@ -1111,23 +1233,29 @@ static bool runPrefillToKV(const int* idsData, int64_t tokenCount, OrtValue* con
         for (int i = 0; i < num_keys_values; ++i) {
             bound = bindOutDevice(mMain, i) && bound;
         }
+        for (int i = 0; i < num_linear_states; ++i) {
+            bound = bindOutDevice(mMain, num_keys_values + i) && bound;
+        }
         bound = bindOut(mMain, mainLogitsOutIdx, logitsBuf.value) && bound;
         const bool mainOk = bound && runBinding(mMain) && fetchOutputsInto(mMain, outKV) &&
-                            outKV.size() >= static_cast<size_t>(num_keys_values);
+                            outKV.size() >= static_cast<size_t>(num_main_states);
         releaseOne(api, hidden);
         releaseValues(api, roOut);
         if (!mainOk) {
             break;
         }
-        for (size_t i = static_cast<size_t>(num_keys_values); i < outKV.size(); ++i) {
+        // Fetched order: [full KV] [linear states] [logits]. Peel linear off, release the logits handle.
+        outLinear.assign(outKV.begin() + num_keys_values, outKV.begin() + num_main_states);
+        for (size_t i = static_cast<size_t>(num_main_states); i < outKV.size(); ++i) {
             releaseOne(api, outKV[i]);
         }
-        outKV.resize(num_keys_values);
+        outKV.resize(num_keys_values);   // linear pointers are now solely owned by outLinear
         ok = true;
     } while (false);
     releaseBuffer(api, logitsBuf);
     if (!ok) {
         releaseValues(api, outKV);
+        releaseValues(api, outLinear);
     }
     return ok;
 }
@@ -1135,6 +1263,7 @@ static bool runPrefillToKV(const int* idsData, int64_t tokenCount, OrtValue* con
 // Rebuild from ids; never excise KV in-place because survivors still attended dropped tokens.
 static bool rebuildSavedKVFromHistoryRetaining(int retainTarget) {
     release_saved_kv();
+    release_saved_linear();
     saved_kv_len = 0;
     saved_kv_base = 0;
     publishMemoryUsage();
@@ -1149,13 +1278,14 @@ static bool rebuildSavedKVFromHistoryRetaining(int retainTarget) {
     if (api == nullptr || !ensureBinding(mEmbed) || !ensureBinding(mRotaryPrefill) || !ensureBinding(mMain)) {
         return false;
     }
-    std::vector<OrtValue*> kept;
+    std::vector<OrtValue*> kept, keptLinear;
     if (!runPrefillToKV(g_history_ids.data() + startIdx, N, input_tensors_kv_init.data(),
-                        0, 0, kept, "recompute input_ids")) {
+                        linear_state_init.data(), 0, 0, kept, keptLinear, "recompute input_ids")) {
         g_history_ids.clear();
         return false;
     }
     for (int i=0;i<num_keys_values;++i) saved_kv[i]=kept[i];
+    store_saved_linear(keptLinear);   // rebuilt from zero over the retained window -> consistent linear state
     saved_kv_len = N;
     saved_kv_base = 0;
     publishMemoryUsage();
@@ -1182,17 +1312,19 @@ static bool appendCleanTurnKV(const std::vector<int>& ids, int memoryTokens) {
                 : prevLen + N);
     g_history_ids.insert(g_history_ids.end(), ids.begin(), ids.end());
     if (api == nullptr || prevLen == 0 || saved_kv[0] == nullptr ||
+        (hasLinearState() && !saved_linear_valid) ||                      // linear state stale: rebuild
         prevBase + prevLen + N + 2 > max_seq_len ||                       // table would overflow: rebuild
         !ensureBinding(mEmbed) || !ensureBinding(mRotaryPrefill) || !ensureBinding(mMain)) {
         return rebuildSavedKVFromHistoryRetaining(intendedRetain);
     }
-    std::vector<OrtValue*> kept;
-    if (!runPrefillToKV(ids.data(), N, saved_kv.data(), prevBase + prevLen, prevLen,
-                        kept, "append input_ids")) {
+    std::vector<OrtValue*> kept, keptLinear;
+    if (!runPrefillToKV(ids.data(), N, saved_kv.data(), saved_linear_states.data(),
+                        prevBase + prevLen, prevLen, kept, keptLinear, "append input_ids")) {
         return rebuildSavedKVFromHistoryRetaining(intendedRetain);
     }
     release_saved_kv();
     for (int i=0;i<num_keys_values;++i) saved_kv[i]=kept[i];
+    store_saved_linear(keptLinear);   // continues the recurrence from the persisted linear state
     saved_kv_len = prevLen + N;
     saved_kv_base = prevBase;
     if (memoryUsedInRedZone(memoryTokens, saved_kv_len)) {
@@ -1244,7 +1376,8 @@ static void commitOffCap(int cap) {
 }
 
 // OFF mode: transfer decode KV directly; red-zone trimming is a background re-prefill, not a slice.
-static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV, int64_t decodeBase,
+static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV, std::vector<OrtValue*>& decodeLinear,
+                               int64_t decodeBase,
                                const std::vector<int>& promptIds, const std::vector<int>& replyIds,
                                int memoryTokens, int* pendingCap) {
     *pendingCap = -1;
@@ -1265,6 +1398,7 @@ static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV, int64_t decodeB
         releaseOne(api, decodeKV[i]);
     }
     decodeKV.clear();
+    store_saved_linear(decodeLinear);   // decode linear is consistent (no in-turn slide for hybrid)
     saved_kv_len  = physLen;
     saved_kv_base = decodeBase;
     g_history_ids.insert(g_history_ids.end(), promptIds.begin(), promptIds.end());
@@ -1280,21 +1414,37 @@ static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV, int64_t decodeB
 }
 
 // Fold manual-stop notice into OFF-mode decode KV.
-static bool appendIdsToDecodeKV(std::vector<OrtValue*>& kv, const std::vector<int>& ids,
-                                int64_t absStart, int64_t cacheLen) {
+static bool appendIdsToDecodeKV(std::vector<OrtValue*>& kv, std::vector<OrtValue*>& linear,
+                                const std::vector<int>& ids, int64_t absStart, int64_t cacheLen) {
     const OrtApi* api = mMain.api;
     const auto n = static_cast<int64_t>(ids.size());
     if (api == nullptr || n <= 0 || kv.size() < static_cast<size_t>(num_keys_values) || kv[0] == nullptr ||
         !ensureBinding(mEmbed) || !ensureBinding(mRotaryPrefill) || !ensureBinding(mMain)) {
         return false;
     }
-    std::vector<OrtValue*> appended;
-    if (!runPrefillToKV(ids.data(), n, kv.data(), absStart, cacheLen, appended, "notice input_ids")) {
+    std::vector<OrtValue*> appended, appendedLinear;
+    if (!runPrefillToKV(ids.data(), n, kv.data(), linear.data(), absStart, cacheLen,
+                        appended, appendedLinear, "notice input_ids")) {
         return false;
     }
     releaseValues(api, kv);
     kv.swap(appended);
+    releaseValues(api, linear);
+    linear.swap(appendedLinear);
     return true;
+}
+
+// ── Multimodal reservation ───────────────────────────────────────────────────────────────────
+// Hook where a future vision build splices image/video embeddings into the text hidden states before the
+// prefill Main pass. No-op today: g_multimodal is only set when a vision model stamped image/video token
+// ids, and the text-only LLM_MODEL_TABLE never loads such a model. See user_settings.h for the activation
+// plan (add the vision graphs to the table as optional loads, then fill this in).
+static inline void maybeInjectVisionEmbeddings(OrtValue* /*prefillHidden*/, const std::vector<int>& /*ids*/) {
+    if (!g_multimodal) {
+        return;
+    }
+    // TODO(vision): LLM_Image/Video_Preprocess -> LLM_Vision -> LLM_Concat_* then overwrite the
+    // <image_pad>/<video_pad> rows of prefillHidden with the projected vision embeddings.
 }
 
 // Must match THINK_OPEN / THINK_CLOSE in ChatAdapter.java.
@@ -1745,8 +1895,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass clazz, 
     const int sep_len = (saved_kv_len > 0) ? prev_close_len : 0;
     const auto core_len = static_cast<int64_t>(get_ids.size());
     const int64_t prompt_span = static_cast<int64_t>(sep_len) + core_len;
-    // Streaming relies on hard RoPE recycle; beam reserves the whole decode budget up front.
-    const bool recyclerDrivesDecode = !useBeam && mKVSlice.session != nullptr && mRopeShift.session != nullptr;
+    // Streaming relies on hard RoPE recycle; beam reserves the whole decode budget up front. Hybrid
+    // (linear-attention) models can't slide/rope-shift their recurrent state, so they also reserve.
+    const bool recyclerDrivesDecode = !useBeam && !hasLinearState() &&
+            mKVSlice.session != nullptr && mRopeShift.session != nullptr;
     const int64_t decode_reserve = std::max<int64_t>(0,
             std::min<int64_t>(recyclerDrivesDecode ? static_cast<int64_t>(kDecodeRecycleHeadroom)
                                                    : static_cast<int64_t>(memory.decodeTokens),
@@ -1756,13 +1908,21 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass clazz, 
     // Reclaim absolute RoPE positions before prefill when needed.
     if (history_pos + turn_room > max_seq_len) {
         const int64_t targetLen = static_cast<int64_t>(max_seq_len) - turn_room;
-        if (targetLen > 0 && saved_kv_len + turn_room > max_seq_len) {
-            if (shrinkSavedKVForRotaryBudget(targetLen)) {
+        if (hasLinearState()) {
+            // Hybrid: can't slice/rope-shift the linear recurrent state; rebuild the retained window
+            // from ids so the full-attention KV and the linear state stay consistent.
+            if (targetLen > 0 && rebuildSavedKVFromHistoryRetaining(static_cast<int>(targetLen))) {
                 history_pos = saved_kv_base + saved_kv_len;
             }
-        }
-        if (saved_kv_len + turn_room <= max_seq_len && renumberSavedKV()) {
-            history_pos = saved_kv_base + saved_kv_len;
+        } else {
+            if (targetLen > 0 && saved_kv_len + turn_room > max_seq_len) {
+                if (shrinkSavedKVForRotaryBudget(targetLen)) {
+                    history_pos = saved_kv_base + saved_kv_len;
+                }
+            }
+            if (saved_kv_len + turn_room <= max_seq_len && renumberSavedKV()) {
+                history_pos = saved_kv_base + saved_kv_len;
+            }
         }
         if (history_pos + turn_room > max_seq_len) {
             clear_history();
@@ -1817,12 +1977,14 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass clazz, 
 
     // Prefill-window decoupling: shorten prefill attention, then concat full KV back for decode.
 retry_generation:
-    const bool wantDecouple = !forceFullPrefill && reusedHistory && saved_kv[0] != nullptr &&
+    // Prefill-window decoupling splits/concats the full-attention KV; it is disabled for hybrid models
+    // because the linear recurrent state cannot be windowed to match a shortened full-attention window.
+    const bool wantDecouple = !forceFullPrefill && !hasLinearState() && reusedHistory && saved_kv[0] != nullptr &&
             memory.prefillTokens > 0 &&
             saved_kv_len > static_cast<int64_t>(memory.prefillTokens) &&
             ids_len >= static_cast<int64_t>(memory.prefillDecoupleMinNewTokens) &&
             mKVSplit2.session != nullptr && mKVConcat.session != nullptr;
-    const bool prefillZeroWindow = !forceFullPrefill && reusedHistory && saved_kv[0] != nullptr &&
+    const bool prefillZeroWindow = !forceFullPrefill && !hasLinearState() && reusedHistory && saved_kv[0] != nullptr &&
             memory.prefillTokens == 0 && mKVConcat.session != nullptr;
     const int64_t prefillCacheLen = prefillZeroWindow ? 0
             : (wantDecouple ? static_cast<int64_t>(memory.prefillTokens) : saved_kv_len);
@@ -1857,6 +2019,7 @@ retry_generation:
         return env->NewStringUTF("");
     }
     keep(prefillHidden);
+    maybeInjectVisionEmbeddings(prefillHidden, get_ids);   // reserved no-op until a vision model is wired in
     const int hiddenSize = static_cast<int>(mEmbed.outputDims[0].back());
     const ONNXTensorElementDataType hiddenType = mEmbed.outputTypes[0];
 
@@ -1965,12 +2128,20 @@ retry_generation:
     std::vector<OrtValue*> greedyOut;
     std::vector<OrtValue*> windowKV;     // prefill-decouple: most-recent prefillTokens fed to the prefill
     std::vector<OrtValue*> prefixKV;     // prefill-decouple: older history concatenated back after prefill
+    std::vector<OrtValue*> mainLinear;   // hybrid linear-attention passthrough states (empty for pure transformers)
+    std::vector<OrtValue*> beamLinear;
+    std::vector<OrtValue*> nextMainLinear;
+    std::vector<OrtValue*> nextBeamLinear;
     mainKV.reserve(num_keys_values);
     beamKV.reserve(num_keys_values);
-    nextMainKV.reserve(num_keys_values + 1);   // KV outputs + logits OrtValue handle from GetBoundOutputValues
+    nextMainKV.reserve(num_main_states + 1);   // KV + linear outputs + logits OrtValue handle
     nextBeamKV.reserve(num_keys_values);
-    beamOut.reserve(num_keys_values + 4);      // reordered KV + save_ids + score/ids/max handles
+    beamOut.reserve(num_main_states + 4);      // reordered KV + linear + save_ids + score/ids/max handles
     greedyOut.reserve(2);                      // max + updated save_ids handles
+    mainLinear.reserve(num_linear_states);
+    beamLinear.reserve(num_linear_states);
+    nextMainLinear.reserve(num_linear_states);
+    nextBeamLinear.reserve(num_linear_states);
     OrtValue* saveIdDev = nullptr;       // greedy/beam save_ids (device), grows each step
     std::vector<int>     recentDecodedIds;
     std::vector<int32_t> escapeSeedData;
@@ -1990,6 +2161,10 @@ retry_generation:
         releaseValues(api, greedyOut);
         releaseValues(api, windowKV);
         releaseValues(api, prefixKV);
+        releaseValues(api, mainLinear);
+        releaseValues(api, beamLinear);
+        releaseValues(api, nextMainLinear);
+        releaseValues(api, nextBeamLinear);
         releaseValues(api, oneTime);
         releaseBuffer(api, prefillLogitsBuf);
         releaseBuffer(api, decodeLogitsBuf);
@@ -2024,11 +2199,15 @@ retry_generation:
 
     const int rotaryDecodeBudget = static_cast<int>(std::max<int64_t>(
             0, static_cast<int64_t>(max_seq_len) - (history_pos + ids_len) - decodeBudgetMargin));
-    const int decodeBudget = useBeam ? std::min(rotaryDecodeBudget, memory.decodeTokens) : memory.decodeTokens;
+    // Hybrid models have no in-turn RoPE recycle, so (like beam) they cap decode to the rotary budget.
+    const bool decodeBudgetBounded = useBeam || hasLinearState();
+    const int decodeBudget = decodeBudgetBounded ? std::min(rotaryDecodeBudget, memory.decodeTokens)
+                                                 : memory.decodeTokens;
     int64_t absNext = history_pos + ids_len;
     int64_t decodeBase = saved_kv_base;   // absolute RoPE pos of the oldest live cached token (0 after a slide)
     bool isPrefill = true;
     bool mainDecodeFixedBound = false;
+    bool argmaxDecodeBound = false;   // Argmax's logits input / max_id output are fixed once decode starts
     int maxId = -1;
     int numDecode = 0;
     int generated = 0;   // committed (streamed) reply tokens; drives the throughput figure
@@ -2121,7 +2300,8 @@ retry_generation:
     };
 
     auto appendPreparedTokenToKV = [&]() -> bool {
-        std::vector<OrtValue*>& kvTarget = useBeam ? beamKV : mainKV;
+        std::vector<OrtValue*>& kvTarget  = useBeam ? beamKV     : mainKV;
+        std::vector<OrtValue*>& linTarget = useBeam ? beamLinear : mainLinear;
         if (kvTarget.size() < static_cast<size_t>(num_keys_values) || kvTarget[0] == nullptr) {
             LOGE("KV append flush skipped: current KV is empty");
             return false;
@@ -2132,6 +2312,9 @@ retry_generation:
         for (int i = 0; i < num_keys_values; ++i) {
             ok = bindIn(mMain, i, kvTarget[i]) && ok;
         }
+        for (int i = 0; i < num_linear_states; ++i) {
+            ok = bindIn(mMain, num_keys_values + i, linTarget[i]) && ok;
+        }
         ok = bindIn(mMain, mainHiddenIdx, hiddenBuf.value) && ok;
         ok = bindIn(mMain, mainCosIdx,    cosBuf.value)    && ok;
         ok = bindIn(mMain, mainSinIdx,    sinBuf.value)    && ok;
@@ -2139,19 +2322,25 @@ retry_generation:
         for (int i = 0; i < num_keys_values; ++i) {
             ok = bindOutDevice(mMain, i) && ok;
         }
+        for (int i = 0; i < num_linear_states; ++i) {
+            ok = bindOutDevice(mMain, num_keys_values + i) && ok;
+        }
         ok = bindOut(mMain, mainLogitsOutIdx, decodeLogitsBuf.value) && ok;
         ok = ok && runBinding(mMain) && fetchOutputsInto(mMain, nextMainKV);
-        if (!ok || nextMainKV.size() < static_cast<size_t>(num_keys_values)) {
+        if (!ok || nextMainKV.size() < static_cast<size_t>(num_main_states)) {
             releaseValues(api, nextMainKV);
             LOGE("KV append flush failed; dropping saved history to avoid stale context");
             return false;
         }
-        if (nextMainKV.size() > static_cast<size_t>(num_keys_values)) {
-            releaseOne(api, nextMainKV[num_keys_values]);
-            nextMainKV.resize(num_keys_values);
+        nextMainLinear.assign(nextMainKV.begin() + num_keys_values, nextMainKV.begin() + num_main_states);
+        for (size_t i = static_cast<size_t>(num_main_states); i < nextMainKV.size(); ++i) {
+            releaseOne(api, nextMainKV[i]);
         }
+        nextMainKV.resize(num_keys_values);
         releaseValues(api, kvTarget);
         kvTarget.swap(nextMainKV);
+        releaseValues(api, linTarget);
+        linTarget.swap(nextMainLinear);
         return true;
     };
 
@@ -2185,16 +2374,26 @@ retry_generation:
                                                                         : input_tensors_kv_init[i]);
                 bindIn(mMain, i, kvIn);
             }
+            for (int i = 0; i < num_linear_states; ++i) {
+                OrtValue* linIn = (reusedHistory && saved_linear_valid) ? saved_linear_states[i]
+                                                                        : linear_state_init[i];
+                bindIn(mMain, num_keys_values + i, linIn);
+            }
             bindIn(mMain, mainHiddenIdx, prefillHidden);
             bindIn(mMain, mainCosIdx,    prefillCos);
             bindIn(mMain, mainSinIdx,    prefillSin);
             bindIn(mMain, mainMaskIdx,   prefillMaskValue);
             for (int i = 0; i < num_keys_values; ++i) bindOutDevice(mMain, i);
+            for (int i = 0; i < num_linear_states; ++i) bindOutDevice(mMain, num_keys_values + i);
             bindOut(mMain, mainLogitsOutIdx, prefillLogitsBuf.value);
         } else {
-            const std::vector<OrtValue*>& kvIn = useBeam ? beamKV : mainKV;
+            const std::vector<OrtValue*>& kvIn  = useBeam ? beamKV     : mainKV;
+            const std::vector<OrtValue*>& linIn = useBeam ? beamLinear : mainLinear;
             for (int i = 0; i < num_keys_values; ++i) {
                 bindIn(mMain, i, kvIn[i]);
+            }
+            for (int i = 0; i < num_linear_states; ++i) {
+                bindIn(mMain, num_keys_values + i, linIn[i]);
             }
             if (UNLIKELY(!mainDecodeFixedBound)) {
                 bindIn(mMain, mainHiddenIdx, hiddenBuf.value);
@@ -2205,24 +2404,28 @@ retry_generation:
                 mainDecodeFixedBound = true;
             }
             for (int i = 0; i < num_keys_values; ++i) bindOutDevice(mMain, i);
+            for (int i = 0; i < num_linear_states; ++i) bindOutDevice(mMain, num_keys_values + i);
         }
         if (!runBinding(mMain) || !fetchOutputsInto(mMain, nextMainKV) ||
-            nextMainKV.size() < static_cast<size_t>(num_keys_values)) {
+            nextMainKV.size() < static_cast<size_t>(num_main_states)) {
             if (!isPrefill && preparedTokenPendingKV) {
                 kvStateValid = false;
             }
             releaseValues(api, nextMainKV);
             break;
         }
-        if (nextMainKV.size() > static_cast<size_t>(num_keys_values)) {
-            releaseOne(api, nextMainKV[num_keys_values]);     // logits read from the buffer
-            nextMainKV.resize(num_keys_values);
+        // Fetched order: [full KV] [linear states] [logits]. Peel linear off, release the logits handle.
+        nextMainLinear.assign(nextMainKV.begin() + num_keys_values, nextMainKV.begin() + num_main_states);
+        for (size_t i = static_cast<size_t>(num_main_states); i < nextMainKV.size(); ++i) {
+            releaseOne(api, nextMainKV[i]);     // logits read from the buffer
         }
+        nextMainKV.resize(num_keys_values);
         if (!isPrefill) {
-            if (useBeam) releaseValues(api, beamKV);   // beam KV consumed by this Main run
-            else         releaseValues(api, mainKV);   // own KV consumed by this Main run
+            if (useBeam) { releaseValues(api, beamKV); releaseValues(api, beamLinear); }   // consumed by this Main run
+            else         { releaseValues(api, mainKV); releaseValues(api, mainLinear); }
         }
         mainKV.swap(nextMainKV);
+        mainLinear.swap(nextMainLinear);
         if (!isPrefill) {
             preparedTokenPendingKV = false;
         }
@@ -2256,6 +2459,7 @@ retry_generation:
             // ON/beam need saved_kv for clean commit; OFF saves mainKV directly.
             if (!organizeMemory && !useBeam) {
                 release_saved_kv();
+                release_saved_linear();   // OFF direct-saves the decode linear state at turn end
             }
             decode_start_clock = std::chrono::steady_clock::now();
             const int64_t nowMs = now_ms();
@@ -2292,6 +2496,7 @@ retry_generation:
             ModelRuntime& beam = isPrefill ? mFirstBeam : mSecondBeam;
             resetBinding(beam);
             for (int i = 0; i < num_keys_values; ++i) bindIn(beam, i, mainKV[i]);
+            for (int i = 0; i < num_linear_states; ++i) bindIn(beam, num_keys_values + i, mainLinear[i]);
             bindIn(beam, mainLogitsOutIdx, logits);
             bindIn(beam, beamSaveIdInIdx, saveIdInput);
             if (isPrefill) {
@@ -2302,35 +2507,47 @@ retry_generation:
                 bindIn(beam, secondBeamTopKIdx,     topKBuf.value);
             }
             for (int i = 0; i < num_keys_values; ++i) bindOutDevice(beam, i);   // reordered KV
+            for (int i = 0; i < num_linear_states; ++i) bindOutDevice(beam, num_keys_values + i); // reordered linear
             bindOutDevice(beam, beamSaveIdOutIdx);                              // save_ids
             bindOut(beam, beamScoreOutIdx, beamScoreBuf.value);                 // score (in-place)
             bindOut(beam, beamIdsOutIdx,   beamIdsBuf.value);                   // beam_ids
             bindOut(beam, beamMaxOutIdx,   maxIdBuf.value);                     // max_id
             if (!runBinding(beam) || !fetchOutputsInto(beam, beamOut) ||
-                beamOut.size() < static_cast<size_t>(num_keys_values + 1)) {
+                beamOut.size() < static_cast<size_t>(num_main_states + 1)) {
                 releaseValues(api, beamOut);
                 break;
             }
-            releaseValues(api, mainKV);   // Main KV consumed by the beam step
+            releaseValues(api, mainKV);       // Main KV consumed by the beam step
+            releaseValues(api, mainLinear);   // Main linear consumed by the beam step
 
             maxId = *maxIdPtr;
             // Keep reordered beams even on stop so finalize can stream row-0 save_ids.
             nextBeamKV.assign(beamOut.begin(), beamOut.begin() + num_keys_values);
-            for (int i = 0; i < num_keys_values; ++i) beamOut[i] = nullptr;
-            OrtValue* newSaveId = beamOut[num_keys_values];
-            beamOut[num_keys_values] = nullptr;
-            for (size_t k = num_keys_values + 1; k < beamOut.size(); ++k) {
+            nextBeamLinear.assign(beamOut.begin() + num_keys_values, beamOut.begin() + num_main_states);
+            for (int i = 0; i < num_main_states; ++i) beamOut[i] = nullptr;
+            OrtValue* newSaveId = beamOut[num_main_states];
+            beamOut[num_main_states] = nullptr;
+            for (size_t k = num_main_states + 1; k < beamOut.size(); ++k) {
                 releaseOne(api, beamOut[k]);   // score/ids/max read from their buffers
             }
             beamOut.clear();
             beamKV.swap(nextBeamKV);
+            beamLinear.swap(nextBeamLinear);
             releaseOne(api, saveIdDev);
             saveIdDev = newSaveId;
 
         } else if (useArgmax) {
-            resetBinding(mArgmax);
-            bindIn(mArgmax, 0, logits);
-            bindOut(mArgmax, 0, maxIdBuf.value);
+            // IOBinding-once: Argmax reads the fixed decode logits buffer and writes the fixed max_id
+            // buffer, so bind only until the decode logits buffer is live (prefill uses a different
+            // buffer), then just re-run each step. Mirrors mainDecodeFixedBound above.
+            if (UNLIKELY(!argmaxDecodeBound)) {
+                resetBinding(mArgmax);
+                bindIn(mArgmax, 0, logits);
+                bindOut(mArgmax, 0, maxIdBuf.value);
+                if (!isPrefill) {
+                    argmaxDecodeBound = true;
+                }
+            }
             if (!runBinding(mArgmax)) {
                 break;
             }
@@ -2378,7 +2595,9 @@ retry_generation:
         }
 
         // Only hard RoPE-table pressure slides in-flight KV; red-zone cleanup waits until turn end.
-        if (!useBeam) {
+        // Hybrid models can't slide their linear recurrent state, so they never in-turn recycle (the
+        // decode budget is already capped to the rotary table above).
+        if (!useBeam && !hasLinearState()) {
             const bool rotaryBudgetLow = absNext + decodeBudgetMargin >= static_cast<int64_t>(max_seq_len);
             if (rotaryBudgetLow) {
                 const int64_t keepForAppend = memoryGreenTargetUsed(memory.decodeKeepWindow);
@@ -2514,7 +2733,7 @@ retry_generation:
         if (!organizeMemory && !useBeam && kvStateValid && !mainKV.empty() && mainKV[0] != nullptr) {
             const int64_t noticeCacheLen = tensorDim(api, mainKV[0], 4);
             if (noticeCacheLen > 0 &&
-                appendIdsToDecodeKV(mainKV, noticeIds, decodeBase + noticeCacheLen, noticeCacheLen)) {
+                appendIdsToDecodeKV(mainKV, mainLinear, noticeIds, decodeBase + noticeCacheLen, noticeCacheLen)) {
                 fullReplyVec.insert(fullReplyVec.end(), noticeIds.begin(), noticeIds.end());
             }
         }
@@ -2555,8 +2774,8 @@ retry_generation:
     // Persist turn: OFF transfers decode KV directly; ON/beam rebuild clean KV from ids.
     if (!organizeMemory && !useBeam) {
         int pendingCap = -1;
-        const bool saved = kvStateValid && saveDecodeKVDirect(mainKV, decodeBase, get_ids, fullReplyVec,
-                                                              memory.memoryTokens, &pendingCap);
+        const bool saved = kvStateValid && saveDecodeKVDirect(mainKV, mainLinear, decodeBase, get_ids,
+                                                              fullReplyVec, memory.memoryTokens, &pendingCap);
         if (!saved) {
             clear_history();
         }
@@ -2677,10 +2896,12 @@ Java_com_example_myapplication_MainActivity_Rollback_1LLM(JNIEnv* env, jclass cl
     const int64_t targetOffset = historyLen - activeLen;
     if (curOffset == targetOffset && mKVSlice.session != nullptr && saved_kv[0] != nullptr) {
         if (activeLen >= saved_kv_len) {
-            return JNI_TRUE;
+            return JNI_TRUE;   // no tokens dropped: full-attention KV and linear state both stay valid
         }
+        // Slicing drops tokens; the hybrid linear recurrent state can't follow, so hybrid models
+        // fall through to a full rebuild-from-ids instead.
         std::vector<OrtValue*> cur(saved_kv.begin(), saved_kv.begin() + num_keys_values), sliced;
-        if (runKVSlice(cur, 0, activeLen, sliced)) {
+        if (!hasLinearState() && runKVSlice(cur, 0, activeLen, sliced)) {
             release_saved_kv();
             for (int i = 0; i < num_keys_values; ++i) saved_kv[i] = sliced[i];
             saved_kv_len = activeLen;

@@ -62,6 +62,12 @@ inline bool ORT_FP16    = false;   // metadata "activations_fp16": 1 => fully-FP
 constexpr int kv_blocks_max   = 6;
 constexpr int max_keys_values = max_num_layers * kv_blocks_max;
 
+// Hybrid (Qwen3.5) linear-attention passthrough states: at most 2 (conv + recurrent) per layer.
+// Pure-transformer (Qwen3) models leave num_linear_states = 0 at runtime, so all of this stays unused.
+constexpr int linear_blocks_max = 2;
+constexpr int max_linear_states = max_num_layers * linear_blocks_max;
+constexpr int max_main_states   = max_keys_values + max_linear_states;   // full-attn KV + linear passthrough
+
 // Conversation limits, in RoPE/token positions. Runtime max/default values derive from max_seq_len.
 inline int DEFAULT_MEMORY_TOKENS     = 0;   // max_seq_len / 4
 inline int DEFAULT_PREFILL_TOKENS    = 0;   // DEFAULT_MEMORY_TOKENS / 8
@@ -107,6 +113,14 @@ inline int chat_newline_id        = 0;  // metadata "chat_newline_id"        (\n
 inline int chat_double_newline_id = 0;  // metadata "chat_double_newline_id" (\n\n)
 inline int chat_think_start_id    = 0;  // metadata "chat_think_start_id"    (<think>)
 inline int chat_think_end_id      = 0;  // metadata "chat_think_end_id"      (</think>)
+
+// Multimodal reservation: filled from metadata when a vision model is present; unused by the text-only
+// runtime today. Keeping them here means enabling vision does not touch the state-management core.
+inline bool g_multimodal          = false;  // set when metadata carries image/video token ids
+inline int  chat_image_token_id   = -1;     // metadata "image_token_id"        (<|image_pad|>)
+inline int  chat_video_token_id   = -1;     // metadata "video_token_id"        (<|video_pad|>)
+inline int  chat_vision_start_id  = -1;     // metadata "vision_start_token_id" (<|vision_start|>)
+inline int  chat_vision_end_id    = -1;     // metadata "vision_end_token_id"   (<|vision_end|>)
 
 inline int end_id_0 = 0;
 inline int end_id_1 = 0;

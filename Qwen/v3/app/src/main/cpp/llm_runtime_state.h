@@ -35,27 +35,38 @@ inline std::array<ModelRuntime, kModelCount> gModelRuntimes;
 inline ModelRuntime& getModel(ModelId id) { return gModelRuntimes[id]; }
 
 // Runtime geometry is filled from ONNX metadata during model load.
-inline int num_layers      = kDefaultNumLayers;
-inline int num_keys_values = kDefaultNumLayers * 2;
-inline int g_kv_blocks     = 2;
+inline int num_layers                  = kDefaultNumLayers;
+inline int num_full_attention_layers   = kDefaultNumLayers;      // layers with a windowed KV cache
+inline int num_linear_attention_layers = 0;                      // hybrid (Qwen3.5) linear-attention layers
+inline int num_keys_values             = kDefaultNumLayers * 2;  // windowed full-attention KV tensors
+inline int num_linear_states           = 0;                      // passthrough conv/recurrent state tensors
+inline int num_main_states             = kDefaultNumLayers * 2;  // = num_keys_values + num_linear_states
+inline int g_kv_blocks                 = 2;                      // KV tensors per full-attention layer (2/4/6)
+inline int g_linear_blocks             = 0;                      // state tensors per linear layer (conv+recurrent)
 
-// Main / beam / KV-slice indices are recomputed after the active KV layout is known.
-inline int mainHiddenIdx     = num_keys_values;
-inline int mainCosIdx        = num_keys_values + 1;
-inline int mainSinIdx        = num_keys_values + 2;
-inline int mainMaskIdx       = num_keys_values + 3;
-inline int mainLogitsOutIdx  = num_keys_values;
+// True for hybrid (linear + full attention) models; false for pure transformers (Qwen3).
+inline bool hasLinearState() { return num_linear_states > 0; }
 
-inline int beamSaveIdInIdx       = num_keys_values + 1;
-inline int firstBeamSizeIdx      = num_keys_values + 2;
-inline int secondBeamPrevProbIdx = num_keys_values + 2;
-inline int secondBeamSizeIdx     = num_keys_values + 3;
-inline int secondBeamTopKIdx     = num_keys_values + 4;
-inline int beamSaveIdOutIdx      = num_keys_values;
-inline int beamScoreOutIdx       = num_keys_values + 1;
-inline int beamIdsOutIdx         = num_keys_values + 2;
-inline int beamMaxOutIdx         = num_keys_values + 3;
+// Main / beam indices are recomputed after the active state layout is known. The Main state block is
+// [windowed full-attn KV : 0 .. num_keys_values) | [passthrough linear : num_keys_values .. num_main_states);
+// hidden/cos/sin/mask/logits and the beam scalars all sit AFTER the whole state block (= num_main_states).
+inline int mainHiddenIdx     = num_main_states;
+inline int mainCosIdx        = num_main_states + 1;
+inline int mainSinIdx        = num_main_states + 2;
+inline int mainMaskIdx       = num_main_states + 3;
+inline int mainLogitsOutIdx  = num_main_states;
 
+inline int beamSaveIdInIdx       = num_main_states + 1;
+inline int firstBeamSizeIdx      = num_main_states + 2;
+inline int secondBeamPrevProbIdx = num_main_states + 2;
+inline int secondBeamSizeIdx     = num_main_states + 3;
+inline int secondBeamTopKIdx     = num_main_states + 4;
+inline int beamSaveIdOutIdx      = num_main_states;
+inline int beamScoreOutIdx       = num_main_states + 1;
+inline int beamIdsOutIdx         = num_main_states + 2;
+inline int beamMaxOutIdx         = num_main_states + 3;
+
+// KV_Slice / Split2 / Concat / RopeShift act on the full-attention KV block only.
 inline int kvSliceStartIdx       = num_keys_values;
 inline int kvSliceEndIdx         = num_keys_values + 1;
 
@@ -86,6 +97,13 @@ inline std::array<OrtValue*, max_keys_values> input_tensors_kv_init = {};
 inline std::array<OrtValue*, max_keys_values> saved_kv = {};
 inline int64_t saved_kv_len  = 0;
 inline int64_t saved_kv_base = 0;
+
+// Hybrid (Qwen3.5) linear-attention passthrough states. Empty for pure-transformer models. These are
+// fixed-shape conv/recurrent summaries threaded output->input each step; they are never windowed, so any
+// token-drop on saved_kv routes through a full re-prefill to keep the linear state consistent.
+inline std::array<OrtValue*, max_linear_states> linear_state_init   = {};   // fixed-shape zero init
+inline std::array<OrtValue*, max_linear_states> saved_linear_states = {};   // cross-turn persisted final states
+inline bool saved_linear_valid = false;   // saved_linear_states corresponds to saved_kv's current window
 inline std::atomic<int64_t> g_memory_used_tokens{0};
 inline std::vector<int> g_history_ids;
 
