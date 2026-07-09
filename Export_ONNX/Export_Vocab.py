@@ -18,11 +18,17 @@ This script is fully self-contained: the tokenizer export logic is inlined from
 MNN's `utils/tokenizer.py`, so it does NOT depend on the MNN repo. Only the
 `transformers` package (plus `sentencepiece` for SentencePiece models) is needed.
 It always writes the plain-text `tokenizer.txt` (never the binary `tokenizer.mtok`).
+
+NVIDIA NeMo ASR models are also supported: point MODEL_PATH at a `.nemo` archive
+(e.g. Nemotron ASR) or a folder containing one, and the embedded SentencePiece
+tokenizer is extracted and exported directly (no HuggingFace tokenizer required).
 """
 
 import os
+import glob
 import json
 import base64
+import tarfile
 
 from transformers import AutoTokenizer
 
@@ -37,6 +43,8 @@ OUTPUT_DIR = None
 # config.json "model_type" (falls back gracefully if missing). MODEL_TYPE only
 # adjusts a few tokenizer special-cases (e.g. gemma3 / gemma3-text vocab count,
 # glm_ocr stop token); any type not listed still exports via the default map.
+# NeMo (.nemo) SentencePiece ASR tokenizers (e.g. Nemotron) are auto-detected by
+# file format and ignore MODEL_TYPE entirely.
 #
 # Supported model types (mirrors MNN llmexport `ModelMapper`, model_mapper.py):
 # ┌────────────────┬──────────────────────────────────────────────────────────┐
@@ -59,6 +67,73 @@ MODEL_TYPE = None
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+# ── NVIDIA NeMo (.nemo) tokenizer support ─────────────────────────────────
+# NeMo ASR checkpoints (e.g. Nemotron) ship the tokenizer as a SentencePiece model
+# packed inside the `.nemo` tar archive, with no HuggingFace tokenizer config. These
+# helpers locate and load that SentencePiece model so it can be exported directly.
+_NEMO_HF_MARKERS = ("tokenizer.json", "tokenizer_config.json", "vocab.json")
+
+
+def detect_nemo_tokenizer(model_path):
+    """Detect an NVIDIA NeMo SentencePiece tokenizer source.
+
+    Returns one of:
+      ("nemo", "/path/to/model.nemo")          -- a `.nemo` archive (a file, or one found in a folder)
+      ("spm",  "/path/to/xxx_tokenizer.model") -- an already-extracted NeMo SentencePiece model
+    or ``None`` when ``model_path`` looks like a regular HuggingFace model folder.
+    """
+    path = os.path.abspath(os.path.expanduser(model_path))
+    if os.path.isfile(path) and path.endswith(".nemo"):
+        return ("nemo", path)
+    if os.path.isdir(path):
+        nemo_files = sorted(glob.glob(os.path.join(path, "*.nemo")))
+        if nemo_files:
+            return ("nemo", nemo_files[0])
+        # A folder may hold an extracted NeMo SentencePiece model but no HuggingFace config.
+        if not any(os.path.isfile(os.path.join(path, marker)) for marker in _NEMO_HF_MARKERS):
+            sp_candidates = sorted(glob.glob(os.path.join(path, "*_tokenizer.model")))
+            plain = os.path.join(path, "tokenizer.model")
+            if os.path.isfile(plain):
+                sp_candidates.insert(0, plain)
+            if sp_candidates:
+                return ("spm", sp_candidates[0])
+    return None
+
+
+def _read_nemo_tokenizer_bytes(source):
+    """Return the raw SentencePiece model bytes for a detected NeMo ``source``."""
+    kind, location = source
+    if kind == "spm":
+        with open(location, "rb") as handle:
+            return handle.read()
+    # kind == "nemo": pull the SentencePiece model out of the tar archive in-memory.
+    with tarfile.open(location, "r:*") as tar:
+        tok_member = next(
+            (m for m in tar.getmembers()
+             if m.isfile() and (os.path.basename(m.name).endswith("_tokenizer.model")
+                                or os.path.basename(m.name) == "tokenizer.model")),
+            None,
+        )
+        if tok_member is None:
+            raise SystemExit(
+                f"No SentencePiece tokenizer (*_tokenizer.model / tokenizer.model) found inside {location}."
+            )
+        with tar.extractfile(tok_member) as src:
+            return src.read()
+
+
+def _load_nemo_sp_model(source):
+    """Load the NeMo SentencePiece model from a detected ``source`` into a processor."""
+    try:
+        import sentencepiece as spm
+    except ImportError as exc:
+        raise SystemExit(
+            "The `sentencepiece` package is required to export NeMo (.nemo) tokenizers. "
+            "Install it with: pip install sentencepiece"
+        ) from exc
+    return spm.SentencePieceProcessor(model_proto=_read_nemo_tokenizer_bytes(source))
+
+
 class TokenizerExporter:
     """Self-contained tokenizer -> plain-text `tokenizer.txt` exporter.
 
@@ -69,12 +144,26 @@ class TokenizerExporter:
     """
 
     def __init__(self, tokenizer_path, model_type):
+        self.tokenizer_path = tokenizer_path
+        self.model_type = model_type
+        self.is_nemo = False
+        self.nemo_source = None
+        self.nemo_sp = None
+
+        nemo_source = detect_nemo_tokenizer(tokenizer_path)
+        if nemo_source is not None:
+            # NVIDIA NeMo (.nemo) SentencePiece ASR tokenizer: no HuggingFace tokenizer is present.
+            self.is_nemo = True
+            self.tokenizer = None
+            self.nemo_source = nemo_source
+            self.nemo_sp = _load_nemo_sp_model(nemo_source)
+            self.stop_ids = self._collect_nemo_stop_ids(self.nemo_sp)
+            return
+
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True, use_fast=False)
         except Exception:
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True, use_fast=True)
-        self.tokenizer_path = tokenizer_path
-        self.model_type = model_type
         self.stop_ids = self._collect_stop_ids(tokenizer_path, model_type)
 
     @classmethod
@@ -131,12 +220,80 @@ class TokenizerExporter:
         stop_ids = list(set(stop_ids))
         return stop_ids
 
+    def _collect_nemo_stop_ids(self, sp_model):
+        """Stop ids for a NeMo SentencePiece tokenizer (EOS only, when the model defines one)."""
+        stop_ids = []
+        eos_id = sp_model.eos_id()
+        if isinstance(eos_id, int) and eos_id >= 0:
+            stop_ids.append(eos_id)
+        return list(set(stop_ids))
+
+    def _export_nemo(self, save_directory, model_path):
+        """Export a NeMo (.nemo) SentencePiece tokenizer to the plain-text SENTENCEPIECE format."""
+        os.makedirs(save_directory, exist_ok=True)
+        sp_model = self.nemo_sp
+
+        # TOKENIZER MAGIC NUMBER / TYPE (mirrors the SentencePiece branch of export()).
+        MAGIC_NUMBER = 430
+        SENTENCEPIECE = 0
+        # TOKENIZER TOKEN TYPES
+        NORMAL = 1; UNKNOWN = 2; CONTROL = 3; UNUSED = 5; BYTE = 6
+
+        # Special tokens = SentencePiece control + unknown pieces (e.g. <unk>).
+        special_list = [i for i in range(sp_model.GetPieceSize())
+                        if sp_model.IsControl(i) or sp_model.IsUnknown(i)]
+        prefix_list = [sp_model.bos_id()] if sp_model.bos_id() >= 0 else []
+        stop_ids = self.stop_ids
+
+        vocab_list = []
+        for i in range(sp_model.GetPieceSize()):
+            token = sp_model.IdToPiece(i)
+            score = sp_model.GetScore(i)
+            if sp_model.IsUnknown(i):
+                token_type = UNKNOWN
+            elif sp_model.IsControl(i):
+                token_type = CONTROL
+            elif sp_model.IsUnused(i):
+                token_type = UNUSED
+            elif sp_model.IsByte(i):
+                token_type = BYTE
+            else:
+                token_type = NORMAL
+            if '▁' in token:
+                token = token.replace('▁', ' ')
+            token_encode = base64.b64encode(token.encode("utf-8")).decode("utf8")
+            vocab_list.append(f'{token_encode} {score} {token_type}\n')
+
+        model_name = os.path.basename(os.path.normpath(model_path))
+        if model_name.endswith('.nemo'):
+            model_name = model_name[:-len('.nemo')]
+        file_path = os.path.join(save_directory, f"vocab_{model_name}.txt")
+
+        with open(file_path, "w", encoding="utf8") as fp:
+            fp.write(f'{MAGIC_NUMBER} {SENTENCEPIECE}\n')
+            fp.write(f'{len(special_list)} {len(stop_ids)} {len(prefix_list)}\n')
+            for group in (special_list, stop_ids, prefix_list):
+                for token in group:
+                    fp.write(str(token) + ' ')
+            fp.write('\n')
+            fp.write(f'{len(vocab_list)}\n')
+            for vocab in vocab_list:
+                fp.write(vocab)
+
+        print(f"NeMo SentencePiece tokenizer: {sp_model.GetPieceSize()} pieces, "
+              f"{len(special_list)} special, {len(stop_ids)} stop, {len(prefix_list)} prefix.")
+        return file_path
+
     def export(self, save_directory, model_path=None, model_type=None):
         # Use provided values or fall back to instance values
         if model_path is None:
             model_path = self.tokenizer_path
         if model_type is None:
             model_type = self.model_type
+
+        # NeMo (.nemo) SentencePiece ASR tokenizers use a dedicated, HuggingFace-free export path.
+        if self.is_nemo:
+            return self._export_nemo(save_directory, model_path)
 
         # Create directory if it doesn't exist
         os.makedirs(save_directory, exist_ok=True)
@@ -412,8 +569,9 @@ def read_model_type(model_path):
 
 def main():
     model_path = os.path.abspath(os.path.expanduser(MODEL_PATH))
-    if not os.path.isdir(model_path):
-        raise SystemExit(f"MODEL_PATH is not a directory: {model_path}")
+    is_nemo_file = os.path.isfile(model_path) and model_path.endswith(".nemo")
+    if not (os.path.isdir(model_path) or is_nemo_file):
+        raise SystemExit(f"MODEL_PATH must be a model directory or a .nemo file: {model_path}")
 
     output_dir = OUTPUT_DIR if OUTPUT_DIR else os.getcwd()
     output_dir = os.path.abspath(os.path.expanduser(output_dir))
@@ -423,6 +581,8 @@ def main():
 
     print(f"Loading tokenizer from: {model_path}")
     print(f"Model type            : {model_type}")
+    if detect_nemo_tokenizer(model_path) is not None:
+        print("Detected NVIDIA NeMo (.nemo) SentencePiece ASR tokenizer.")
 
     tokenizer = TokenizerExporter.from_pretrained(model_path, model_type)
     out_path = tokenizer.export(output_dir, model_path, model_type)
