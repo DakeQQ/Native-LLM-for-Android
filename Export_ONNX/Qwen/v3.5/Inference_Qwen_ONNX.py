@@ -89,7 +89,7 @@ BEAM_SIZE       = 3                                             # Beam size; mus
 # Runtime config
 ORT_LOG                  = False                                # Enable ONNX Runtime logging for debugging.
 ORT_FP16                 = False                                # Auto-set from LLM_Metadata.onnx (activations_fp16).
-ORT_Accelerate_Providers = ["CUDAExecutionProvider"]                                   # ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+ORT_Accelerate_Providers = []                                   # ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
 MAX_THREADS              = 0                                    # 0 = auto
 DEVICE_ID                = 0                                    # Device ID for GPU
 
