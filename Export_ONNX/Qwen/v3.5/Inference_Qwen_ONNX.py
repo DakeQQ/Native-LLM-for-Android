@@ -16,13 +16,13 @@ def parse_args():
     parser.add_argument(
         "--model-folder",
         type=Path,
-        default=Path(__file__).resolve().parent / "Qwen_ONNX",
+        default=Path(__file__).resolve().parent / "Qwen_Optimized",
         help="Folder containing the split ONNX graphs exported by Export_Qwen.py.",
     )
     parser.add_argument(
         "--tokenizer-folder",
         type=Path,
-        default=Path(r"/home/iamj/Downloads/Qwen3.5-0.8B"),
+        default=Path(r"/home/DakeQQ/Downloads/Qwen3.5-0.8B"),
         help="HF checkpoint/tokenizer folder used to tokenize the demo prompt.",
     )
     parser.add_argument(
