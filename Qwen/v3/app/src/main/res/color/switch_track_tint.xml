@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- MaterialSwitch track: energy-accent when checked, faint inactive track when off.
-     Auto-adapts to the day/night palette via the shared color tokens. -->
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:color="@color/energyYellow" android:state_checked="true" />
-    <item android:color="@color/sliderTrackInactive" />
-</selector>
