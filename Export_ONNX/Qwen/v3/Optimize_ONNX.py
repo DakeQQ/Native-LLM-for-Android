@@ -1,8 +1,4 @@
-"""Optimize exported split ONNX modules.
-
-Edit USER CONFIG for defaults and MODEL_PLANS for per-module overrides. Methods:
-Q2/Q4/Q8 = MatMulNBits, DYNAMIC = INT8 dynamic, F16 = fp16, F32 = optimize only.
-"""
+"""Optimize Qwen v3 ONNX modules and rebuild the shared merged bundle."""
 
 import os
 import gc
@@ -23,49 +19,41 @@ from onnxruntime.quantization import (
     quantize_dynamic,
 )
 
+import Shared_Merged
 
-# ============================== USER CONFIG ==============================
 
-# --- Folders / source model (edit these three to target a different model) ----
-# The LLM_* module names in MODEL_PLANS are shared across the exported model family.
+# User config
 _SCRIPT_DIR                    = Path(__file__).resolve().parent
 ORIGINAL_FOLDER_PATH           = str(_SCRIPT_DIR / "Qwen_ONNX")         # Folder holding the exported *.onnx modules.
 QUANTED_FOLDER_PATH            = str(_SCRIPT_DIR / "Qwen_Optimized")    # Destination folder for the results.
-DOWNLOAD_PATH                  = r"/home/DakeQQ/Downloads/Qwen3-1.7B"   # Model dir (attention fusion); "NONE" to skip.
+DOWNLOAD_PATH                  = str(Path.home() / "Downloads" / "Qwen3-0.6B")  # Model dir (attention fusion); "NONE" to skip.
 
-# --- Weight-only quantization defaults (Q2 / Q4 / Q8 -> MatMulNBits) -----------
-WEIGHT_ONLY_ALGORITHM          = "k_quant"                           # "k_quant" | "DEFAULT" | "RTN" | "HQQ".
+WEIGHT_ONLY_ALGORITHM          = "k_quant"                           # "k_quant" | "DEFAULT" | "RTN" | "HQQ". k_quant/RTN are Q4-only; use DEFAULT/HQQ for Q2/Q8.
 BLOCK_SIZE                     = 32                                  # Power of two, [16..256].
 ACCURACY_LEVEL                 = 4                                   # MatMulNBits accuracy level 0-4 (DEFAULT algo only).
 QUANT_SYMMETRIC                = False                               # False = asymmetric (accuracy), True = symmetric (speed).
 QUANT_FORMAT                   = "QOperator"                         # "QOperator" (MatMulNBits op) | "QDQ" (DEFAULT algo + 4-bit only).
 
-# --- Dynamic INT8 quantization defaults (DYNAMIC -> quantize_dynamic) ----------
 DYNAMIC_WEIGHT_TYPE            = "QInt8"                             # "QUInt8" | "QInt8".
 DYNAMIC_PER_CHANNEL            = True                                # Per-channel weights (accuracy, slower).
 DYNAMIC_REDUCE_RANGE           = False                               # 7-bit weights; can help on non-VNNI CPUs.
 
-# --- Node selection (global defaults; override per module via Plan) ------------
 NODES_TO_EXCLUDE               = None                                # Node names to keep unquantized, or None.
 NODES_TO_INCLUDE               = None                                # Node names to quantize exclusively, or None.
 
-# --- Storage / opset ----------------------------------------------------------
 FORCE_EXTERNAL_DATA            = False                               # Two-part storage (*.onnx.data); auto-forced when >2GB.
 UPGRADE_OPSET                  = 0                                   # Target ONNX opset (0 = keep current).
 
-# --- Graph optimizer (onnxruntime.transformers) -------------------------------
 OPTIMIZER_LEVEL                = 2                                   # ORT graph optimization level: 0 | 1 | 2 | 99.
 OPTIMIZER_MODEL_TYPE           = "bert"                              # Fusion template; "bert" is a safe generic choice.
 OPTIMIZER_ONLY_ONNXRUNTIME     = False                               # True = only ORT's built-in optimizer (skip Python fusions).
 OPTIMIZER_FUSION_OPTIONS       = None                                # Optional dict of FusionOptions overrides, e.g. {"enable_gelu": False}.
 SHAPE_INFER                    = True                                # Run shape inference before the optimizer (needed for some fusions).
 
-# --- onnxslim -----------------------------------------------------------------
 SLIM_SKIP_FUSION_PATTERNS      = None                                # Fusion patterns to skip, or None.
 SLIM_SKIP_OPTIMIZATIONS        = None                                # Optimizations to skip, or None.
 SLIM_SIZE_THRESHOLD            = None                                # Max constant size (bytes) to fold; None = fold all.
 
-# --- float16 conversion (F16 method / Plan.fp16) ------------------------------
 F16_KEEP_IO_TYPES              = None                                # None = auto (keep fp32 I/O only when precisions are mixed).
 F16_FORCE_INITIALIZERS         = True                                # Cast float initializers to float16.
 F16_MIN_POSITIVE_VAL           = 1e-7                                # Clamp floor for tiny positive values.
@@ -76,14 +64,8 @@ F16_OP_BLOCK_LIST              = [                                   # Op types 
     "DequantizeLinear",
     "DynamicQuantizeMatMul",
     "MatMulIntegerToFloat",
-    # "Pow",
-    # "ReduceMean",
-    # "ReduceSum",
-    # "Sqrt",
-    # "Softmax",
 ]
 
-# --- Q8-KV surgery: auto-rewrite integer KV attention/write/rope-shift chains ---
 KV_ATTENTION_SURGERY           = "auto"                              # "auto" (enable when quantized KV detected) | True | False.
 
 
@@ -92,7 +74,7 @@ class Plan:
     """Per-module recipe. None inherits the USER CONFIG default."""
     method:              str                    = "Q4"     # Q2 | Q4 | Q8 | DYNAMIC | F16 | F32
     # weight-only (Q2/Q4/Q8)
-    algo:                str  | None            = None     # DEFAULT | RTN | HQQ | k_quant
+    algo:                str  | None            = None     # DEFAULT | RTN | HQQ | k_quant (k_quant/RTN: Q4 only)
     op_types:            tuple[str, ...] | None = None     # e.g. ("MatMul",) or ("Gather",)
     axes:                tuple[int, ...] | None = None     # quant axis per op type
     block_size:          int  | None            = None
@@ -115,26 +97,22 @@ class Plan:
     external:            bool | None            = None     # None inherits; auto-forced when >2GB
 
 
-# Per-module plan. Comment out a line to skip that module; edit "method" freely.
+_PRIMARY_MERGED_MODEL = Path(Shared_Merged.PREFILL_GREEDY_MODEL_NAME).stem
+_MERGED_MODEL_NAMES = tuple(Path(name).stem for name, _, _ in Shared_Merged.MERGED_BUILD_PLAN)
+
 MODEL_PLANS: dict[str, Plan] = {
     "LLM_Metadata":      Plan(method="F32", optimize=False),
-    "LLM_Embed":         Plan(method="Q4", external=True, algo="DEFAULT", block_size=32, op_types=("Gather",), axes=(1,)),
-    "LLM_Main":          Plan(method="Q4", external=True),
-    "LLM_Greedy":        Plan(method="F32"),
-    "LLM_FirstBeam":     Plan(method="F32"),
-    "LLM_SecondBeam":    Plan(method="F32"),
-    "LLM_Penalty":       Plan(method="F32"),
-    "LLM_Argmax":        Plan(method="F32"),
+    # Quantize Main once, then transplant that Main block into the other merged shells.
+    _PRIMARY_MERGED_MODEL: Plan(method="Q4", external=True, optimize=False),
     "LLM_KV_Slice":      Plan(method="F32"),
     "LLM_KV_Split2":     Plan(method="F32"),
     "LLM_KV_Concat":     Plan(method="F32"),
-    "LLM_RotaryPrefill": Plan(method="F32"),
-    "LLM_RotaryDecode":  Plan(method="F32"),
+    "LLM_KV_Concat_FirstBeam": Plan(method="F32"),
+    "LLM_GatherFirstBeam": Plan(method="F32"),
     "LLM_RopeShift":     Plan(method="F32"),
 }
+REQUIRED_STANDALONE_MODELS = {"LLM_GatherFirstBeam"}
 
-
-# ============================== RESOLUTION ==============================
 
 _WEIGHT_ONLY_BITS = {"Q2": 2, "Q4": 4, "Q8": 8}     # method -> weight-only bit width
 _QUANT_FORMATS = {
@@ -142,7 +120,14 @@ _QUANT_FORMATS = {
     "QDQ": quant_utils.QuantFormat.QDQ,
 }
 _DYNAMIC_WEIGHT_TYPES = {"QUINT8": QuantType.QUInt8, "QINT8": QuantType.QInt8}
-_VALID_ALGOS = {"DEFAULT", "RTN", "HQQ", "k_quant"}
+_WEIGHT_ONLY_ALGO_BITS = {
+    "DEFAULT": frozenset(_WEIGHT_ONLY_BITS.values()),
+    "HQQ": frozenset(_WEIGHT_ONLY_BITS.values()),
+    # ORT routes RTN and k_quant through _generate_q4_node_config(), which hard-codes bits=4.
+    "RTN": frozenset({4}),
+    "k_quant": frozenset({4}),
+}
+_VALID_ALGOS = set(_WEIGHT_ONLY_ALGO_BITS)
 
 
 @dataclass
@@ -204,6 +189,15 @@ def validate_plan(name: str, rp: ResolvedPlan) -> None:
         bits = _WEIGHT_ONLY_BITS[rp.method]
         if rp.algo not in _VALID_ALGOS:
             raise ValueError(f"[{name}] unknown algo {rp.algo!r}; choose one of {sorted(_VALID_ALGOS)}.")
+        if bits not in _WEIGHT_ONLY_ALGO_BITS[rp.algo]:
+            compatible = sorted(
+                algo for algo, supported_bits in _WEIGHT_ONLY_ALGO_BITS.items()
+                if bits in supported_bits
+            )
+            raise ValueError(
+                f"[{name}] algo={rp.algo!r} cannot produce {bits}-bit weights; its ORT backend "
+                f"emits 4-bit only. Use one of {compatible} for method={rp.method!r}."
+            )
         if rp.quant_format not in _QUANT_FORMATS:
             raise ValueError(f"[{name}] unknown quant_format; choose 'QOperator' or 'QDQ'.")
         if len(rp.op_types) != len(rp.axes):
@@ -223,15 +217,11 @@ def _uses_fp16(plan: Plan) -> bool:
     return plan.fp16 or plan.method.upper() == "F16"
 
 
-# Mixed precision needs fp32 graph I/O at shared boundaries.
 _PRECISION_MODEL_PLANS = [plan for name, plan in MODEL_PLANS.items() if name != "LLM_Metadata"]
 MIXED_PRECISION = (
     any(_uses_fp16(p) for p in _PRECISION_MODEL_PLANS)
     and not all(_uses_fp16(p) for p in _PRECISION_MODEL_PLANS)
 )
-
-
-# ============================== FILE / STORAGE HELPERS ==============================
 
 
 def get_model_paths(name: str) -> tuple[str, str]:
@@ -281,6 +271,15 @@ def read_onnx_metadata(model_path: str) -> dict:
     except Exception as exc:  # noqa: BLE001 - metadata is best-effort; never abort the pipeline over it
         print(f"  Warning: could not read metadata from {os.path.basename(model_path)} ({exc}).")
         return {}
+
+
+def _metadata_model_file_names(source_folder: Path) -> dict[str, str]:
+    metadata = read_onnx_metadata(str(source_folder / "LLM_Metadata.onnx"))
+    return {
+        key[len("model_file_name_"):]: value
+        for key, value in metadata.items()
+        if key.startswith("model_file_name_") and value
+    }
 
 
 def write_onnx_metadata(model_path: str, metadata: dict) -> None:
@@ -369,9 +368,6 @@ def run_onnxslim(model_path: str, external: bool, no_shape_infer: bool = False) 
             os.remove(stash_path)
 
 
-# ============================== OPTIMIZE / QUANTIZE ==============================
-
-
 def build_fusion_options(model_type: str):
     if not OPTIMIZER_FUSION_OPTIONS:
         return None
@@ -442,6 +438,11 @@ def fetch_transformer_config(download_path: str) -> tuple[int, int]:
 
 
 def build_weight_only_config(rp: ResolvedPlan, bits: int):
+    supported_bits = _WEIGHT_ONLY_ALGO_BITS.get(rp.algo)
+    if supported_bits is None or bits not in supported_bits:
+        raise ValueError(
+            f"algo={rp.algo!r} cannot produce {bits}-bit weights; validate the plan before quantization."
+        )
     op_types, axes = list(rp.op_types), list(rp.axes)
     quant_axes = tuple(zip(op_types, axes))
     quant_format = _QUANT_FORMATS[rp.quant_format]
@@ -488,6 +489,18 @@ def quantize_weight_only(src_path: str, dst_path: str, rp: ResolvedPlan, bits: i
         nodes_to_include=rp.nodes_to_include,
     )
     quant.process()
+    emitted_bits = {
+        int(attribute.i)
+        for node in quant.model.model.graph.node
+        if node.op_type == "MatMulNBits"
+        for attribute in node.attribute
+        if attribute.name == "bits"
+    }
+    if emitted_bits and emitted_bits != {bits}:
+        raise RuntimeError(
+            f"Weight-only quantizer requested {bits}-bit but emitted MatMulNBits widths "
+            f"{sorted(emitted_bits)}; refusing to save a mislabeled model."
+        )
     quant.model.save_model_to_file(dst_path, external)
     del model, quant
     gc.collect()
@@ -520,9 +533,6 @@ def quantize_dynamic_int8(src_path: str, dst_path: str, rp: ResolvedPlan, extern
         nodes_to_exclude=rp.nodes_to_exclude,
         use_external_data_format=external,
     )
-
-
-# ============================== GRAPH SURGERY UTILITIES ==============================
 
 
 def _src_through_casts(name: str, producer: dict) -> str:
@@ -647,8 +657,417 @@ def _split_value_scale_mul(mul, producer: dict) -> tuple[str, str] | None:
     return (right, left) if left_is_scale else (left, right)
 
 
-# ============================== Q8-KV SURGERY ==============================
-# Keeps quantized KV caches in integer form while using ORT fused quant ops.
+def _init_map(graph) -> dict[str, TensorProto]:
+    return {init.name: init for init in graph.initializer}
+
+
+def _tensor_dims(tensor: TensorProto) -> tuple[int, ...]:
+    return tuple(int(dim) for dim in tensor.dims)
+
+
+def _node_attrs(node) -> dict:
+    return {attr.name: helper.get_attribute_value(attr) for attr in node.attribute}
+
+
+def _graph_used_names(graph) -> set[str]:
+    used = {value.name for value in graph.input}
+    used.update(value.name for value in graph.output)
+    used.update(value.name for value in graph.value_info)
+    used.update(init.name for init in graph.initializer)
+    for node in graph.node:
+        if node.name:
+            used.add(node.name)
+        used.update(name for name in node.input if name)
+        used.update(name for name in node.output if name)
+    return used
+
+
+def _make_name_factory(graph, prefix: str):
+    used = _graph_used_names(graph)
+
+    def make(suffix: str) -> str:
+        base = f"{prefix}{suffix}"
+        if base not in used:
+            used.add(base)
+            return base
+        index = 1
+        while f"{base}_{index}" in used:
+            index += 1
+        name = f"{base}_{index}"
+        used.add(name)
+        return name
+
+    return make
+
+
+def _replace_graph_node(graph, target, replacement_nodes: list) -> None:
+    nodes, replaced = [], False
+    target_id = id(target)
+    for node in graph.node:
+        if id(node) == target_id:
+            nodes.extend(replacement_nodes)
+            replaced = True
+        else:
+            nodes.append(node)
+    if not replaced:
+        raise RuntimeError(f"node {target.name or target.op_type!r} was not found in the graph")
+    graph.ClearField("node")
+    graph.node.extend(nodes)
+
+
+def _drop_initializers(graph, names: set[str]) -> None:
+    if not names:
+        return
+    keep = [init for init in graph.initializer if init.name not in names]
+    graph.ClearField("initializer")
+    graph.initializer.extend(keep)
+
+
+def _find_embed_gather(graph):
+    """Return (Gather node, initializer name, vocab, hidden) for Main's token embedding."""
+    inits = _init_map(graph)
+    candidates = []
+    for node in graph.node:
+        if node.op_type != "Gather" or len(node.input) < 2:
+            continue
+        init = inits.get(node.input[0])
+        if init is None or len(init.dims) != 2:
+            continue
+        rows, cols = _tensor_dims(init)
+        if rows <= 0 or cols <= 0:
+            continue
+        score = rows * cols
+        if rows > cols:
+            score += rows
+        if "input_ids" in node.input[1]:
+            score += rows * cols
+        candidates.append((score, node, init.name, rows, cols))
+    if not candidates:
+        raise RuntimeError("embedding Gather with a 2-D initializer was not found")
+    _, node, name, vocab, hidden = max(candidates, key=lambda item: item[0])
+    return node, name, vocab, hidden
+
+
+def _find_lmhead(graph, vocab: int, hidden: int):
+    """Return (op_type, node) for the lm_head op matching [hidden, vocab] / [vocab, hidden]."""
+    inits = _init_map(graph)
+    for node in graph.node:
+        if node.op_type != "MatMulNBits":
+            continue
+        attrs = _node_attrs(node)
+        if int(attrs.get("K", -1)) == hidden and int(attrs.get("N", -1)) == vocab:
+            return node.op_type, node
+
+    expected = {(hidden, vocab), (vocab, hidden)}
+    for op_type in ("MatMul", "Gemm", "MatMulInteger"):
+        for node in graph.node:
+            if node.op_type != op_type or len(node.input) < 2:
+                continue
+            init = inits.get(node.input[1])
+            if init is not None and _tensor_dims(init) in expected:
+                return node.op_type, node
+    raise RuntimeError(f"lm_head op with vocab={vocab}, hidden={hidden} was not found")
+
+
+def _make_scalar_initializer(graph, name: str, array: np.ndarray) -> str:
+    inits = _init_map(graph)
+    if name not in inits:
+        graph.initializer.append(numpy_helper.from_array(array, name=name))
+    return name
+
+
+def _make_axes_initializer(graph, name: str, axes: list[int]) -> str:
+    inits = _init_map(graph)
+    if name not in inits:
+        graph.initializer.append(numpy_helper.from_array(np.array(axes, dtype=np.int64), name=name))
+    return name
+
+
+def _share_float_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: int, hidden: int) -> dict:
+    inits = _init_map(graph)
+    shared_weight = lmhead.input[1]
+    weight = inits.get(shared_weight)
+    if weight is None:
+        raise RuntimeError("float lm_head weight initializer was not found")
+    dims = _tensor_dims(weight)
+    make = _make_name_factory(graph, "share_embed_lmhead_")
+    ids, out = gather.input[1], gather.output[0]
+
+    if dims == (vocab, hidden):
+        shared_gather = helper.make_node(
+            "Gather", [shared_weight, ids], [out], axis=0, name=make("gather")
+        )
+        replacement = [shared_gather]
+    elif dims == (hidden, vocab):
+        gathered = make("gathered_hbs")
+        shared_gather = helper.make_node(
+            "Gather", [shared_weight, ids], [gathered], axis=1, name=make("gather")
+        )
+        to_bsh = helper.make_node("Transpose", [gathered], [out], perm=[1, 2, 0], name=make("transpose"))
+        replacement = [shared_gather, to_bsh]
+    else:
+        raise RuntimeError(f"unsupported lm_head weight shape {dims}; expected {(hidden, vocab)} or {(vocab, hidden)}")
+
+    _replace_graph_node(graph, gather, replacement)
+    if embed_init != shared_weight:
+        _drop_initializers(graph, {embed_init})
+    return {"lmhead_op": lmhead.op_type, "dropped": embed_init, "shared_weight": shared_weight}
+
+
+def _share_q4_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: int, hidden: int,
+                           fallback_block_size: int) -> dict:
+    attrs = _node_attrs(lmhead)
+    block_size = int(attrs.get("block_size", fallback_block_size))
+    if block_size <= 0 or hidden % block_size != 0:
+        raise RuntimeError(f"lm_head MatMulNBits block_size={block_size} is incompatible with hidden={hidden}")
+    if len(lmhead.input) < 4:
+        raise RuntimeError("share_embed_lmhead currently requires asymmetric MatMulNBits with a zero-point input")
+
+    bq, bs, bz = lmhead.input[1], lmhead.input[2], lmhead.input[3]
+    kb = hidden // block_size
+    make = _make_name_factory(graph, "share_embed_lmhead_q4_")
+    ids, out = gather.input[1], gather.output[0]
+
+    axm1 = _make_axes_initializer(graph, make("axis_m1"), [-1])
+    rs_qint = _make_axes_initializer(graph, make("reshape_qint"), [0, 0, 0, -1])
+    rs_flat = _make_axes_initializer(graph, make("reshape_flat"), [0, 0, -1])
+    c16 = _make_scalar_initializer(graph, make("c16"), np.array(16, dtype=np.uint8))
+    z_start = _make_axes_initializer(graph, make("z_start"), [0])
+    z_end = _make_axes_initializer(graph, make("z_end"), [kb])
+    z_axis = _make_axes_initializer(graph, make("z_axis"), [2])
+
+    gq, gs, gz = make("gather_q"), make("gather_s"), make("gather_z")
+    qlo, qhi, qlo1, qhi1, qcat, qint = (make("qlo"), make("qhi"), make("qlo1"),
+                                        make("qhi1"), make("qcat"), make("qint"))
+    zlo, zhi, zlo1, zhi1, zcat, zflat, zint = (make("zlo"), make("zhi"), make("zlo1"),
+                                               make("zhi1"), make("zcat"), make("zflat"), make("zint"))
+    qf, zf, zf1, gs1, sub, deq = (make("qf"), make("zf"), make("zf1"), make("gs1"),
+                                  make("sub"), make("deq"))
+
+    replacement = [
+        helper.make_node("Gather", [bq, ids], [gq], axis=0, name=make("gather_q_node")),
+        helper.make_node("Gather", [bs, ids], [gs], axis=0, name=make("gather_s_node")),
+        helper.make_node("Gather", [bz, ids], [gz], axis=0, name=make("gather_z_node")),
+        helper.make_node("Mod", [gq, c16], [qlo], name=make("qlo_node")),
+        helper.make_node("Div", [gq, c16], [qhi], name=make("qhi_node")),
+        helper.make_node("Unsqueeze", [qlo, axm1], [qlo1], name=make("qlo_unsq")),
+        helper.make_node("Unsqueeze", [qhi, axm1], [qhi1], name=make("qhi_unsq")),
+        helper.make_node("Concat", [qlo1, qhi1], [qcat], axis=-1, name=make("qcat_node")),
+        helper.make_node("Reshape", [qcat, rs_qint], [qint], name=make("qreshape_node")),
+        helper.make_node("Mod", [gz, c16], [zlo], name=make("zlo_node")),
+        helper.make_node("Div", [gz, c16], [zhi], name=make("zhi_node")),
+        helper.make_node("Unsqueeze", [zlo, axm1], [zlo1], name=make("zlo_unsq")),
+        helper.make_node("Unsqueeze", [zhi, axm1], [zhi1], name=make("zhi_unsq")),
+        helper.make_node("Concat", [zlo1, zhi1], [zcat], axis=-1, name=make("zcat_node")),
+        helper.make_node("Reshape", [zcat, rs_flat], [zflat], name=make("zreshape_node")),
+        helper.make_node("Slice", [zflat, z_start, z_end, z_axis], [zint], name=make("zslice_node")),
+        helper.make_node("Cast", [qint], [qf], to=TensorProto.FLOAT, name=make("q_cast")),
+        helper.make_node("Cast", [zint], [zf], to=TensorProto.FLOAT, name=make("z_cast")),
+        helper.make_node("Unsqueeze", [zf, axm1], [zf1], name=make("z_unsq")),
+        helper.make_node("Unsqueeze", [gs, axm1], [gs1], name=make("s_unsq")),
+        helper.make_node("Sub", [qf, zf1], [sub], name=make("sub_node")),
+        helper.make_node("Mul", [sub, gs1], [deq], name=make("mul_node")),
+        helper.make_node("Reshape", [deq, rs_flat], [out], name=make("output_reshape")),
+    ]
+
+    _replace_graph_node(graph, gather, replacement)
+    _drop_initializers(graph, {embed_init})
+    return {"lmhead_op": lmhead.op_type, "dropped": embed_init, "shared_weight": bq}
+
+
+def _graph_consumers(graph) -> dict[str, list]:
+    consumers: dict[str, list] = {}
+    for node in graph.node:
+        for name in node.input:
+            consumers.setdefault(name, []).append(node)
+    return consumers
+
+
+def _is_dynamic_weight_scale_init(init: TensorProto, vocab: int) -> bool:
+    return _tensor_dims(init) in ((), (1,), (vocab,)) and init.data_type in (TensorProto.FLOAT, TensorProto.FLOAT16)
+
+
+def _find_dynamic_weight_scale(graph, lmhead, vocab: int) -> str | None:
+    inits = _init_map(graph)
+    consumers = _graph_consumers(graph)
+    producer = {out: node for node in graph.node for out in node.output}
+
+    bq = lmhead.input[1]
+    candidates = []
+    if bq.endswith("_quantized"):
+        candidates.append(bq[:-len("_quantized")] + "_scale")
+    if len(lmhead.input) > 3 and lmhead.input[3].endswith("_zero_point"):
+        candidates.append(lmhead.input[3][:-len("_zero_point")] + "_scale")
+    for name in candidates:
+        init = inits.get(name)
+        if init is not None and _is_dynamic_weight_scale_init(init, vocab):
+            return name
+
+    queue = list(lmhead.output)
+    seen: set[str] = set(queue)
+    for _ in range(8):
+        next_queue = []
+        for value in queue:
+            for node in consumers.get(value, []):
+                if node.op_type == "Mul":
+                    for inp in node.input:
+                        init = inits.get(inp)
+                        if init is not None and _is_dynamic_weight_scale_init(init, vocab):
+                            return inp
+                        scale_mul = producer.get(inp)
+                        if scale_mul is not None and scale_mul.op_type == "Mul":
+                            for scale_inp in scale_mul.input:
+                                scale_init = inits.get(scale_inp)
+                                if scale_init is not None and _is_dynamic_weight_scale_init(scale_init, vocab):
+                                    return scale_inp
+                for out in node.output:
+                    if out not in seen:
+                        seen.add(out)
+                        next_queue.append(out)
+        queue = next_queue
+        if not queue:
+            break
+    return None
+
+
+def _append_vector_or_scalar_dequant_input(graph, nodes: list, name: str, ids: str, vocab: int,
+                                           make, suffix: str) -> str:
+    init = _init_map(graph).get(name)
+    if init is None:
+        raise RuntimeError(f"initializer {name!r} was not found")
+    dims = _tensor_dims(init)
+    if dims == (vocab,):
+        gathered = make(f"{suffix}_gathered")
+        expanded = make(f"{suffix}_expanded")
+        axis = _make_axes_initializer(graph, make(f"{suffix}_axis"), [-1])
+        nodes.extend([
+            helper.make_node("Gather", [name, ids], [gathered], axis=0, name=make(f"{suffix}_gather")),
+            helper.make_node("Unsqueeze", [gathered, axis], [expanded], name=make(f"{suffix}_unsq")),
+        ])
+        return expanded
+    if dims in ((), (1,)):
+        return name
+    raise RuntimeError(f"initializer {name!r} has unsupported dynamic lm_head scale/zp shape {dims}")
+
+
+def _share_dynamic_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: int, hidden: int) -> dict:
+    inits = _init_map(graph)
+    bq = lmhead.input[1]
+    bq_init = inits.get(bq)
+    if bq_init is None:
+        raise RuntimeError("dynamic lm_head quantized weight initializer was not found")
+    bq_dims = _tensor_dims(bq_init)
+    b_scale = _find_dynamic_weight_scale(graph, lmhead, vocab)
+    if b_scale is None:
+        raise RuntimeError("dynamic lm_head weight scale initializer was not found")
+
+    make = _make_name_factory(graph, "share_embed_lmhead_dyn_")
+    ids = gather.input[1]
+    consumers = _graph_consumers(graph)
+    dq_node = None
+    gather_consumers = consumers.get(gather.output[0], [])
+    if len(gather_consumers) == 1 and gather_consumers[0].op_type == "DequantizeLinear":
+        dq_node = gather_consumers[0]
+        out = dq_node.output[0]
+    else:
+        out = gather.output[0]
+    replacement: list = []
+
+    if bq_dims == (vocab, hidden):
+        q_bsh = make("q_bsh")
+        replacement.append(helper.make_node("Gather", [bq, ids], [q_bsh], axis=0, name=make("gather_q")))
+    elif bq_dims == (hidden, vocab):
+        q_hbs = make("q_hbs")
+        q_bsh = make("q_bsh")
+        replacement.extend([
+            helper.make_node("Gather", [bq, ids], [q_hbs], axis=1, name=make("gather_q")),
+            helper.make_node("Transpose", [q_hbs], [q_bsh], perm=[1, 2, 0], name=make("transpose_q")),
+        ])
+    else:
+        raise RuntimeError(f"dynamic lm_head weight has unsupported shape {bq_dims}")
+
+    if len(lmhead.input) > 3 and lmhead.input[3]:
+        b_zp = lmhead.input[3]
+    else:
+        dtype = TensorProto.UINT8 if bq_init.data_type == TensorProto.UINT8 else TensorProto.INT8
+        zero = np.array(0, dtype=np.uint8 if dtype == TensorProto.UINT8 else np.int8)
+        b_zp = _make_scalar_initializer(graph, make("zero_point"), zero)
+
+    scale = _append_vector_or_scalar_dequant_input(graph, replacement, b_scale, ids, vocab, make, "scale")
+    zp = _append_vector_or_scalar_dequant_input(graph, replacement, b_zp, ids, vocab, make, "zp")
+    qf, zf, sub = make("qf"), make("zf"), make("sub")
+    replacement.extend([
+        helper.make_node("Cast", [q_bsh], [qf], to=TensorProto.FLOAT, name=make("q_cast")),
+        helper.make_node("Cast", [zp], [zf], to=TensorProto.FLOAT, name=make("zp_cast")),
+        helper.make_node("Sub", [qf, zf], [sub], name=make("sub_node")),
+        helper.make_node("Mul", [sub, scale], [out], name=make("mul_node")),
+    ])
+
+    if dq_node is None:
+        _replace_graph_node(graph, gather, replacement)
+    else:
+        nodes = []
+        gather_id, dq_id = id(gather), id(dq_node)
+        for node in graph.node:
+            if id(node) == gather_id:
+                nodes.extend(replacement)
+            elif id(node) != dq_id:
+                nodes.append(node)
+        graph.ClearField("node")
+        graph.node.extend(nodes)
+    _drop_initializers(graph, {embed_init})
+    return {"lmhead_op": lmhead.op_type, "dropped": embed_init, "shared_weight": bq}
+
+
+def unify_embed_lmhead(model_path: str, method: str, block_size: int = 32, external: bool | None = None,
+                       quiet: bool = False) -> dict | None:
+    """Drop Main's duplicate embedding initializer by reusing the tied lm_head weight.
+
+    The current exporter always emits the share-ready lm_head: the weight is the pristine tied
+    embedding and the final RMSNorm is explicit in the graph.
+    """
+    if external is None:
+        external = os.path.exists(model_path + ".data")
+    model = onnx.load(model_path)
+    graph = model.graph
+    try:
+        gather, embed_init, vocab, hidden = _find_embed_gather(graph)
+        _, lmhead = _find_lmhead(graph, vocab, hidden)
+    except RuntimeError as exc:
+        if not quiet:
+            print(f"  share_embed_lmhead: skipped ({exc}).")
+        del model
+        gc.collect()
+        return None
+
+    method = method.upper()
+    if method in ("F32", "F16"):
+        info = _share_float_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden)
+    elif method == "Q4":
+        if lmhead.op_type != "MatMulNBits":
+            raise RuntimeError(f"Q4 share_embed_lmhead expected MatMulNBits lm_head, got {lmhead.op_type}")
+        info = _share_q4_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden, block_size)
+    elif method == "DYNAMIC":
+        if lmhead.op_type != "MatMulInteger":
+            raise RuntimeError(f"DYNAMIC share_embed_lmhead expected MatMulInteger lm_head, got {lmhead.op_type}")
+        info = _share_dynamic_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden)
+    else:
+        raise ValueError(f"unknown share_embed_lmhead method {method!r}")
+
+    _dead_code_elimination(graph)
+    _deduplicate_node_names(graph)
+    _save_model(model, model_path, external)
+    del model
+    gc.collect()
+    return info
+
+
+def _unify_method_kind(rp: ResolvedPlan) -> str:
+    if rp.method in _WEIGHT_ONLY_BITS:
+        return "Q4"
+    if rp.method == "DYNAMIC":
+        return "DYNAMIC"
+    return "F16" if (rp.fp16 or rp.method == "F16") else "F32"
 
 
 def inspect_kv_surgery(graph) -> tuple[bool, str]:
@@ -1100,16 +1519,14 @@ def plan_kv_surgery(src_path: str) -> tuple[bool, str]:
         del meta
 
 
-# ============================== PIPELINE ==============================
-
-
 def process_model(name: str, rp: ResolvedPlan) -> None:
     src_path, dst_path = get_model_paths(name)
     if not os.path.exists(src_path):
+        if name in REQUIRED_STANDALONE_MODELS:
+            raise FileNotFoundError(f"Required standalone model not found: {src_path}")
         print(f"  Skipping — file not found: {src_path}")
         return
 
-    # Restamp exporter metadata after stages that rebuild ModelProto.
     source_metadata = read_onnx_metadata(src_path)
 
     _remove_external_files(dst_path)
@@ -1118,8 +1535,6 @@ def process_model(name: str, rp: ResolvedPlan) -> None:
     use_fp16 = rp.fp16 or rp.method == "F16"
     keep_io_types = MIXED_PRECISION if F16_KEEP_IO_TYPES is None else F16_KEEP_IO_TYPES
 
-    # Quantized (Q8 / rope-shift) KV surgery runs in-memory before optimize. Float16 KV needs no
-    # surgery: the exporter's COMPUTE_IN_F32 switch already emits F16- or F32-compute attention.
     do_surgery = False
     if rp.kv_surgery is not False:
         do_surgery, message = plan_kv_surgery(src_path)
@@ -1148,6 +1563,14 @@ def process_model(name: str, rp: ResolvedPlan) -> None:
     if UPGRADE_OPSET > 0:
         upgrade_opset_version(dst_path, UPGRADE_OPSET, external)
 
+    method_kind = _unify_method_kind(rp)
+    info = unify_embed_lmhead(dst_path, method_kind, block_size=rp.block_size, external=external, quiet=True)
+    if info is not None:
+        print(
+            f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
+            f"embedding now reuses {info['shared_weight']!r} ({info['lmhead_op']})."
+        )
+
     if not external and os.path.exists(dst_path + ".data"):
         os.remove(dst_path + ".data")
 
@@ -1158,6 +1581,103 @@ def process_model(name: str, rp: ResolvedPlan) -> None:
         write_onnx_metadata(dst_path, source_metadata)
         fp16_note = " (activations_fp16=1)" if use_fp16 else ""
         print(f"  Metadata: restamped {len(source_metadata)} keys onto the optimized model{fp16_note}.")
+
+
+def _print_process_header(name: str, rp: ResolvedPlan) -> None:
+    print(f"\n{'=' * 60}\nProcessing: {name}  [{rp.method}]\n{'=' * 60}")
+
+
+def _cleanup_merged_outputs(out_folder: Path, model_file_names: dict[str, str]) -> None:
+    for file_name, _, _ in Shared_Merged.make_merged_build_plan(model_file_names):
+        _remove_external_files(str(out_folder / file_name))
+    shared_name = model_file_names.get("shared_initializers", Shared_Merged.SHARED_MODEL_NAME)
+    _remove_external_files(str(out_folder / shared_name))
+
+
+def _available_merged_plan(source_folder: Path, model_file_names: dict[str, str]):
+    return [
+        (file_name, recipe, deps)
+        for file_name, recipe, deps in Shared_Merged.make_merged_build_plan(model_file_names)
+        if (source_folder / file_name).exists()
+    ]
+
+
+def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
+    source_folder = Path(ORIGINAL_FOLDER_PATH)
+    out_folder = Path(QUANTED_FOLDER_PATH)
+    model_file_names = _metadata_model_file_names(source_folder)
+    available = _available_merged_plan(source_folder, model_file_names)
+    if not available:
+        print("\nMerged decode-strategy graphs not found; skipping merged bundle optimization.")
+        return
+
+    _cleanup_merged_outputs(out_folder, model_file_names)
+
+    primary_file = model_file_names.get("prefill_greedy", Shared_Merged.PREFILL_GREEDY_MODEL_NAME)
+    if not (source_folder / primary_file).exists():
+        primary_file = available[0][0]
+    primary_stem = Path(primary_file).stem
+    primary_plan = resolved.get(primary_stem, resolved[_PRIMARY_MERGED_MODEL])
+
+    _print_process_header(primary_stem, primary_plan)
+    process_model(primary_stem, primary_plan)
+
+    primary_path = out_folder / primary_file
+    if not primary_path.exists():
+        raise FileNotFoundError(primary_path)
+
+    shared_model_name = model_file_names.get("shared_initializers", Shared_Merged.SHARED_MODEL_NAME)
+    shared_data_name = model_file_names.get("shared_initializers_data", shared_model_name + ".data")
+
+    source_metadata = read_onnx_metadata(str(primary_path))
+    if source_metadata and model_file_names:
+        source_metadata.update({f"model_file_name_{key}": value for key, value in model_file_names.items()})
+
+    def _persist(file_name: str, model: onnx.ModelProto) -> None:
+        out_path = out_folder / file_name
+        Shared_Merged.save_model(model, out_path)
+        if source_metadata:
+            write_onnx_metadata(str(out_path), source_metadata)
+        print(f"  {file_name} ({out_path.stat().st_size} bytes)")
+
+    print(f"\n{'=' * 60}\nTransplanting quantized Main into merged strategy graphs\n{'=' * 60}")
+
+    # The quantized primary is the shared Main donor for every strategy graph. Seed the shared blob
+    # from it and redirect its own Main to external refs, then reuse it (in memory) as the transplant
+    # donor so each target copies only lightweight references instead of a fresh full Main copy. Its
+    # small non-shared Main initializers were loaded inline, so it stays self-contained once its own
+    # .data sidecar is removed by the persist below.
+    quantized_primary = Shared_Merged.load_model(primary_path)
+    external_by_name = Shared_Merged.extract_and_write_shared(
+        [quantized_primary],
+        out_folder / shared_model_name,
+        primary_model=quantized_primary,
+    )
+    _persist(primary_file, quantized_primary)
+
+    for file_name, _, _ in available:
+        if file_name == primary_file:
+            continue
+        # Structure-only load: the target's Main weights live in the multi-GB exporter blob and are
+        # never needed here — transplant swaps in the donor's quantized Main and redirect repoints
+        # every shared initializer at the freshly written blob. Graphs are built and saved one at a
+        # time so at most one target is resident, instead of holding every strategy graph at once.
+        target = onnx.load(str(source_folder / file_name), load_external_data=False)
+        model = Shared_Merged.transplant_quantized_main(target, quantized_primary)
+        del target
+        Shared_Merged.redirect_shared_initializers_to_external(model, external_by_name)
+        _persist(file_name, model)
+        del model
+        gc.collect()
+
+    shared_data = out_folder / shared_data_name
+    if shared_data.exists():
+        print(f"  {shared_data_name} ({shared_data.stat().st_size} bytes)")
+
+    for removed in Shared_Merged.delete_merged_constituents(
+        out_folder, protected_names=(shared_model_name, shared_data_name)
+    ):
+        print(f"  Deleted absorbed split constituent: {removed}")
 
 
 def main() -> None:
@@ -1174,8 +1694,11 @@ def main() -> None:
             "float32-compatible across the split graphs."
         )
     for name, rp in resolved.items():
-        print(f"\n{'=' * 60}\nProcessing: {name}  [{rp.method}]\n{'=' * 60}")
+        if name in _MERGED_MODEL_NAMES:
+            continue
+        _print_process_header(name, rp)
         process_model(name, rp)
+    build_quantized_merged_bundle(resolved)
     print("\n--- All models processed successfully! ---")
 
 

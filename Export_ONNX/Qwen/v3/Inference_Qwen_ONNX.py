@@ -1,50 +1,58 @@
 import argparse
 import time
 from pathlib import Path
+
 import numpy as np
+import onnx
 import onnxruntime
+from onnx import TensorProto
 from onnxruntime.capi import _pybind_state as C
 from transformers import AutoTokenizer
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the Qwen split-ONNX inference demo.")
+    parser = argparse.ArgumentParser(description="Run the Qwen v3 merged-ONNX inference demo.")
     parser.add_argument(
         "--model-folder",
         type=Path,
         default=Path(__file__).resolve().parent / "Qwen_Optimized",
-        help="Folder containing the split ONNX graphs. Defaults to Qwen_Optimized; use Qwen_ONNX for freshly exported graphs.",
+        help="Folder containing merged ONNX graphs and LLM_SharedInitializers.onnx(.data).",
     )
     parser.add_argument(
         "--tokenizer-folder",
         type=Path,
-        default=Path(r"/home/iamj/Downloads/Qwen3-0.6B"),
+        default=Path.home() / "Downloads" / "Qwen3-0.6B",
         help="HF checkpoint/tokenizer folder used to tokenize the demo prompt.",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=None,
+        help="Optional cap for generated tokens.",
     )
     return parser.parse_args()
 
 
 args = parse_args()
 
+METADATA_MODEL_NAME = "LLM_Metadata.onnx"
 
-download_path                  = str(args.tokenizer_folder.expanduser().resolve())
-onnx_folder                    = args.model_folder.expanduser().resolve()
-onnx_model_Metadata            = str(onnx_folder / "LLM_Metadata.onnx")
-onnx_model_Embed               = str(onnx_folder / "LLM_Embed.onnx")
-onnx_model_Main                = str(onnx_folder / "LLM_Main.onnx")
-onnx_model_Rotary_Text_Prefill = str(onnx_folder / "LLM_RotaryPrefill.onnx")
-onnx_model_Rotary_Text_Decode  = str(onnx_folder / "LLM_RotaryDecode.onnx")
-onnx_model_Greedy              = str(onnx_folder / "LLM_Greedy.onnx")
-onnx_model_First_Beam          = str(onnx_folder / "LLM_FirstBeam.onnx")
-onnx_model_Second_Beam         = str(onnx_folder / "LLM_SecondBeam.onnx")
-onnx_model_Penalty             = str(onnx_folder / "LLM_Penalty.onnx")
-onnx_model_Argmax              = str(onnx_folder / "LLM_Argmax.onnx")
+
+download_path            = str(args.tokenizer_folder.expanduser().resolve())
+onnx_folder              = args.model_folder.expanduser().resolve()
+onnx_model_Metadata      = str(onnx_folder / METADATA_MODEL_NAME)
+MAX_NEW_TOKENS           = args.max_new_tokens
 
 TEST_THINK_MODE          = False
 TEST_QUERY               = "地球最高的山峰是什么？"
 
 USE_BEAM_SEARCH          = False
-REPEAT_PENALTY           = 1.0                     # 0.0 ~ 1.0; No penalty = 1.0
+USE_SAMPLING             = False
+TEMPERATURE              = 0.8
+TOP_P                    = 0.95
+# Greedy/beam decode: direct repeated-token logit multiplier, 0.0 ~ 1.0; no penalty = 1.0.
+# USE_SAMPLING=True: standard repetition penalty, >= 1.0; no penalty = 1.0.
+REPEAT_PENALTY           = 0.9
 PENALTY_RANGE            = 20
 TOP_K                    = 3
 BEAM_SIZE                = 3                       # Must be <= export MAX_BEAM_SIZE.
@@ -52,52 +60,73 @@ BEAM_SIZE                = 3                       # Must be <= export MAX_BEAM_
 ORT_LOG                  = False
 ORT_FP16                 = False                   # CPU FP16 requires ARM64-v8.2a+.
 ORT_Accelerate_Providers = []                      # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
-MAX_THREADS              = 0                       # auto
+MAX_THREADS              = 0                       # 0 lets ORT choose the thread count.
 DEVICE_ID                = 0
 
+TOP_K = max(1, TOP_K)
 
-def bind_ort_in_buf(binding, names, values):
-    for name, val in zip(names, values):
-        binding.bind_ortvalue_input(name, val)
+if USE_SAMPLING:
+    USE_BEAM_SEARCH = False
 
+if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
+    TOP_K = BEAM_SIZE
 
-def bind_ort_out_buf(binding, names, values):
-    for name, val in zip(names, values):
-        binding.bind_ortvalue_output(name, val)
+if TOP_K < 2 or BEAM_SIZE < 2:
+    USE_BEAM_SEARCH = False
 
+if not USE_BEAM_SEARCH:
+    BEAM_SIZE = 1
 
-def bind_ort_out(binding, names, device):
-    for name in names:
-        binding._iobinding.bind_output(name, device)
-
-
-def create_ort_with_data(data, dtype, device, device_id):
-    return onnxruntime.OrtValue.ortvalue_from_numpy(np.array(data, dtype=dtype), device, device_id)
+USE_PENALTY = REPEAT_PENALTY != 1.0
 
 
-def create_ort_with_shape(shape, dtype, device, device_id):
-    return onnxruntime.OrtValue.ortvalue_from_numpy(np.zeros(shape, dtype=dtype), device, device_id)
+_MODEL_FILE_METADATA_KEYS = {
+    "prefill_greedy":           ("model_file_name_prefill_greedy", None),
+    "prefill_penalty_greedy":   ("model_file_name_prefill_penalty_greedy", None),
+    "prefill_beam":             ("model_file_name_prefill_beam", None),
+    "prefill_sampling":         ("model_file_name_prefill_sampling", "LLM_TextPrefillSampling.onnx"),
+    "decode_greedy":            ("model_file_name_decode_greedy", None),
+    "decode_penalty_greedy":    ("model_file_name_decode_penalty_greedy", None),
+    "decode_beam":              ("model_file_name_decode_beam", None),
+    "decode_penalty_beam":      ("model_file_name_decode_penalty_beam", None),
+    "decode_sampling":          ("model_file_name_decode_sampling", "LLM_DecodeSampling.onnx"),
+    "shared_initializers":      ("model_file_name_shared_initializers", None),
+    "shared_initializers_data": ("model_file_name_shared_initializers_data", None),
+}
+
+_UNSHAREABLE_INIT_TYPES = frozenset(
+    getattr(TensorProto, name)
+    for name in ("UINT4", "INT4", "FLOAT4E2M1")
+    if hasattr(TensorProto, name)
+)
 
 
-def create_session(model_path, _session_opts, _providers, _provider_options, _disabled_optimizers):
-    return onnxruntime.InferenceSession(
-        model_path,
-        sess_options=_session_opts,
-        providers=_providers,
-        provider_options=_provider_options,
-        disabled_optimizers=_disabled_optimizers)
+def _external_data_map(init):
+    return {entry.key: entry.value for entry in init.external_data}
 
 
-def get_in_names(session):
-    return [x.name for x in session.get_inputs()]
-
-
-def get_out_names(session):
-    return [x.name for x in session.get_outputs()]
-
-
-def run(session, binding):
-    session.run_with_iobinding(binding, run_options=run_options)
+def attach_shared_initializers(session_options, shared_model_path):
+    shared_model_path = Path(shared_model_path)
+    shared_model = onnx.load(str(shared_model_path), load_external_data=False)
+    arrays = {}
+    ort_values = []
+    for init in shared_model.graph.initializer:
+        if init.data_type in _UNSHAREABLE_INIT_TYPES:
+            continue
+        ext = _external_data_map(init)
+        location = ext.get("location")
+        if not location:
+            raise RuntimeError(f"Shared initializer {init.name!r} is not stored as external data.")
+        data_path = shared_model_path.parent / location
+        offset = int(ext.get("offset", "0"))
+        np_dtype = onnx.helper.tensor_dtype_to_np_dtype(init.data_type)
+        shape = tuple(int(dim) for dim in init.dims)
+        array = np.memmap(data_path, dtype=np_dtype, mode="r", offset=offset, shape=shape)
+        arrays[init.name] = array
+        ort_value = onnxruntime.OrtValue.ortvalue_from_numpy(array)
+        ort_values.append(ort_value)
+        session_options.add_initializer(init.name, ort_value)
+    return arrays, ort_values
 
 
 def load_metadata_carrier(model_path):
@@ -125,490 +154,594 @@ def load_metadata_carrier(model_path):
     return metadata
 
 
+def load_model_file_names(meta):
+    missing = [
+        key for role, (key, default_file_name) in _MODEL_FILE_METADATA_KEYS.items()
+        if not meta.get(key) and default_file_name is None
+    ]
+    if missing:
+        raise RuntimeError(
+            "LLM_Metadata.onnx is missing model file-name metadata. "
+            "Re-export with Export_Qwen.py or re-quantize with Optimize_ONNX.py. Missing: "
+            + ", ".join(missing)
+        )
+
+    file_names = {}
+    for role, (key, default_file_name) in _MODEL_FILE_METADATA_KEYS.items():
+        value = meta.get(key) or default_file_name
+        path = Path(value)
+        if path.is_absolute() or path.name != value:
+            raise RuntimeError(f"Metadata key {key!r} must contain a file name, got {value!r}.")
+        file_names[role] = value
+    return file_names
+
+
 # Read metadata before creating real sessions so ORT_FP16/session settings follow the exported graphs.
 model_meta = load_metadata_carrier(onnx_model_Metadata)
+MODEL_FILE_NAMES = load_model_file_names(model_meta)
 ORT_FP16 = model_meta.get('activations_fp16') == '1'
 
 
-session_opts = onnxruntime.SessionOptions()
-run_options  = onnxruntime.RunOptions()
+def create_session_options():
+    session_opts = onnxruntime.SessionOptions()
+    session_opts.log_severity_level = 0 if ORT_LOG else 4
+    session_opts.log_verbosity_level = 4
+    session_opts.inter_op_num_threads = MAX_THREADS
+    session_opts.intra_op_num_threads = MAX_THREADS
+    session_opts.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
+    session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-for opt in (session_opts, run_options):
-    opt.log_severity_level  = 0 if ORT_LOG else 4
-    opt.log_verbosity_level = 4
+    session_config_entries = {
+        'session.set_denormal_as_zero':                  '1',
+        'session.intra_op.allow_spinning':               '1',
+        'session.inter_op.allow_spinning':               '1',
+        'session.enable_quant_qdq_cleanup':              '1',
+        'session.qdq_matmulnbits_accuracy_level':        '2' if ORT_FP16 else '4',
+        'session.use_device_allocator_for_initializers': '1',
+        'session.graph_optimizations_loop_level':        '2',
+        'optimization.enable_gelu_approximation':        '1',
+        'optimization.minimal_build_optimizations':      '',
+        'optimization.enable_cast_chain_elimination':    '1',
+        'optimization.disable_specified_optimizers':
+            'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else ''
+    }
+    for key, value in session_config_entries.items():
+        session_opts.add_session_config_entry(key, value)
 
-session_opts.inter_op_num_threads     = MAX_THREADS
-session_opts.intra_op_num_threads     = MAX_THREADS
-session_opts.execution_mode           = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
-session_opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-_session_configs = {
-    'session.set_denormal_as_zero':                  '1',
-    'session.intra_op.allow_spinning':               '1',
-    'session.inter_op.allow_spinning':               '1',
-    'session.enable_quant_qdq_cleanup':              '1',
-    'session.qdq_matmulnbits_accuracy_level':        '2' if ORT_FP16 else '4',
-    'session.use_device_allocator_for_initializers': '1',
-    'session.graph_optimizations_loop_level':        '2',
-    'optimization.enable_gelu_approximation':        '1',
-    'optimization.minimal_build_optimizations':      '',
-    'optimization.enable_cast_chain_elimination':    '1',
-    'optimization.disable_specified_optimizers':
-        'CastFloat16Transformer;FuseFp16InitializerToFp32NodeTransformer' if ORT_FP16 else ''
-}
-for k, v in _session_configs.items():
-    session_opts.add_session_config_entry(k, v)
-
-run_options.add_run_config_entry('disable_synchronize_execution_providers', '0')
-
-disabled_optimizers = ['CastFloat16Transformer', 'FuseFp16InitializerToFp32NodeTransformer'] if ORT_FP16 else None
+    return session_opts
 
 
-if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
-    provider_options = [{
-        'device_type':              'CPU',
-        'precision':                'ACCURACY',
-        'num_of_threads':           MAX_THREADS if MAX_THREADS != 0 else 8,
-        'num_streams':              1,
-        'enable_opencl_throttling': False,
-        'enable_qdq_optimizer':     False,
-        'disable_dynamic_shapes':   False
-    }]
-    device_type      = 'cpu'
-    _ort_device_type = C.OrtDevice.cpu()
+def create_run_options():
+    options = onnxruntime.RunOptions()
+    options.log_severity_level = 0 if ORT_LOG else 4
+    options.log_verbosity_level = 4
+    options.add_run_config_entry("disable_synchronize_execution_providers", "0")
+    return options
 
-elif "CUDAExecutionProvider" in ORT_Accelerate_Providers:
-    provider_options = [{
-        'device_id':                          DEVICE_ID,
-        'gpu_mem_limit':                      24 * (1024 **3),
-        'arena_extend_strategy':              'kNextPowerOfTwo',
-        'cudnn_conv_algo_search':             'EXHAUSTIVE',
-        'sdpa_kernel':                        '2',
-        'use_tf32':                           '1',
-        'fuse_conv_bias':                     '0',
-        'cudnn_conv_use_max_workspace':       '1',
-        'cudnn_conv1d_pad_to_nc1d':           '0',
-        'tunable_op_enable':                  '0',
-        'tunable_op_tuning_enable':           '0',
-        'tunable_op_max_tuning_duration_ms':  10,
-        'do_copy_in_default_stream':          '0',
-        'enable_cuda_graph':                  '0',
-        'prefer_nhwc':                        '0',
-        'enable_skip_layer_norm_strict_mode': '0',
-        'use_ep_level_unified_stream':        '0'
-    }]
-    device_type      = 'cuda'
-    _ort_device_type = C.OrtDevice.cuda()
 
-elif "DmlExecutionProvider" in ORT_Accelerate_Providers:
-    provider_options = [{
-        'device_id':                  DEVICE_ID,
-        'performance_preference':     'high_performance',
-        'device_filter':              'gpu',
-        'disable_metacommands':       'false',
-        'enable_graph_capture':       'false',
-        'enable_graph_serialization': 'false'
-    }]
-    device_type      = 'dml'
-    _ort_device_type = C.OrtDevice.dml()
+def resolve_execution_provider():
+    if "OpenVINOExecutionProvider" in ORT_Accelerate_Providers:
+        return (
+            'cpu',
+            C.OrtDevice.cpu(),
+            [{
+                'device_type':              'CPU',
+                'precision':                'ACCURACY',
+                'num_of_threads':           MAX_THREADS if MAX_THREADS != 0 else 8,
+                'num_streams':              1,
+                'enable_opencl_throttling': False,
+                'enable_qdq_optimizer':     False,
+                'disable_dynamic_shapes':   False
+            }],
+        )
 
-else:
-    provider_options = None
-    device_type      = 'cpu'
-    _ort_device_type = C.OrtDevice.cpu()
+    if "CUDAExecutionProvider" in ORT_Accelerate_Providers:
+        return (
+            'cuda',
+            C.OrtDevice.cuda(),
+            [{
+                'device_id':                          DEVICE_ID,
+                'gpu_mem_limit':                      24 * (1024 ** 3),
+                'arena_extend_strategy':              'kNextPowerOfTwo',
+                'cudnn_conv_algo_search':             'EXHAUSTIVE',
+                'sdpa_kernel':                        '2',
+                'use_tf32':                           '1',
+                'fuse_conv_bias':                     '1',
+                'cudnn_conv_use_max_workspace':       '1',
+                'cudnn_conv1d_pad_to_nc1d':           '0',
+                'tunable_op_enable':                  '0',
+                'tunable_op_tuning_enable':           '0',
+                'tunable_op_max_tuning_duration_ms':  10,
+                'do_copy_in_default_stream':          '0',
+                'enable_cuda_graph':                  '0',
+                'prefer_nhwc':                        '0',
+                'enable_skip_layer_norm_strict_mode': '0',
+                'use_ep_level_unified_stream':        '0'
+            }],
+        )
 
-packed_settings = {
-    "_session_opts":        session_opts,
-    "_providers":           ORT_Accelerate_Providers,
-    "_provider_options":    provider_options,
-    "_disabled_optimizers": disabled_optimizers
-}
+    if "DmlExecutionProvider" in ORT_Accelerate_Providers:
+        return (
+            'dml',
+            C.OrtDevice.dml(),
+            [{
+                'device_id':                  DEVICE_ID,
+                'performance_preference':     'high_performance',
+                'device_filter':              'gpu',
+                'disable_metacommands':       'false',
+                'enable_graph_capture':       'false',
+                'enable_graph_serialization': 'false'
+            }],
+        )
 
-_ort_device_type = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
-kv_device = 'cpu' if 'dml' in device_type else device_type
+    return 'cpu', C.OrtDevice.cpu(), None
+
+
+run_options = create_run_options()
+device_type, _ort_device_type, provider_options = resolve_execution_provider()
+disabled_optimizers = (
+    ["CastFloat16Transformer", "FuseFp16InitializerToFp32NodeTransformer"]
+    if ORT_FP16
+    else None
+)
+ORT_DEVICE = C.OrtDevice(_ort_device_type, C.OrtDevice.default_memory(), DEVICE_ID)
+kv_device = "cpu" if device_type == "dml" else device_type
+
+
+def create_merged_session(model_path, shared_path):
+    session_opts = create_session_options()
+    shared_initializer_refs = attach_shared_initializers(session_opts, shared_path)
+    session = onnxruntime.InferenceSession(
+        str(model_path),
+        sess_options=session_opts,
+        providers=ORT_Accelerate_Providers,
+        provider_options=provider_options,
+        disabled_optimizers=disabled_optimizers,
+    )
+    session._native_llm_shared_initializers = shared_initializer_refs
+    return session
+
+
+def run_iobinding(session, binding):
+    session.run_with_iobinding(binding, run_options=run_options)
+
 
 print(
-    '\nStart running the LLM by ONNXRuntime.\n'
+    '\nStart running the Qwen v3 LLM by ONNXRuntime.\n'
     'Now loading . . . it could cost minutes.'
 )
 
 
-ort_session_Embed = create_session(onnx_model_Embed, **packed_settings)
-binding_Embed     = ort_session_Embed.io_binding()
-in_name_Embed     = get_in_names(ort_session_Embed)[0]
-out_name_Embed    = get_out_names(ort_session_Embed)[0]
-
-ort_session_Rotary_Text_Prefill = create_session(onnx_model_Rotary_Text_Prefill, **packed_settings)
-binding_Rotary_Text_Prefill     = ort_session_Rotary_Text_Prefill.io_binding()
-in_name_Rotary_Text_Prefill     = get_in_names(ort_session_Rotary_Text_Prefill)
-out_name_Rotary_Text_Prefill    = get_out_names(ort_session_Rotary_Text_Prefill)
-out_meta_Rotary_Text_Prefill    = ort_session_Rotary_Text_Prefill._outputs_meta
-
-ort_session_Rotary_Text_Decode = create_session(onnx_model_Rotary_Text_Decode, **packed_settings)
-binding_Rotary_Text_Decode     = ort_session_Rotary_Text_Decode.io_binding()
-in_name_Rotary_Text_Decode     = get_in_names(ort_session_Rotary_Text_Decode)[0]
-out_name_Rotary_Text_Decode    = get_out_names(ort_session_Rotary_Text_Decode)
-out_meta_Rotary_Text_Decode    = ort_session_Rotary_Text_Decode._outputs_meta
-
-ort_session_Main = create_session(onnx_model_Main, **packed_settings)
-binding_Main     = ort_session_Main.io_binding()
-print(f"\nUsable Providers: {ort_session_Main.get_providers()}")
+def _merged_stop_tokens(meta):
+    stops = [int(t) for t in meta.get('eos_token_ids', '').split(',') if t]
+    if not stops:
+        stops = [int(v) for k in ('chat_endoftext_id', 'chat_im_end_id') for v in (meta.get(k),) if v]
+    return set(stops)
 
 
-in_name_Main  = get_in_names(ort_session_Main)
-out_name_Main = get_out_names(ort_session_Main)
-in_meta_Main  = ort_session_Main._inputs_meta
+def _meta_int(meta, key):
+    value = meta.get(key)
+    if value is None:
+        raise RuntimeError(f"LLM_Metadata.onnx is missing required key {key!r}.")
+    return int(value)
 
-_NP_DTYPES = {
-    'float32': np.float32, 'float16': np.float16,
-    'int8':    np.int8,    'uint8':   np.uint8,
-    'int32':   np.int32,   'int64':   np.int64,
-}
 
-num_keys_values_Main = int(model_meta['kv_num_tensors'])
-num_layers_Main      = int(model_meta['num_layers'])
-_kv_blocks_per_layer = int(model_meta['kv_blocks_per_layer'])   # 2 plain, 4 symmetric quant, 6 asymmetric quant.
-_kv_sym_rt           = model_meta['kv_symmetric'] == '1'
+def _kv_num_tensors(meta):
+    kv_num = _meta_int(meta, 'kv_num_tensors')
+    expected = _meta_int(meta, 'num_layers') * _meta_int(meta, 'kv_blocks_per_layer')
+    if kv_num != expected:
+        raise RuntimeError(f"Metadata KV tensor count mismatch: kv_num_tensors={kv_num}, expected={expected}.")
+    return kv_num
 
-if len(in_name_Main) != num_keys_values_Main + 4 or len(out_name_Main) != num_keys_values_Main + 1:
-    raise RuntimeError(
-        "LLM_Metadata.onnx disagrees with LLM_Main.onnx I/O: "
-        f"metadata KV={num_keys_values_Main}, Main inputs={len(in_name_Main)}, outputs={len(out_name_Main)}."
+
+def _generation_limit(meta, prompt_tokens):
+    limit = max(0, _meta_int(meta, 'max_seq_len') - prompt_tokens)
+    if MAX_NEW_TOKENS is not None:
+        limit = min(limit, max(0, int(MAX_NEW_TOKENS)))
+    return limit
+
+
+def _merged_state_seq_axis(value_meta):
+    symbolic_axes = [
+        index for index, dim in enumerate(value_meta.shape)
+        if index != 0 and not isinstance(dim, int)
+    ]
+    if len(symbolic_axes) == 1:
+        return symbolic_axes[0]
+    if value_meta.name.startswith('in_') and len(value_meta.shape) > 1:
+        return len(value_meta.shape) - 1
+    return None
+
+
+def _merged_np_dtype(type_name):
+    for key, dt in (('float16', np.float16), ('float', np.float32), ('uint8', np.uint8),
+                    ('int8', np.int8), ('int32', np.int32), ('int64', np.int64)):
+        if key in type_name:
+            return dt
+    raise ValueError(f"Unsupported ORT tensor type: {type_name}")
+
+
+def _session_input_dtypes(sess):
+    return {meta.name: _merged_np_dtype(meta.type) for meta in sess.get_inputs()}
+
+
+def _merged_zero(meta):
+    shape = list(meta.shape)
+    seq_axis = _merged_state_seq_axis(meta)
+    for i, dim in enumerate(shape):
+        if i == 0:
+            shape[i] = 1
+        elif seq_axis is not None and i == seq_axis:
+            shape[i] = 0
+        elif not isinstance(dim, int):
+            shape[i] = 1
+    return np.zeros(tuple(shape), dtype=_merged_np_dtype(meta.type))
+
+
+def _ov(arr, device=None):
+    return onnxruntime.OrtValue.ortvalue_from_numpy(
+        np.ascontiguousarray(arr), device or device_type, DEVICE_ID
     )
 
-num_keys_values_Main_plus_1 = num_keys_values_Main + 1
-num_keys_values_Main_plus_2 = num_keys_values_Main + 2
-num_keys_values_Main_plus_3 = num_keys_values_Main + 3
 
-in_name_Main_kv      = in_name_Main[:num_keys_values_Main]
-out_name_Main_kv     = out_name_Main[:num_keys_values_Main]
-in_name_Main_others  = in_name_Main[num_keys_values_Main:]
-out_name_Main_logits = out_name_Main[num_keys_values_Main]
-
-kv_dtype_Main = _NP_DTYPES[model_meta['kv_cache_elem_type']]
-vocab_size    = int(model_meta['vocab_size'])
-
-# F16 attention surgery can retype the mask without changing hidden_states.
-hidden_dtype_Main = np.float16 if 'float16' in in_meta_Main[num_keys_values_Main].type else np.float32
-mask_dtype_Main   = np.float16 if 'float16' in out_meta_Rotary_Text_Prefill[out_name_Rotary_Text_Prefill.index('attention_mask')].type else np.float32
-
-MAX_SEQ_LEN = int(model_meta['max_seq_len'])
-STOP_TOKEN = [int(t) for t in model_meta.get('eos_token_ids', '').split(',') if t]
-if not STOP_TOKEN:
-    STOP_TOKEN = [int(model_meta['chat_endoftext_id']), int(model_meta['chat_im_end_id'])]
+def _bind_outputs_device(binding, names):
+    for name in names:
+        binding._iobinding.bind_output(name, ORT_DEVICE)
 
 
-# Scale/bias shapes come from graph I/O because grouped KV quantization packs dims there.
-if _kv_blocks_per_layer >= 4:
-    scale_dtype = _NP_DTYPES[model_meta['kv_scale_bias_elem_type']]
+def _decode_dynamic_output_names(io_plan):
+    names = list(io_plan['state_out'])
+    if io_plan['save_id_out'] is not None:
+        names.append(io_plan['save_id_out'])
+    return names
 
-    if _kv_sym_rt:
-        k_scale_shape   = list(in_meta_Main[num_layers_Main * 2].shape)
-        k_scale_shape[0] = 1
-        k_scale_shape[-1] = 0
-        v_scale_shape   = list(in_meta_Main[num_layers_Main * 3].shape)
-        v_scale_shape[0] = 1
-        v_scale_shape[3] = 0
-        k_scales        = create_ort_with_shape(tuple(k_scale_shape), scale_dtype, kv_device, DEVICE_ID)
-        k_biases        = None
-        v_scales        = create_ort_with_shape(tuple(v_scale_shape), scale_dtype, kv_device, DEVICE_ID)
-        v_biases        = None
+
+def _save_id_in_names(strategy, is_decode, inputs):
+    if strategy == 'greedy':
+        candidates = []
+    elif strategy == 'sampling':
+        candidates = ['sampling_previous_ids']
+    elif strategy == 'beam' or (strategy == 'penalty_beam' and not is_decode):
+        candidates = ['beam_save_id_in']
+    elif strategy == 'penalty_beam':
+        candidates = ['penalty_save_id_in', 'beam_save_id_in']
+    elif strategy == 'penalty_greedy' and is_decode:
+        candidates = ['penalty_save_id_in', 'penalty_greedy_save_id_in']
     else:
-        k_scale_shape   = list(in_meta_Main[num_layers_Main * 2].shape)
-        k_scale_shape[0] = 1
-        k_scale_shape[-1] = 0
-        v_scale_idx     = num_layers_Main * 4
-        v_scale_shape   = list(in_meta_Main[v_scale_idx].shape)
-        v_scale_shape[0] = 1
-        v_scale_shape[3] = 0
-        k_scales        = create_ort_with_shape(tuple(k_scale_shape), scale_dtype, kv_device, DEVICE_ID)
-        k_biases        = create_ort_with_shape(tuple(k_scale_shape), scale_dtype, kv_device, DEVICE_ID)
-        v_scales        = create_ort_with_shape(tuple(v_scale_shape), scale_dtype, kv_device, DEVICE_ID)
-        v_biases        = create_ort_with_shape(tuple(v_scale_shape), scale_dtype, kv_device, DEVICE_ID)
-else:
-    k_scales = None
-
-past_keys_Main   = create_ort_with_shape((1, in_meta_Main[0].shape[1],               1, in_meta_Main[0].shape[3],               0), kv_dtype_Main, kv_device, DEVICE_ID)
-past_values_Main = create_ort_with_shape((1, in_meta_Main[num_layers_Main].shape[1], 1, 0, in_meta_Main[num_layers_Main].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
+        candidates = ['penalty_greedy_save_id_in']
+    missing = [name for name in candidates if name not in inputs]
+    if missing:
+        raise RuntimeError(f"Merged graph is missing expected save_id input(s): {missing}")
+    return candidates
 
 
-if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
-    TOP_K = BEAM_SIZE
+def plan_merged_io(sess, strategy, kv_num_tensors, is_decode):
+    ins = [i.name for i in sess.get_inputs()]
+    outs = [o.name for o in sess.get_outputs()]
+    if len(ins) < kv_num_tensors or len(outs) < kv_num_tensors:
+        raise RuntimeError(
+            f"Merged graph has too few I/O values for {kv_num_tensors} KV tensors: "
+            f"inputs={len(ins)}, outputs={len(outs)}."
+        )
+    state_in = ins[:kv_num_tensors]
+    state_out = outs[:kv_num_tensors]
+    bad_inputs = [name for name in state_in if not name.startswith('in_')]
+    bad_outputs = [name for name in state_out if not (name.startswith('out_') or name.startswith('beam_out_'))]
+    if bad_inputs or bad_outputs:
+        raise RuntimeError(
+            "Merged graph KV block is not leading/positional as expected: "
+            f"bad inputs={bad_inputs[:3]}, bad outputs={bad_outputs[:3]}."
+        )
 
-if TOP_K < 2 or BEAM_SIZE < 2:
-    USE_BEAM_SEARCH = False
-    print("\nInappropriate Beam Search setting detected. Falling back to Greedy Search.")
-
-if not USE_BEAM_SEARCH:
-    BEAM_SIZE = 1
-
-USE_PENALTY = (REPEAT_PENALTY != 1.0)
-
-
-tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
-
-STOP_TOKEN_SET = set(STOP_TOKEN)
-
-prompt = (
-    f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
-    if TEST_THINK_MODE else
-    f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
-)
-
-tokens      = tokenizer(prompt, return_tensors='np')['input_ids'].astype(np.int32)
-num_prefill = tokens.shape[-1]
-
-
-input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens,   device_type, DEVICE_ID)
-ids_len          = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
-init_history_len = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
-init_cache_len   = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
-topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DEVICE_ID)
-beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
-
-attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                            mask_dtype_Main, device_type, DEVICE_ID)
-rotary_cos_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[0].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
-rotary_sin_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[1].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
-hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
-save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                              np.int32,          device_type, DEVICE_ID)
-
-prefill_logits_buf = create_ort_with_shape((1, vocab_size),         hidden_dtype_Main, device_type, DEVICE_ID)
-decode_logits_buf  = create_ort_with_shape((BEAM_SIZE, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
-max_idx_buf        = create_ort_with_shape((1, 1),                  np.int32,          device_type, DEVICE_ID)
-
-
-if USE_BEAM_SEARCH:
-    print("\nBeam Search does not display immediate decoding results...")
-
-    ort_session_First_Beam     = create_session(onnx_model_First_Beam, **packed_settings)
-    binding_First_Beam         = ort_session_First_Beam.io_binding()
-    in_name_First_Beam         = get_in_names(ort_session_First_Beam)
-    out_name_First_Beam        = get_out_names(ort_session_First_Beam)
-    in_name_First_Beam_parts   = in_name_First_Beam[:num_keys_values_Main_plus_1]
-    out_name_First_Beam_parts  = out_name_First_Beam[:num_keys_values_Main_plus_1]
-    out_name_First_Beam_others = out_name_First_Beam[num_keys_values_Main_plus_1:]
-
-    ort_session_Second_Beam     = create_session(onnx_model_Second_Beam, **packed_settings)
-    binding_Second_Beam         = ort_session_Second_Beam.io_binding()
-    in_name_Second_Beam         = get_in_names(ort_session_Second_Beam)
-    out_name_Second_Beam        = get_out_names(ort_session_Second_Beam)
-    in_name_Second_Beam_parts   = in_name_Second_Beam[:num_keys_values_Main_plus_1]
-    out_name_Second_Beam_parts  = out_name_Second_Beam[:num_keys_values_Main_plus_1]
-    out_name_Second_Beam_others = out_name_Second_Beam[num_keys_values_Main_plus_1:]
-
-    beam_ids_buf   = create_ort_with_shape((BEAM_SIZE, 1), np.int32,          device_type, DEVICE_ID)
-    beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
-
-    bind_ort_in_buf(binding_First_Beam, in_name_First_Beam[num_keys_values_Main_plus_1: num_keys_values_Main_plus_3], [save_id_buf, beam_size])
-    bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam[num_keys_values_Main_plus_3:], [beam_size, topK])
-else:
-    ort_session_Greedy = create_session(onnx_model_Greedy, **packed_settings)
-    binding_Greedy     = ort_session_Greedy.io_binding()
-    in_name_Greedy     = get_in_names(ort_session_Greedy)
-    out_name_Greedy    = get_out_names(ort_session_Greedy)
-    binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id_buf)
-
-    ort_session_Argmax = create_session(onnx_model_Argmax, **packed_settings)
-    binding_Argmax     = ort_session_Argmax.io_binding()
-    in_name_Argmax     = get_in_names(ort_session_Argmax)[0]
-    out_name_Argmax    = get_out_names(ort_session_Argmax)[0]
-    save_id_numpy      = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
-
-
-if USE_PENALTY:
-    ort_session_Penalty = create_session(onnx_model_Penalty, **packed_settings)
-    binding_Penalty     = ort_session_Penalty.io_binding()
-    in_name_Penalty     = get_in_names(ort_session_Penalty)
-    out_name_Penalty    = get_out_names(ort_session_Penalty)[0]
-
-    penalty_dtype = np.float16 if 'float16' in ort_session_Penalty._inputs_meta[2].type else np.float32
-    penalty_value = create_ort_with_data([REPEAT_PENALTY], penalty_dtype, device_type, DEVICE_ID)
-    penalty_range = create_ort_with_data([PENALTY_RANGE],  np.int64,      device_type, DEVICE_ID)
-
-    bind_ort_in_buf(binding_Penalty, in_name_Penalty[2:], [penalty_value, penalty_range])
-
-
-is_prefill_step = True
-prefill_start_time = time.time()
-
-binding_Embed.bind_ortvalue_input(in_name_Embed, input_ids)
-bind_ort_out(binding_Embed, [out_name_Embed], _ort_device_type)
-run(ort_session_Embed, binding_Embed)
-hidden_states = binding_Embed.get_outputs()[0]
-
-binding_Embed.bind_ortvalue_input(in_name_Embed, max_idx_buf)
-
-bind_ort_in_buf(binding_Rotary_Text_Prefill, in_name_Rotary_Text_Prefill, [ids_len, init_history_len, init_cache_len])
-bind_ort_out(binding_Rotary_Text_Prefill, out_name_Rotary_Text_Prefill, _ort_device_type)
-run(ort_session_Rotary_Text_Prefill, binding_Rotary_Text_Prefill)
-rotary_cos, rotary_sin, attention_mask, kv_seq_len = binding_Rotary_Text_Prefill.get_outputs()
-
-kv_seq_len_next = create_ort_with_shape(tuple(kv_seq_len.shape()), np.int64, device_type, DEVICE_ID)
-binding_Rotary_Text_Decode.bind_ortvalue_input(in_name_Rotary_Text_Decode, kv_seq_len)
-bind_ort_out_buf(binding_Rotary_Text_Decode, out_name_Rotary_Text_Decode, [rotary_cos_buf, rotary_sin_buf, kv_seq_len_next])
-
-bind_ort_in_buf(binding_Main, in_name_Main_others, [hidden_states, rotary_cos, rotary_sin, attention_mask])
-
-i = 0
-for _ in range(num_layers_Main):
-    binding_Main.bind_ortvalue_input(in_name_Main[i], past_keys_Main)
-    i += 1
-for _ in range(num_layers_Main):
-    binding_Main.bind_ortvalue_input(in_name_Main[i], past_values_Main)
-    i += 1
-if k_scales is not None:
-    if k_biases is not None:
-        for j in (k_scales, k_biases, v_scales, v_biases):
-            for _ in range(num_layers_Main):
-                binding_Main.bind_ortvalue_input(in_name_Main[i], j)
-                i += 1
+    tail = outs[kv_num_tensors:]
+    if strategy in ('beam', 'penalty_beam'):
+        if len(tail) < 5:
+            raise RuntimeError(f"Beam merged graph output tail is too short: {tail}")
+        save_id_out, beam_prob_out, beam_idx_out, max_idx_out, kv_seq_out = tail[:5]
+    elif strategy == 'greedy':
+        if len(tail) < 2:
+            raise RuntimeError(f"Greedy merged graph output tail is too short: {tail}")
+        max_idx_out, kv_seq_out = tail[:2]
+        save_id_out = beam_prob_out = beam_idx_out = None
+    elif strategy == 'sampling':
+        if len(tail) < 3:
+            raise RuntimeError(f"Sampling merged graph output tail is too short: {tail}")
+        max_idx_out, save_id_out, kv_seq_out = tail[:3]
+        beam_prob_out = beam_idx_out = None
     else:
-        for j in (k_scales, v_scales):
-            for _ in range(num_layers_Main):
-                binding_Main.bind_ortvalue_input(in_name_Main[i], j)
-                i += 1
+        if len(tail) < 3:
+            raise RuntimeError(f"Penalty-greedy merged graph output tail is too short: {tail}")
+        max_idx_out, save_id_out, kv_seq_out = tail[:3]
+        beam_prob_out = beam_idx_out = None
 
-bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
-binding_Main.bind_ortvalue_output(out_name_Main_logits, prefill_logits_buf)
+    kv_seq_in = None
+    if is_decode:
+        kv_seq_in = ins[kv_num_tensors]
+        if not kv_seq_in.startswith('decode_kv_seq_len'):
+            raise RuntimeError(f"Decode graph expected decode_kv_seq_len after KV inputs, got {kv_seq_in!r}.")
 
-if USE_PENALTY:
-    binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], prefill_logits_buf)
-    binding_Penalty.bind_ortvalue_output(out_name_Penalty,  prefill_logits_buf)
-
-if USE_BEAM_SEARCH:
-    binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main], prefill_logits_buf)
-elif USE_PENALTY:
-    binding_Greedy.bind_ortvalue_input(in_name_Greedy[0],   prefill_logits_buf)
-    binding_Greedy.bind_ortvalue_output(out_name_Greedy[0], max_idx_buf)
-else:
-    binding_Argmax.bind_ortvalue_input(in_name_Argmax,   prefill_logits_buf)
-    binding_Argmax.bind_ortvalue_output(out_name_Argmax, max_idx_buf)
-
-
-print(f'\nTest Question: {TEST_QUERY}\nLLM Answering:')
-
-num_decode     = 0
-generate_limit = MAX_SEQ_LEN - num_prefill
-
-while num_decode < generate_limit:
-
-    run(ort_session_Main, binding_Main)
-    outputs_Main = binding_Main.get_outputs()
-
-    if USE_PENALTY and num_decode >= PENALTY_RANGE:
-        binding_Penalty.bind_ortvalue_input(in_name_Penalty[1], save_id)
-        run(ort_session_Penalty, binding_Penalty)
-
-    if USE_BEAM_SEARCH:
-        if is_prefill_step:
-            bind_ort_in_buf(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
-            bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
-            bind_ort_out_buf(binding_First_Beam, out_name_First_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
-            run(ort_session_First_Beam, binding_First_Beam)
-            outputs_Beam = binding_First_Beam.get_outputs()
-        else:
-            bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
-            bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
-            if num_decode < 2:
-                binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_2], beam_score_buf)
-                bind_ort_out_buf(binding_Second_Beam, out_name_Second_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
-            run(ort_session_Second_Beam, binding_Second_Beam)
-            outputs_Beam = binding_Second_Beam.get_outputs()
-
-        max_logits_idx = max_idx_buf.numpy().flat[0]
-        if max_logits_idx in STOP_TOKEN_SET:
-            break
-
-        save_id = outputs_Beam[num_keys_values_Main]
-        bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Beam)
-        binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_1], save_id)
-
-    else:
-        if USE_PENALTY:
-            binding_Greedy._iobinding.bind_output(out_name_Greedy[1], _ort_device_type)
-            run(ort_session_Greedy, binding_Greedy)
-            save_id = binding_Greedy.get_outputs()[1]
-        else:
-            run(ort_session_Argmax, binding_Argmax)
-
-        max_logits_idx = max_idx_buf.numpy().flat[0]
-        if max_logits_idx in STOP_TOKEN_SET:
-            break
-
-        if USE_PENALTY:
-            binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id)
-        else:
-            save_id_numpy[num_decode] = max_logits_idx
-
-        bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Main)
-
-        print(tokenizer.decode(max_logits_idx), end="", flush=True)
-
-    bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
-
-    if is_prefill_step:
-
-        bind_ort_in_buf(binding_Main, in_name_Main_others, [hidden_states_buf, rotary_cos_buf, rotary_sin_buf, attention_mask_buf])
-        binding_Main.bind_ortvalue_output(out_name_Main_logits, decode_logits_buf)
-
-        binding_Embed.bind_ortvalue_output(out_name_Embed, hidden_states_buf)
-
-        if USE_PENALTY:
-            binding_Penalty.bind_ortvalue_input(in_name_Penalty[0], decode_logits_buf)
-            binding_Penalty.bind_ortvalue_output(out_name_Penalty, decode_logits_buf)
-
-        if USE_BEAM_SEARCH:
-            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main], decode_logits_buf)
-            binding_Embed.bind_ortvalue_input(in_name_Embed, beam_ids_buf)
-        elif USE_PENALTY:
-            binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], decode_logits_buf)
-        else:
-            binding_Argmax.bind_ortvalue_input(in_name_Argmax, decode_logits_buf)
-
-        is_prefill_step = False
-
-        decode_start_time = time.time()
-        prefill_elapsed = decode_start_time - prefill_start_time
-
-    run(ort_session_Embed, binding_Embed)
-    run(ort_session_Rotary_Text_Decode, binding_Rotary_Text_Decode)
-
-    kv_seq_len.update_inplace(kv_seq_len_next)
-    num_decode += 1
+    return {
+        'in_names': ins,
+        'out_names': outs,
+        'state_in': state_in,
+        'state_out': state_out,
+        'max_idx_out': max_idx_out,
+        'kv_seq_out': kv_seq_out,
+        'kv_seq_in': kv_seq_in,
+        'save_id_in': _save_id_in_names(strategy, is_decode, set(ins)),
+        'save_id_out': save_id_out,
+        'beam_idx_out': beam_idx_out,
+        'beam_prob_out': beam_prob_out,
+        'beam_prev_prob_in': 'beam_previous_prob' if strategy in ('beam', 'penalty_beam') and is_decode else None,
+    }
 
 
-decode_end_time = time.time()
+def _decode_static_inputs(strategy, beam_size, input_dtypes):
+    static_inputs = []
+    if strategy in ('penalty_greedy', 'penalty_beam'):
+        static_inputs.extend([
+            ('penalty_penalty_value', _ov(np.array([REPEAT_PENALTY], input_dtypes['penalty_penalty_value']))),
+            ('penalty_penalty_range', _ov(np.array([PENALTY_RANGE], input_dtypes['penalty_penalty_range']))),
+        ])
+    if strategy in ('beam', 'penalty_beam'):
+        static_inputs.extend([
+            ('beam_beam_size', _ov(np.array([beam_size], input_dtypes['beam_beam_size']))),
+            ('beam_topK', _ov(np.array([TOP_K], input_dtypes['beam_topK']))),
+        ])
+    if strategy == 'sampling':
+        static_inputs.extend([
+            ('sampling_temperature', _ov(np.array([TEMPERATURE], input_dtypes['sampling_temperature']))),
+            ('sampling_top_k', _ov(np.array([TOP_K], input_dtypes['sampling_top_k']))),
+            ('sampling_top_p', _ov(np.array([TOP_P], input_dtypes['sampling_top_p']))),
+            ('sampling_repetition_penalty', _ov(np.array([REPEAT_PENALTY], input_dtypes['sampling_repetition_penalty']))),
+        ])
+    return static_inputs
 
-if num_decode < 2:
-    prefill_elapsed = 0.0
-    decode_elapsed = 0.0
-else:
-    decode_elapsed = decode_end_time - decode_start_time
 
-total_elapsed = decode_end_time - prefill_start_time
+def run_merged_iobinding(folder, meta, strategy, model_file_names):
+    """Run a merged prefill graph once, then ping-pong two decode bindings per token."""
+    graph_pair = {
+        'greedy':         (model_file_names['prefill_greedy'],         model_file_names['decode_greedy']),
+        'penalty_greedy': (model_file_names['prefill_penalty_greedy'], model_file_names['decode_penalty_greedy']),
+        'beam':           (model_file_names['prefill_beam'],           model_file_names['decode_beam']),
+        'penalty_beam':   (model_file_names['prefill_beam'],           model_file_names['decode_penalty_beam']),
+        'sampling':       (model_file_names['prefill_sampling'],       model_file_names['decode_sampling']),
+    }
+    if strategy not in graph_pair:
+        raise ValueError(f"Unknown decode strategy {strategy!r}.")
+    prefill_name, decode_name = graph_pair[strategy]
+    is_beam = strategy in ('beam', 'penalty_beam')
+    is_sampling = strategy == 'sampling'
+    shared_path = folder / model_file_names['shared_initializers']
+    shared_data_path = folder / model_file_names['shared_initializers_data']
+    if not shared_path.exists() or not shared_data_path.exists():
+        raise RuntimeError(
+            f"Merged runtime requires {model_file_names['shared_initializers']} and "
+            f"{model_file_names['shared_initializers_data']} in {folder}."
+        )
+    for graph in (prefill_name, decode_name):
+        if not (folder / graph).exists():
+            raise RuntimeError(f"Merged graph {graph} missing for strategy {strategy!r} in {folder}.")
 
-prefill_tokens_per_second = num_prefill / prefill_elapsed if prefill_elapsed > 0 else 0.0
-decode_tokens_per_second = num_decode / decode_elapsed if decode_elapsed > 0 else 0.0
-overall_tokens_per_second = (num_decode + 1) / total_elapsed if total_elapsed > 0 else 0.0
+    prefill_sess = create_merged_session(folder / prefill_name, shared_path)
+    decode_sess = create_merged_session(folder / decode_name, shared_path)
+    print(f"Usable Providers: {decode_sess.get_providers()}")
 
-if USE_PENALTY or USE_BEAM_SEARCH:
-    result = tokenizer.decode(save_id.numpy().flat[:num_decode], skip_special_tokens=True)
-else:
-    result = tokenizer.decode(save_id_numpy[:num_decode], skip_special_tokens=True)
+    beam_size = BEAM_SIZE if is_beam else 1
+    kv_num_tensors = _kv_num_tensors(meta)
+    prefill_io_plan = plan_merged_io(prefill_sess, strategy, kv_num_tensors, is_decode=False)
+    decode_io_plan = plan_merged_io(decode_sess, strategy, kv_num_tensors, is_decode=True)
+    if decode_io_plan['kv_seq_in'] is None:
+        raise RuntimeError("Decode graph is missing its decode_kv_seq_len input.")
+    if 'attention_mask' in decode_io_plan['in_names']:
+        raise RuntimeError("Merged decode graph unexpectedly exposes an attention_mask input.")
+    if decode_io_plan['beam_prev_prob_in'] is not None and decode_io_plan['beam_prev_prob_in'] not in decode_io_plan['in_names']:
+        raise RuntimeError("Beam decode graph is missing beam_previous_prob input.")
 
-print(
-    f"\n\n{'─' * 56}\n"
-    f"  📝 Generated Output\n"
-    f"{'─' * 56}\n"
-    f"{result}\n"
-    f"{'─' * 56}\n\n"
-    f"  ⚡ Performance Summary\n"
-    f"{'─' * 56}\n"
-    f"  {'Phase':<12} {'Speed':>14} {'Tokens':>8} {'Time':>10}\n"
-    f"  {'─' * 48}\n"
-    f"  {'Prefill':<12} {prefill_tokens_per_second:>10.2f} t/s {num_prefill:>8d} {prefill_elapsed:>8.3f}s\n"
-    f"  {'Decode':<12} {decode_tokens_per_second:>10.2f} t/s {num_decode:>8d} {decode_elapsed:>8.3f}s\n"
-    f"  {'─' * 48}\n"
-    f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {num_decode:>8d} {total_elapsed:>8.3f}s\n"
-    f"{'─' * 56}\n"
-)
+    tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
+    prompt = (
+        f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n'
+        if TEST_THINK_MODE else
+        f'<|im_start|>user\n{TEST_QUERY}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+    )
+    tokens = tokenizer(prompt, return_tensors='np')['input_ids']
+    num_prefill = int(tokens.shape[-1])
+    generate_limit = _generation_limit(meta, num_prefill)
+    stop_set = _merged_stop_tokens(meta)
+
+    decode_input_dtypes = _session_input_dtypes(decode_sess)
+
+    prefill_input_meta_by_name = {i.name: i for i in prefill_sess.get_inputs()}
+    prefill_input_dtypes = _session_input_dtypes(prefill_sess)
+    prefill_input_values = []
+    prefill_binding = prefill_sess.io_binding()
+
+    def bind_prefill_input(name, arr, device=None):
+        # Cast every runtime-built input to the dtype the graph declares (metadata-driven,
+        # never hard-coded) so an export dtype change can't silently mismatch the binding.
+        value = _ov(np.asarray(arr).astype(prefill_input_dtypes[name], copy=False), device)
+        prefill_input_values.append(value)
+        prefill_binding.bind_ortvalue_input(name, value)
+
+    bind_prefill_input('input_ids', tokens)
+    bind_prefill_input('prefill_ids_len', np.array([num_prefill]))
+    bind_prefill_input('prefill_history_len', np.array([0]))
+    bind_prefill_input('prefill_cache_len', np.array([0]))
+    for name in prefill_io_plan['state_in']:
+        bind_prefill_input(name, _merged_zero(prefill_input_meta_by_name[name]), kv_device)
+    for name in prefill_io_plan['save_id_in']:
+        bind_prefill_input(name, np.zeros((beam_size, 0)))
+    if is_beam:
+        bind_prefill_input('beam_beam_size', np.array([beam_size]))
+    if is_sampling:
+        bind_prefill_input('sampling_temperature', np.array([TEMPERATURE]))
+        bind_prefill_input('sampling_top_k', np.array([TOP_K]))
+        bind_prefill_input('sampling_top_p', np.array([TOP_P]))
+        bind_prefill_input('sampling_repetition_penalty', np.array([REPEAT_PENALTY]))
+    _bind_outputs_device(prefill_binding, prefill_io_plan['out_names'])
+
+    prefill_start_time = time.time()
+    run_iobinding(prefill_sess, prefill_binding)
+    prefill_elapsed = time.time() - prefill_start_time
+    # Outputs are bound in out_names order, so get_outputs() aligns 1:1 with out_names. Gather
+    # them positionally (integer index / list slice) instead of rebuilding a name->value dict:
+    # the KV state block always leads the outputs, and the tails sit at fixed offsets.
+    prefill_outputs = prefill_binding.get_outputs()
+    prefill_out_names = prefill_io_plan['out_names']
+    prefill_next_token_output = prefill_io_plan['beam_idx_out'] if is_beam else prefill_io_plan['max_idx_out']
+    prefill_max_idx_pos = prefill_out_names.index(prefill_io_plan['max_idx_out'])
+    prefill_kv_seq_pos = prefill_out_names.index(prefill_io_plan['kv_seq_out'])
+    prefill_next_token_pos = prefill_out_names.index(prefill_next_token_output)
+    prefill_save_id_pos = prefill_out_names.index(prefill_io_plan['save_id_out']) if prefill_io_plan['save_id_out'] else -1
+    prefill_beam_prob_pos = prefill_out_names.index(prefill_io_plan['beam_prob_out']) if is_beam else -1
+
+    # Hoist every decode-graph plan field into a local so the per-token loop touches no dict.
+    decode_out_names = decode_io_plan['out_names']
+    decode_token_in = 'input_ids'
+    decode_kv_seq_in = decode_io_plan['kv_seq_in']
+    decode_state_in = decode_io_plan['state_in']
+    decode_save_id_in = decode_io_plan['save_id_in']
+    decode_beam_prev_prob_in = decode_io_plan['beam_prev_prob_in']
+    decode_next_token_output = decode_io_plan['beam_idx_out'] if is_beam else decode_io_plan['max_idx_out']
+    decode_max_idx_pos = decode_out_names.index(decode_io_plan['max_idx_out'])
+    decode_kv_seq_pos = decode_out_names.index(decode_io_plan['kv_seq_out'])
+    decode_next_token_pos = decode_out_names.index(decode_next_token_output)
+    decode_save_id_pos = decode_out_names.index(decode_io_plan['save_id_out']) if decode_io_plan['save_id_out'] else -1
+    decode_beam_prob_pos = decode_out_names.index(decode_io_plan['beam_prob_out']) if is_beam else -1
+    decode_dynamic_out_names = _decode_dynamic_output_names(decode_io_plan)
+
+    generated = []
+    final_saved_token_ids = None
+    selected_token_id = prefill_outputs[prefill_max_idx_pos].numpy().flat[0]
+    next_token_tensor = prefill_outputs[prefill_next_token_pos]
+    kv_sequence_length = prefill_outputs[prefill_kv_seq_pos]
+    cached_state_tensors = prefill_outputs[:kv_num_tensors]
+    saved_token_ids = prefill_outputs[prefill_save_id_pos] if prefill_save_id_pos >= 0 else None
+    beam_scores = prefill_outputs[prefill_beam_prob_pos] if is_beam else None
+    generated_count = 0
+    print(f"\nTest Question: {TEST_QUERY}\nLLM Answering:")
+    if is_beam:
+        final_saved_token_ids = saved_token_ids
+        if selected_token_id not in stop_set and generated_count < generate_limit:
+            generated_count += 1
+    elif selected_token_id not in stop_set and generated_count < generate_limit:
+        generated.append(selected_token_id)
+        generated_count += 1
+        print(tokenizer.decode(selected_token_id), end="", flush=True)
+
+    static_inputs = _decode_static_inputs(strategy, beam_size, decode_input_dtypes)
+    decode_bindings = [decode_sess.io_binding(), decode_sess.io_binding()]
+    for binding in decode_bindings:
+        for name, value in static_inputs:
+            binding.bind_ortvalue_input(name, value)
+        _bind_outputs_device(binding, decode_out_names)
+
+    # Two-binding ping-pong: each step's device-auto outputs feed the *other* binding on the
+    # next step. KV state and saved_token_ids GROW every step, so ORT re-allocates them (fresh
+    # handle) and they -- plus their device outputs -- must be rebound every step. kv_seq_len /
+    # next_token / beam_prob are fixed-shape outputs bound once, so each binding keeps reading
+    # the *same* peer buffer (overwritten in place); their source only shifts while the ping-
+    # pong warms up (prefill -> peer), so bind them on a binding's first two uses and skip the
+    # otherwise-redundant per-step rebind afterward.
+    control_rebinds_left = [2, 2]
+
+    decode_step = 0
+    decode_start_time = time.time()
+    while generated_count < generate_limit and selected_token_id not in stop_set:
+        binding_index = decode_step & 1
+        binding = decode_bindings[binding_index]
+        if control_rebinds_left[binding_index]:
+            control_rebinds_left[binding_index] -= 1
+            binding.bind_ortvalue_input(decode_kv_seq_in, kv_sequence_length)
+            binding.bind_ortvalue_input(decode_token_in, next_token_tensor)
+            if is_beam:
+                binding.bind_ortvalue_input(decode_beam_prev_prob_in, beam_scores)
+        for name, value in zip(decode_state_in, cached_state_tensors):
+            binding.bind_ortvalue_input(name, value)
+        for name in decode_save_id_in:
+            binding.bind_ortvalue_input(name, saved_token_ids)
+        _bind_outputs_device(binding, decode_dynamic_out_names)
+
+        run_iobinding(decode_sess, binding)
+        decode_outputs = binding.get_outputs()
+
+        cached_state_tensors = decode_outputs[:kv_num_tensors]
+        selected_token_id = decode_outputs[decode_max_idx_pos].numpy().flat[0]
+        if decode_save_id_pos != -1:
+            saved_token_ids = decode_outputs[decode_save_id_pos]
+        # kv_seq_len / next_token / beam_prob feed ONLY the warm-up rebinds at the top of the
+        # loop; once both bindings lock onto their peer's fixed buffers (overwritten in place)
+        # nothing reads a freshly fetched copy again. A step's fetch feeds the NEXT step's
+        # rebind, so keep fetching while any binding still has a warm-up rebind pending.
+        if any(control_rebinds_left):
+            kv_sequence_length = decode_outputs[decode_kv_seq_pos]
+            next_token_tensor = decode_outputs[decode_next_token_pos]
+            if is_beam:
+                beam_scores = decode_outputs[decode_beam_prob_pos]
+        if is_beam:
+            final_saved_token_ids = saved_token_ids
+            if selected_token_id not in stop_set:
+                generated_count += 1
+        elif selected_token_id not in stop_set:
+            generated.append(selected_token_id)
+            generated_count += 1
+            print(tokenizer.decode(selected_token_id), end="", flush=True)
+        decode_step += 1
+    decode_elapsed = time.time() - decode_start_time
+
+    if is_beam and final_saved_token_ids is not None:
+        generated = []
+        best_beam_tokens = final_saved_token_ids.numpy()[0]
+        for token in best_beam_tokens[:generated_count]:
+            if token in stop_set:
+                break
+            generated.append(token)
+
+    text = tokenizer.decode(generated, skip_special_tokens=True)
+    total_elapsed = prefill_elapsed + decode_elapsed
+    prefill_tokens_per_second = num_prefill / prefill_elapsed if prefill_elapsed > 0 else 0.0
+    decode_tokens_per_second = decode_step / decode_elapsed if decode_elapsed > 0 else 0.0
+    overall_tokens_per_second = (num_prefill + generated_count) / total_elapsed if total_elapsed > 0 else 0.0
+
+    print(
+        "\n\n--------------------------------------------------------\n"
+        "  Generated Output\n"
+        "--------------------------------------------------------\n"
+        f"{text}\n"
+        "--------------------------------------------------------\n\n"
+        "  Performance Summary\n"
+        "--------------------------------------------------------\n"
+        f"  {'Phase':<12} {'Speed':>14} {'Tokens':>8} {'Time':>10}\n"
+        "  ------------------------------------------------\n"
+        f"  {'Prefill':<12} {prefill_tokens_per_second:>10.2f} t/s {num_prefill:>8d} {prefill_elapsed:>8.3f}s\n"
+        f"  {'Decode':<12} {decode_tokens_per_second:>10.2f} t/s {generated_count:>8d} {decode_elapsed:>8.3f}s\n"
+        "  ------------------------------------------------\n"
+        f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {generated_count:>8d} {total_elapsed:>8.3f}s\n"
+        "--------------------------------------------------------\n"
+    )
+    return text
+
+
+def _resolve_strategy():
+    if USE_SAMPLING:
+        return 'sampling'
+    if USE_BEAM_SEARCH and TOP_K >= 2 and BEAM_SIZE >= 2:
+        return 'penalty_beam' if USE_PENALTY else 'beam'
+    if USE_PENALTY:
+        return 'penalty_greedy'
+    return 'greedy'
+
+
+DECODE_STRATEGY = _resolve_strategy()
+
+
+_required_shared_files = (MODEL_FILE_NAMES['shared_initializers'], MODEL_FILE_NAMES['shared_initializers_data'])
+_missing_shared_files = [name for name in _required_shared_files if not (onnx_folder / name).exists()]
+if _missing_shared_files:
+    raise RuntimeError(
+        "Merged shared initializer files not found in "
+        f"{onnx_folder}. This runtime is merged-only; re-export with Export_Qwen.py or "
+        "re-quantize with Optimize_ONNX.py to produce merged graphs and "
+        f"{', '.join(_required_shared_files)}. Missing: {', '.join(_missing_shared_files)}."
+    )
+run_merged_iobinding(onnx_folder, model_meta, DECODE_STRATEGY, MODEL_FILE_NAMES)

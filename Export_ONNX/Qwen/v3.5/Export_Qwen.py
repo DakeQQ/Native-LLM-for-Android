@@ -18,7 +18,7 @@ from PIL import Image
 from onnxruntime.capi import _pybind_state as C
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-download_path                    = r"/home/DakeQQ/Downloads/Qwen3.5-0.8B"                  # Set the folder path where the Qwen3.5 multimodal model project downloaded.
+download_path                    = str(Path.home() / "Downloads" / "Qwen3.5-0.8B")   # Set the folder path where the Qwen3.5 multimodal model project downloaded.
 SCRIPT_DIR                       = Path(__file__).resolve().parent                         # Folder containing this export script.
 
 ONNX_DIR                         = SCRIPT_DIR / "Qwen_ONNX"                                # Exported ONNX graphs are written here, next to this script.
@@ -38,6 +38,8 @@ onnx_model_Rotary_Text_Prefill   = str(ONNX_DIR / "LLM_RotaryPrefill.onnx")
 onnx_model_Rotary_Text_Decode    = str(ONNX_DIR / "LLM_RotaryDecode.onnx")      
 onnx_model_Main                  = str(ONNX_DIR / "LLM_Main.onnx")
 onnx_model_Greedy                = str(ONNX_DIR / "LLM_Greedy.onnx")            
+onnx_model_TopKTopP_Sampling     = str(ONNX_DIR / "LLM_TopKTopPSampling.onnx")
+onnx_model_Penalty_Greedy        = str(ONNX_DIR / "LLM_PenaltyGreedy.onnx")
 onnx_model_First_Beam            = str(ONNX_DIR / "LLM_FirstBeam.onnx")         
 onnx_model_Second_Beam           = str(ONNX_DIR / "LLM_SecondBeam.onnx")        
 onnx_model_Penalty               = str(ONNX_DIR / "LLM_Penalty.onnx")          
@@ -45,7 +47,69 @@ onnx_model_Argmax                = str(ONNX_DIR / "LLM_Argmax.onnx")
 onnx_model_KV_Slice              = str(ONNX_DIR / "LLM_KV_Slice.onnx")
 onnx_model_KV_Split2             = str(ONNX_DIR / "LLM_KV_Split2.onnx")
 onnx_model_KV_Concat             = str(ONNX_DIR / "LLM_KV_Concat.onnx")
+onnx_model_KV_Concat_FirstBeam   = str(ONNX_DIR / "LLM_KV_Concat_FirstBeam.onnx")
+onnx_model_Gather_FirstBeam      = str(ONNX_DIR / "LLM_GatherFirstBeam.onnx")
 onnx_model_Rope_Shift            = str(ONNX_DIR / "LLM_RopeShift.onnx")
+
+MODEL_FILE_NAMES = {
+    "metadata": "LLM_Metadata.onnx",
+    "embed": "LLM_Embed.onnx",
+    "vision": "LLM_Vision.onnx",
+    "image_preprocess": "LLM_Image_Preprocess.onnx",
+    "video_preprocess": "LLM_Video_Preprocess.onnx",
+    "concat_image": "LLM_Concat_Image.onnx",
+    "concat_video": "LLM_Concat_Video.onnx",
+    "rotary_image_prefill": "LLM_Rotary_Image_Prefill.onnx",
+    "rotary_image_decode": "LLM_Rotary_Image_Decode.onnx",
+    "rotary_video_prefill": "LLM_Rotary_Video_Prefill.onnx",
+    "rotary_video_decode": "LLM_Rotary_Video_Decode.onnx",
+    "rotary_text_prefill": "LLM_RotaryPrefill.onnx",
+    "rotary_text_decode": "LLM_RotaryDecode.onnx",
+    "main": "LLM_Main.onnx",
+    "greedy": "LLM_Greedy.onnx",
+    "sampling": "LLM_TopKTopPSampling.onnx",
+    "penalty_greedy": "LLM_PenaltyGreedy.onnx",
+    "first_beam": "LLM_FirstBeam.onnx",
+    "second_beam": "LLM_SecondBeam.onnx",
+    "penalty": "LLM_Penalty.onnx",
+    "argmax": "LLM_Argmax.onnx",
+    "kv_slice": "LLM_KV_Slice.onnx",
+    "kv_split2": "LLM_KV_Split2.onnx",
+    "kv_concat": "LLM_KV_Concat.onnx",
+    "kv_concat_first_beam": "LLM_KV_Concat_FirstBeam.onnx",
+    "gather_first_beam": "LLM_GatherFirstBeam.onnx",
+    "rope_shift": "LLM_RopeShift.onnx",
+    "text_prefill_greedy": "LLM_TextPrefillGreedy.onnx",
+    "text_prefill_penalty_greedy": "LLM_TextPrefillPenaltyGreedy.onnx",
+    "text_prefill_beam": "LLM_TextPrefillBeamFirst.onnx",
+    "text_prefill_sampling": "LLM_TextPrefillSampling.onnx",
+    "text_decode_greedy": "LLM_TextDecodeGreedy.onnx",
+    "text_decode_penalty_greedy": "LLM_TextDecodePenaltyGreedy.onnx",
+    "text_decode_beam": "LLM_TextDecodeBeamNext.onnx",
+    "text_decode_penalty_beam": "LLM_TextDecodePenaltyBeamNext.onnx",
+    "text_decode_sampling": "LLM_TextDecodeSampling.onnx",
+    "image_prefill_greedy": "LLM_ImagePrefillGreedy.onnx",
+    "image_prefill_penalty_greedy": "LLM_ImagePrefillPenaltyGreedy.onnx",
+    "image_prefill_beam": "LLM_ImagePrefillBeamFirst.onnx",
+    "image_prefill_sampling": "LLM_ImagePrefillSampling.onnx",
+    "image_decode_greedy": "LLM_ImageDecodeGreedy.onnx",
+    "image_decode_penalty_greedy": "LLM_ImageDecodePenaltyGreedy.onnx",
+    "image_decode_beam": "LLM_ImageDecodeBeamNext.onnx",
+    "image_decode_penalty_beam": "LLM_ImageDecodePenaltyBeamNext.onnx",
+    "image_decode_sampling": "LLM_ImageDecodeSampling.onnx",
+    "video_prefill_greedy": "LLM_VideoPrefillGreedy.onnx",
+    "video_prefill_penalty_greedy": "LLM_VideoPrefillPenaltyGreedy.onnx",
+    "video_prefill_beam": "LLM_VideoPrefillBeamFirst.onnx",
+    "video_prefill_sampling": "LLM_VideoPrefillSampling.onnx",
+    "video_decode_greedy": "LLM_VideoDecodeGreedy.onnx",
+    "video_decode_penalty_greedy": "LLM_VideoDecodePenaltyGreedy.onnx",
+    "video_decode_beam": "LLM_VideoDecodeBeamNext.onnx",
+    "video_decode_penalty_beam": "LLM_VideoDecodePenaltyBeamNext.onnx",
+    "video_decode_sampling": "LLM_VideoDecodeSampling.onnx",
+    "shared_initializers": "LLM_SharedInitializers.onnx",
+}
+MODEL_FILE_NAMES["shared_initializers_data"] = MODEL_FILE_NAMES["shared_initializers"] + ".data"
+MODEL_FILE_NAME_METADATA = {f"model_file_name_{key}": value for key, value in MODEL_FILE_NAMES.items()}
 
 # Test Input
 TEST_IMAGE                       = [str(SCRIPT_DIR / "psyduck.png")]                      # List of image paths for multi-image support. Use [] for text-only.
@@ -55,11 +119,11 @@ ENABLE_THINKING                  = False                                        
 
 # Model Config
 DO_EXPORT                        = True                                                   # Whether to export the ONNX models
-PREVENT_F16_OVERFLOW             = False                                                  # Prevent float16 overflow. Set True for Q4F16 or Q8F16 or F16 quantization.
+OPSET                            = 20                                                     # ONNX opset version (matches v3; all multimodal graphs verified to export cleanly at 20)
 COMPUTE_IN_F32                   = False                                                  # F16-KV compute precision. False (default): run the F16 KV-cache attention and RopeShift in float16 (downcast Q so the growing F16 cache is never upcast). True: upcast the stored F16 cache to float32 at each use for float32 attention. No effect unless KV_QUANT_DTYPE == "F16".
-STOP_TOKEN                       = [248044]                                               # Qwen3.5 stop token ids
+STOP_TOKEN                       = [248044]                                               # additional stop token ids
 MAX_SEQ_LEN                      = 4096                                                   # Max context length. Can not edit after export.
-ORT_LINEAR_ATTENTION_CHUNK_SIZE  = 128                                                     # Internal chunk size hint for com.microsoft::LinearAttention prefill. This is inside one LLM_Main graph, not runtime subgraph fragmentation.
+ORT_LINEAR_ATTENTION_CHUNK_SIZE  = 128                                                    # Internal chunk size hint for com.microsoft::LinearAttention prefill. This is inside one LLM_Main graph, not runtime subgraph fragmentation.
 
 # Image Vision Config
 HEIGHT_FACTOR                    = 25                                                     # Adjust this value to determine the resize shape and vision resolution.
@@ -74,18 +138,18 @@ VIDEO_FPS                        = 2.0                                          
 VIDEO_MAX_FRAMES                 = 768                                                    # Max frames before temporal patching.
 VIDEO_MIN_FRAMES                 = 4                                                      # Min frames.
 VIDEO_NUM_FRAMES                 = 8                                                      # Actual frames used. Must be even and divisible by TEMPORAL_PATCH_SIZE.
-VIDEO_HEIGHT_FACTOR              = 10                                                     # Video height factor (grid_h = factor * merge_size).
-VIDEO_WIDTH_FACTOR               = 18                                                     # Video width factor (grid_w = factor * merge_size).
+VIDEO_HEIGHT_FACTOR              = 20                                                     # Video height factor (grid_h = factor * merge_size).
+VIDEO_WIDTH_FACTOR               = 20                                                     # Video width factor (grid_w = factor * merge_size).
 VIDEO_RESIZE                     = [VIDEO_HEIGHT_FACTOR * 32, VIDEO_WIDTH_FACTOR * 32]    # Target frame spatial size.
-INPUT_VIDEO_SIZE                 = [720, 1280]                                            # Input video frame shape (H, W).
+INPUT_VIDEO_SIZE                 = [960, 960]                                             # Input video frame shape (H, W).
 DYNAMIC_VIDEO_SHAPE              = False                                                  # Allow dynamic video frame count/spatial.
 
 # KV cache quantization
 KV_QUANT_DTYPE                   = "Q8"                                                   # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
-KV_QUANT_GROUP_SIZE              = 256                                                    # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Must divide head_dim evenly.
+KV_QUANT_GROUP_SIZE              = 128                                                    # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Must divide head_dim evenly.
 USE_HADAMARD                     = True                                                   # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
 HADAMARD_RANDOM_SEED             = 9527                                                   # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
-USE_CLIP                         = True                                                   # Clip outliers to mean ± CLIP_SIGMA*std before quantization. Works for Q4 and Q8 modes.
+USE_CLIP                         = False                                                  # Clip outliers to mean ± CLIP_SIGMA*std before quantization. Works for Q4 and Q8 modes.
 CLIP_SIGMA                       = 3.0                                                    # Clip threshold in standard deviations. Lower = more aggressive clipping. 2.5-3.5 recommended. Only used when USE_CLIP=True.
 USE_SHUFFLE                      = True                                                   # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes.
 USE_SYM                          = False                                                  # True = Less RAM Bandwidth. True: symmetric quantization (no bias, absmax-based); False: asymmetric (min-max with bias). Works for Q4 and Q8 modes.
@@ -98,22 +162,6 @@ REORDER_OPROJ_FOR_QUANT          = False                                        
 REORDER_KEY                      = "absmean"                                              # "absmean" | "L4" | "rms" | "std".
 REORDER_VISION_MLP_FOR_QUANT     = True                                                   # Exact vision MLP/merger intermediate-channel reorder.
 REORDER_VISION_OPROJ_FOR_QUANT   = False                                                  # Exact vision attention value/o_proj channel reorder.
-
-# Decoding strategy
-USE_BEAM_SEARCH                  = False                                                  # Use beam search or greedy search
-REPEAT_PENALTY                   = 1.0                                                    # 0.0 ~ 1.0; No penalty = 1.0. Traced into Apply_Penalty; live in the inline runtime.
-PENALTY_RANGE                    = 20                                                     # Recent-token window to apply penalty. Traced into Apply_Penalty; live in the inline runtime.
-MAX_BEAM_SIZE                    = 10                                                     # Max beam size for beam search. Can not edit after export.
-TOP_K                            = 3                                                      # Top-K for beam search. Traced into the beam graphs; live in the inline runtime.
-BEAM_SIZE                        = 3                                                      # Beam size for beam search. Must be <= MAX_BEAM_SIZE. Traced (batch) into graphs; live in the inline runtime.
-
-# Runtime config
-ORT_LOG                          = False                                                  # Enable ONNX Runtime logging for debugging. Set to False for best performance.
-ORT_FP16                         = False                                                  # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
-ORT_Accelerate_Providers         = []                                                     # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
-MAX_THREADS                      = 0                                                      # 0 = auto
-DEVICE_ID                        = 0                                                      # Device ID for GPU
-OPSET                            = 20                                                     # ONNX opset version (matches v3; all multimodal graphs verified to export cleanly at 20)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -182,17 +230,6 @@ VIDEO_FRAME_SEQLEN             = VIDEO_HEIGHT_FACTOR * VIDEO_WIDTH_FACTOR
 VIDEO_TOTAL_VISION_TOKENS      = VIDEO_GRID_T * VIDEO_FRAME_SEQLEN
 
 SCALE_DTYPE_TORCH = torch.float16 if USE_FLOAT16_SCALE_BIAS else torch.float32
-
-if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
-    TOP_K = BEAM_SIZE
-
-if TOP_K < 2 or BEAM_SIZE < 2:
-    USE_BEAM_SEARCH = False
-
-if not USE_BEAM_SEARCH:
-    BEAM_SIZE = 1
-
-USE_PENALTY = REPEAT_PENALTY != 1.0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -491,13 +528,36 @@ NUM_MAIN_STATE_TENSORS = NUM_FULL_STATE_TENSORS + NUM_LINEAR_STATE_TENSORS
 # ══════════════════════════════════════════════════════════════════════════════
 # Decoding Strategy Modules
 # ══════════════════════════════════════════════════════════════════════════════
-class GREEDY_SEARCH(torch.nn.Module):
-    """Greedy decoding: append the highest-logit token to the running sequence."""
+class PENALTY_GREEDY_SEARCH(torch.nn.Module):
+    """Greedy decoding with save-id append for repetition-penalty paths."""
 
     def forward(self, logits, save_id):
         max_logits_idx = torch.argmax(logits, dim=-1, keepdim=True).int()
         save_id = torch.cat([save_id, max_logits_idx], dim=-1)
         return max_logits_idx, save_id
+
+
+class GREEDY_SEARCH(torch.nn.Module):
+    """Greedy decoding: return only the highest-logit token."""
+
+    def forward(self, logits):
+        return torch.argmax(logits, dim=-1, keepdim=True).int()
+
+
+class GATHER_FIRST_BEAM(torch.nn.Module):
+    """Collapse an ordered Beam state block to its best row while preserving batch rank."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer(
+            "first_beam_row", torch.tensor([0], dtype=torch.int64), persistent=False
+        )
+
+    def forward(self, *states):
+        return tuple(
+            torch.index_select(state, dim=0, index=self.first_beam_row)
+            for state in states
+        )
 
 
 class FIRST_BEAM_SEARCH(torch.nn.Module):
@@ -597,6 +657,38 @@ class ARGMAX(torch.nn.Module):
         return torch.argmax(logits, dim=-1, keepdim=True).int()
 
 
+class TOPK_TOPP_SAMPLING(torch.nn.Module):
+    NEG_INF = float("-inf")
+    GUMBEL_EPS = 1.0e-7
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("neg_inf", torch.tensor(self.NEG_INF, dtype=torch.float32), persistent=False)
+        self.register_buffer("gumbel_min", torch.tensor(self.GUMBEL_EPS, dtype=torch.float32), persistent=False)
+        self.register_buffer("gumbel_max", torch.tensor(1.0 - self.GUMBEL_EPS, dtype=torch.float32), persistent=False)
+
+    def forward(self, logits, temperature, top_k, top_p, repetition_penalty, previous_ids):
+        inv_penalty = torch.reciprocal(repetition_penalty)
+        prev_logits = torch.gather(logits, 1, previous_ids)
+        prev_scores = torch.where(prev_logits < 0.0, prev_logits * repetition_penalty, prev_logits * inv_penalty)
+        scores = torch.scatter(logits, 1, previous_ids, prev_scores)
+        scores = scores * torch.reciprocal(temperature)
+
+        sorted_scores, sorted_indices = torch.topk(scores, k=top_k, dim=-1, largest=True, sorted=True)
+
+        sorted_probs = torch.softmax(sorted_scores, dim=-1)
+        sorted_cumsum = torch.cumsum(sorted_probs, dim=-1)
+        keep_topp = (sorted_cumsum - sorted_probs) <= top_p
+        sorted_scores = torch.where(keep_topp, sorted_scores, self.neg_inf)
+
+        noise = torch.clamp(torch.rand_like(sorted_scores), self.gumbel_min, self.gumbel_max)
+        gumbel = -torch.log(-torch.log(noise))
+        winner = torch.argmax(sorted_scores + gumbel, dim=-1, keepdim=True)
+        sampled_id = torch.gather(sorted_indices, 1, winner).int()
+        save_id = torch.cat([previous_ids, sampled_id], dim=-1)
+        return sampled_id, save_id
+
+
 class METADATA_CARRIER(torch.nn.Module):
     """Tiny identity graph whose only job is to carry model metadata_props."""
 
@@ -662,7 +754,6 @@ class KV_SLICE(torch.nn.Module):
         super().__init__()
         self.kv_quantized  = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_rotary_q4  = KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA")
-        self.kv_rotary     = KV_QUANT_DTYPE in ("ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_q8_grouped = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA") and (USE_HADAMARD or USE_SHUFFLE) and KV_QUANT_GROUP_SIZE < head_dim
         self.kv_grouped_6d = self.kv_rotary_q4 or self.kv_q8_grouped
         self.kv_sym        = USE_SYM and self.kv_quantized
@@ -763,7 +854,6 @@ class KV_SPLIT2(torch.nn.Module):
         super().__init__()
         self.kv_quantized  = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_rotary_q4  = KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA")
-        self.kv_rotary     = KV_QUANT_DTYPE in ("ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_q8_grouped = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA") and (USE_HADAMARD or USE_SHUFFLE) and KV_QUANT_GROUP_SIZE < head_dim
         self.kv_grouped_6d = self.kv_rotary_q4 or self.kv_q8_grouped
         self.kv_sym        = USE_SYM and self.kv_quantized
@@ -824,10 +914,12 @@ class KV_SPLIT2(torch.nn.Module):
 
 
 class KV_CONCAT(torch.nn.Module):
-    """Concatenate two full-attention KV cache halves along the sequence axis."""
+    """Concatenate full-attention KV halves, optionally restoring FirstBeam batch."""
 
-    def __init__(self, num_layers, head_dim=0):
+    def __init__(self, num_layers, head_dim=0, first_beam=False):
         super().__init__()
+        self.first_beam = first_beam
+        self.register_buffer("first_beam_row", torch.tensor([0], dtype=torch.int64), persistent=False)
         self.kv_quantized  = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_rotary_q4  = KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_q8_grouped = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA") and (USE_HADAMARD or USE_SHUFFLE) and KV_QUANT_GROUP_SIZE < head_dim
@@ -848,22 +940,30 @@ class KV_CONCAT(torch.nn.Module):
                 self.save_k_bias  = [None] * num_layers
                 self.save_v_bias  = [None] * num_layers
 
+    def _concat(self, prefix, suffix, dim):
+        if not self.first_beam:
+            return torch.cat([prefix, suffix], dim=dim)
+
+        suffix_top1 = torch.index_select(suffix, dim=0, index=self.first_beam_row)
+        full_top1 = torch.cat([prefix, suffix_top1], dim=dim)
+        return full_top1.expand(suffix.shape[0], *([-1] * (full_top1.dim() - 1)))
+
     def forward(self, *all_inputs):
         n = len(all_inputs) // 2
         a = all_inputs[:n]
         b = all_inputs[n:]
         for i in range(self.num_layers):
-            self.save_key[i]   = torch.cat([a[i],                   b[i]],                   dim=-1)
-            self.save_value[i] = torch.cat([a[i + self.num_layers], b[i + self.num_layers]], dim=-2)
+            self.save_key[i]   = self._concat(a[i],                   b[i],                   dim=-1)
+            self.save_value[i] = self._concat(a[i + self.num_layers], b[i + self.num_layers], dim=-2)
             if self.kv_quantized:
                 if self.kv_sym:
-                    self.save_k_scale[i] = torch.cat([a[i + self.num_layers_2], b[i + self.num_layers_2]], dim=-1)
-                    self.save_v_scale[i] = torch.cat([a[i + self.num_layers_3], b[i + self.num_layers_3]], dim=self.v_axis)
+                    self.save_k_scale[i] = self._concat(a[i + self.num_layers_2], b[i + self.num_layers_2], dim=-1)
+                    self.save_v_scale[i] = self._concat(a[i + self.num_layers_3], b[i + self.num_layers_3], dim=self.v_axis)
                 else:
-                    self.save_k_scale[i] = torch.cat([a[i + self.num_layers_2], b[i + self.num_layers_2]], dim=-1)
-                    self.save_k_bias[i]  = torch.cat([a[i + self.num_layers_3], b[i + self.num_layers_3]], dim=-1)
-                    self.save_v_scale[i] = torch.cat([a[i + self.num_layers_4], b[i + self.num_layers_4]], dim=self.v_axis)
-                    self.save_v_bias[i]  = torch.cat([a[i + self.num_layers_5], b[i + self.num_layers_5]], dim=self.v_axis)
+                    self.save_k_scale[i] = self._concat(a[i + self.num_layers_2], b[i + self.num_layers_2], dim=-1)
+                    self.save_k_bias[i]  = self._concat(a[i + self.num_layers_3], b[i + self.num_layers_3], dim=-1)
+                    self.save_v_scale[i] = self._concat(a[i + self.num_layers_4], b[i + self.num_layers_4], dim=self.v_axis)
+                    self.save_v_bias[i]  = self._concat(a[i + self.num_layers_5], b[i + self.num_layers_5], dim=self.v_axis)
         if self.kv_sym:
             return *self.save_key, *self.save_value, *self.save_k_scale, *self.save_v_scale
         if self.kv_quantized:
@@ -878,8 +978,10 @@ def build_mrope_shift_tables(rotary_module, max_shift: int):
     freqs = inv_freq_expanded @ shift_ids
     freqs = freqs.transpose(-1, -2).unsqueeze(1)
     freqs = rotary_module.apply_interleaved_mrope(freqs, rotary_module.mrope_section)
-    cos = torch.cat([freqs.cos(), freqs.cos()], dim=-1).squeeze(0).squeeze(1)
-    sin = torch.cat([freqs.sin(), -freqs.sin()], dim=-1).squeeze(0).squeeze(1)
+    freqs_cos = freqs.cos()
+    freqs_sin = freqs.sin()
+    cos = torch.cat([freqs_cos, freqs_cos], dim=-1).squeeze(0).squeeze(1)
+    sin = torch.cat([freqs_sin, -freqs_sin], dim=-1).squeeze(0).squeeze(1)
     return cos.half().view(max_shift + 1, 1, 1, ROTARY_DIM, 1), sin.half().view(max_shift + 1, 1, 1, ROTARY_DIM, 1)
 
 
@@ -904,18 +1006,18 @@ class ROPE_SHIFT(torch.nn.Module):
         self.register_buffer("cos_shift", cos_shift, persistent=False)
         self.register_buffer("sin_shift", sin_shift, persistent=False)
 
-    def _flip_k(self, k, batch_size):
-        return (
-            k.view(batch_size, self.num_kv_heads, 1, 2, self.rotary_dim_half, -1)
-            .flip(-3)
-            .view(batch_size, self.num_kv_heads, 1, self.rotary_dim, -1)
+    def _flip_k(self, k):
+        k = onnx_reshape_batch(
+            k, (self.num_kv_heads, 1, 2, self.rotary_dim_half, -1)
         )
+        k = k.flip(-3)
+        return onnx_reshape_batch(k, (self.num_kv_heads, 1, self.rotary_dim, -1))
 
-    def _shift_key(self, key, cos_tab, sin_tab, batch_size):
+    def _shift_key(self, key, cos_tab, sin_tab):
         if self.full_rotary:
-            return key * cos_tab + self._flip_k(key, batch_size) * sin_tab
+            return key * cos_tab + self._flip_k(key) * sin_tab
         key_rot, key_pass = torch.split(key, [self.rotary_dim, HEAD_DIM - self.rotary_dim], dim=-2)
-        key_rot = key_rot * cos_tab + self._flip_k(key_rot, batch_size) * sin_tab
+        key_rot = key_rot * cos_tab + self._flip_k(key_rot) * sin_tab
         return torch.cat([key_rot, key_pass], dim=-2)
 
     def forward(self, *all_inputs):
@@ -929,13 +1031,12 @@ class ROPE_SHIFT(torch.nn.Module):
             cos_tab = cos_tab.float()
             sin_tab = sin_tab.float()
 
-        batch_size = all_inputs[0].shape[0]
         outputs = []
         for layer_index in range(self.num_layers):
             key = all_inputs[layer_index]
             if force_f32:
                 key = key.float()
-            shifted = self._shift_key(key, cos_tab, sin_tab, batch_size)
+            shifted = self._shift_key(key, cos_tab, sin_tab)
             if force_f32:
                 shifted = shifted.to(kv_dtype)
             outputs.append(shifted)
@@ -958,18 +1059,18 @@ class ROPE_SHIFT_QUANT(torch.nn.Module):
         self.register_buffer("cos_shift", cos_shift, persistent=False)
         self.register_buffer("sin_shift", sin_shift, persistent=False)
 
-    def _flip_k(self, k, batch_size):
-        return (
-            k.view(batch_size, self.num_kv_heads, 1, 2, self.rotary_dim_half, -1)
-            .flip(-3)
-            .view(batch_size, self.num_kv_heads, 1, self.rotary_dim, -1)
+    def _flip_k(self, k):
+        k = onnx_reshape_batch(
+            k, (self.num_kv_heads, 1, 2, self.rotary_dim_half, -1)
         )
+        k = k.flip(-3)
+        return onnx_reshape_batch(k, (self.num_kv_heads, 1, self.rotary_dim, -1))
 
-    def _shift_key(self, key, cos_tab, sin_tab, batch_size):
+    def _shift_key(self, key, cos_tab, sin_tab):
         if self.full_rotary:
-            return key * cos_tab + self._flip_k(key, batch_size) * sin_tab
+            return key * cos_tab + self._flip_k(key) * sin_tab
         key_rot, key_pass = torch.split(key, [self.rotary_dim, HEAD_DIM - self.rotary_dim], dim=-2)
-        key_rot = key_rot * cos_tab + self._flip_k(key_rot, batch_size) * sin_tab
+        key_rot = key_rot * cos_tab + self._flip_k(key_rot) * sin_tab
         return torch.cat([key_rot, key_pass], dim=-2)
 
     def forward(self, *all_inputs):
@@ -982,13 +1083,12 @@ class ROPE_SHIFT_QUANT(torch.nn.Module):
         scales_in = all_inputs[layers:2 * layers]
         biases_in = all_inputs[2 * layers:3 * layers] if self.is_asym else None
 
-        batch_size = all_inputs[0].shape[0]
         out_keys, out_scales, out_biases = [], [], []
         for layer_index in range(layers):
             key_bias = biases_in[layer_index] if self.is_asym else None
-            key = self.quantizer.dequantize_key(keys_in[layer_index], scales_in[layer_index], key_bias, batch_size)
-            key = self._shift_key(key, cos_tab, sin_tab, batch_size)
-            new_key, new_scale, new_bias = self.quantizer.quantize_key(key, batch_size)
+            key = self.quantizer.dequantize_key(keys_in[layer_index], scales_in[layer_index], key_bias)
+            key = self._shift_key(key, cos_tab, sin_tab)
+            new_key, new_scale, new_bias = self.quantizer.quantize_key(key)
             out_keys.append(new_key)
             out_scales.append(new_scale)
             if self.is_asym:
@@ -1001,6 +1101,33 @@ class ROPE_SHIFT_QUANT(torch.nn.Module):
 # ══════════════════════════════════════════════════════════════════════════════
 # KV Cache Quantization
 # ══════════════════════════════════════════════════════════════════════════════
+class ONNX_STATIC_RESHAPE(torch.autograd.Function):
+    """Emit a standard Reshape whose zero dimensions copy the input shape."""
+
+    @staticmethod
+    def forward(ctx, x, shape):
+        eager_shape = tuple(
+            x.shape[index] if dim == 0 else dim
+            for index, dim in enumerate(shape)
+        )
+        return x.reshape(eager_shape)
+
+    @staticmethod
+    def symbolic(g, x, shape):
+        shape_const = g.op(
+            "Constant", value_t=torch.tensor(shape, dtype=torch.int64)
+        )
+        return g.op("Reshape", x, shape_const)
+
+
+def onnx_static_reshape(x, shape):
+    return ONNX_STATIC_RESHAPE.apply(x, shape)
+
+
+def onnx_reshape_batch(x, shape):
+    return onnx_static_reshape(x, (0,) + tuple(shape))
+
+
 class KVQuantizer(torch.nn.Module):
     """Unified KV cache quantizer supporting Q8, Q8_CUDA, ROTARY_Q8, ROTARY_Q8_CUDA, and ROTARY_Q4.
 
@@ -1056,12 +1183,10 @@ class KVQuantizer(torch.nn.Module):
             self.SIGNED_QMIN = -8 if is_q4 else -128
             self.SIGNED_QMAX = 7 if is_q4 else 127
             self.QMAX = float(self.SIGNED_QMAX)
-            self.ZERO_POINT = 0.0
         else:
             self.SIGNED_QMIN = None
             self.SIGNED_QMAX = None
             self.QMAX = 15.0 if is_q4 else 255.0
-            self.ZERO_POINT = 0.0
         self.register_buffer("inv_qmax", torch.tensor([1.0 / self.QMAX]).view(1, 1, 1, 1, -1))
 
         # Group parameters
@@ -1091,10 +1216,6 @@ class KVQuantizer(torch.nn.Module):
             fwd_sin = torch.cat([torch.full((head_dim // 2,), -inv_sqrt2), torch.full((head_dim // 2,), inv_sqrt2)])
             self.register_buffer("rot_sin_k", fwd_sin.view(1, 1, 1, -1, 1))
             self.register_buffer("rot_sin_v", fwd_sin.view(1, 1, 1, 1, -1))
-
-            c_vec = torch.zeros(head_dim)
-            c_vec[: head_dim // 2] = sqrt2
-            self.register_buffer("c_vec", c_vec.view(1, 1, 1, 1, -1))
 
         # Enhanced Hadamard transform buffers
         if self.use_hadamard:
@@ -1152,11 +1273,12 @@ class KVQuantizer(torch.nn.Module):
             x = x * self.hadamard_sign
         if self.hadamard_pad:
             x = F.pad(x, (0, self.hadamard_pad))
+        leading_zeros = (0,) * (x.dim() - 1)
         for width, half in self._hadamard_levels:
-            x = x.view(*x.shape[:-1], -1, width)
+            x = onnx_static_reshape(x, leading_zeros + (-1, width))
             even, odd = torch.split(x, [half, half], dim=-1)
             x = torch.cat([even + odd, even - odd], dim=-1)
-            x = x.view(*x.shape[:-2], -1)
+            x = onnx_static_reshape(x, leading_zeros + (-1,))
         x = x * self.hadamard_inv_sqrt
         if self.hadamard_pad:
             x = x[..., : self.kv_quant_group_size]
@@ -1171,104 +1293,121 @@ class KVQuantizer(torch.nn.Module):
         bound = self._clip_sigma_t * std
         return x.clamp(mean - bound, mean + bound)
 
-    def _flip_k(self, k, batch_size):
-        return (
-            k.view(batch_size, self.num_kv_heads, 1, 2, self.head_dim_half, -1)
-            .flip(-3)
-            .view(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+    def _flip_k(self, k):
+        k = onnx_reshape_batch(
+            k, (self.num_kv_heads, 1, 2, self.head_dim_half, -1)
         )
+        k = k.flip(-3)
+        return onnx_reshape_batch(k, (self.num_kv_heads, 1, self.head_dim, -1))
 
-    def _flip_v(self, v, batch_size):
-        return (
-            v.view(batch_size, self.num_kv_heads, 1, -1, 2, self.head_dim_half)
-            .flip(-2)
-            .view(batch_size, self.num_kv_heads, 1, -1, self.head_dim)
+    def _flip_v(self, v):
+        v = onnx_reshape_batch(
+            v, (self.num_kv_heads, 1, -1, 2, self.head_dim_half)
         )
+        v = v.flip(-2)
+        return onnx_reshape_batch(v, (self.num_kv_heads, 1, -1, self.head_dim))
 
-    def _flip_q(self, q, batch_size):
-        return (
-            q.view(
-                batch_size,
+    def _flip_q(self, q):
+        q = onnx_reshape_batch(
+            q,
+            (
                 self.num_kv_heads,
                 self.num_kv_groups,
                 -1,
                 2,
                 self.head_dim_half,
-            )
-            .flip(-2)
-            .view(batch_size, self.num_kv_heads, self.num_kv_groups, -1, self.head_dim)
+            ),
+        )
+        q = q.flip(-2)
+        return onnx_reshape_batch(
+            q,
+            (
+                self.num_kv_heads,
+                self.num_kv_groups,
+                -1,
+                self.head_dim,
+            ),
         )
 
-    def rotate_k(self, k, batch_size):
-        return k * self.rot_cos + self._flip_k(k, batch_size) * self.rot_sin_k
+    def rotate_k(self, k):
+        return k * self.rot_cos + self._flip_k(k) * self.rot_sin_k
 
-    def rotate_v(self, v, batch_size):
-        return v * self.rot_cos + self._flip_v(v, batch_size) * self.rot_sin_v
+    def rotate_v(self, v):
+        return v * self.rot_cos + self._flip_v(v) * self.rot_sin_v
 
-    def rotate_q(self, q, batch_size):
-        return q * self.rot_cos + self._flip_q(q, batch_size) * self.rot_sin_v
+    def rotate_q(self, q):
+        return q * self.rot_cos + self._flip_q(q) * self.rot_sin_v
 
-    def inverse_rotate_v(self, v, batch_size):
-        return v * self.rot_cos - self._flip_v(v, batch_size) * self.rot_sin_v
+    def inverse_rotate_v(self, v):
+        return v * self.rot_cos - self._flip_v(v) * self.rot_sin_v
 
-    def inverse_rotate_k(self, k, batch_size):
-        return k * self.rot_cos - self._flip_k(k, batch_size) * self.rot_sin_k
+    def inverse_rotate_k(self, k):
+        return k * self.rot_cos - self._flip_k(k) * self.rot_sin_k
 
-    def inverse_rotate_attn(self, x, batch_size):
-        return x * self.rot_cos - self._flip_q(x, batch_size) * self.rot_sin_v
+    def inverse_rotate_attn(self, x):
+        return x * self.rot_cos - self._flip_q(x) * self.rot_sin_v
 
-    def hadamard_k(self, k, batch_size):
-        k = k.reshape(
-            batch_size,
-            self.num_kv_heads,
-            1,
-            self.kv_quant_num_groups,
-            self.kv_quant_group_size,
-            -1,
+    def hadamard_k(self, k):
+        k = onnx_reshape_batch(
+            k,
+            (
+                self.num_kv_heads,
+                1,
+                self.kv_quant_num_groups,
+                self.kv_quant_group_size,
+                -1,
+            ),
         )
         k = self._apply_hadamard_last_dim(k.transpose(-1, -2)).transpose(-1, -2)
-        return k.reshape(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+        return onnx_reshape_batch(k, (self.num_kv_heads, 1, self.head_dim, -1))
 
-    def hadamard_v(self, v, batch_size):
-        v = v.reshape(
-            batch_size,
-            self.num_kv_heads,
-            1,
-            -1,
-            self.kv_quant_num_groups,
-            self.kv_quant_group_size,
+    def hadamard_v(self, v):
+        v = onnx_reshape_batch(
+            v,
+            (
+                self.num_kv_heads,
+                1,
+                -1,
+                self.kv_quant_num_groups,
+                self.kv_quant_group_size,
+            ),
         )
         v = self._apply_hadamard_last_dim(v)
-        return v.reshape(batch_size, self.num_kv_heads, 1, -1, self.head_dim)
+        return onnx_reshape_batch(v, (self.num_kv_heads, 1, -1, self.head_dim))
 
     def hadamard_q(self, q_g):
         return self._apply_hadamard_last_dim(q_g)
 
-    def inverse_hadamard_attn(self, x, batch_size):
-        x = x.view(
-            batch_size,
-            self.num_kv_heads,
-            self.num_kv_groups,
-            -1,
-            self.kv_quant_num_groups,
-            self.kv_quant_group_size,
+    def inverse_hadamard_attn(self, x):
+        x = onnx_reshape_batch(
+            x,
+            (
+                self.num_kv_heads,
+                self.num_kv_groups,
+                -1,
+                self.kv_quant_num_groups,
+                self.kv_quant_group_size,
+            ),
         )
         x = self._apply_hadamard_last_dim(x, inverse=True)
-        return x.view(
-            batch_size, self.num_kv_heads, self.num_kv_groups, -1, self.head_dim
+        return onnx_reshape_batch(
+            x,
+            (self.num_kv_heads, self.num_kv_groups, -1, self.head_dim),
         )
 
-    def inverse_hadamard_k(self, k, batch_size):
-        k = k.reshape(
-            batch_size,
-            self.num_kv_heads,
-            1,
-            self.kv_quant_num_groups,
-            self.kv_quant_group_size,
-            -1,
+    def inverse_hadamard_k(self, k):
+        k = onnx_reshape_batch(
+            k,
+            (
+                self.num_kv_heads,
+                1,
+                self.kv_quant_num_groups,
+                self.kv_quant_group_size,
+                -1,
+            ),
         )
         k = self._apply_hadamard_last_dim(k.transpose(-1, -2), inverse=True).transpose(-1, -2)
-        return k.reshape(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+        return onnx_reshape_batch(k, (self.num_kv_heads, 1, self.head_dim, -1))
 
     def _finalize_asymmetric_quant(self, x, x_packed, scale, block_min, dim):
         if self.use_residual_bias_correction:
@@ -1305,9 +1444,9 @@ class KVQuantizer(torch.nn.Module):
         x = x.to(torch.int16)
         return torch.remainder(x + 128, 256) - 128
 
-    def _quantize_block(self, x, dim, batch_size=1):
+    def _quantize_block(self, x, dim):
         if self.is_grouped:
-            return self._quantize_block_grouped(x, dim, batch_size)
+            return self._quantize_block_grouped(x, dim)
         if self.use_sym:
             if self.use_clip:
                 x = self._clip_to_sigma(x, dim=dim)
@@ -1325,54 +1464,60 @@ class KVQuantizer(torch.nn.Module):
         x_packed = torch.round(x_normalized)
         return self._finalize_asymmetric_quant(x, x_packed, scale, block_min, dim)
 
-    def _quantize_block_grouped(self, x, dim, batch_size):
+    def _quantize_block_grouped(self, x, dim):
         if self.use_sym:
             if dim == -2:
-                x = x.view(
-                    batch_size,
-                    self.num_kv_heads,
-                    1,
-                    self.kv_quant_num_groups,
-                    self.kv_quant_group_size,
-                    -1,
+                x = onnx_reshape_batch(
+                    x,
+                    (
+                        self.num_kv_heads,
+                        1,
+                        self.kv_quant_num_groups,
+                        self.kv_quant_group_size,
+                        -1,
+                    ),
                 )
                 if self.use_clip:
                     x = self._clip_to_sigma(x, dim=-2)
                 absmax = x.abs().amax(dim=-2, keepdim=True)
                 scale = absmax * self.inv_qmax
                 x_packed = self._quantize_signed_to_storage(x, scale)
-                x_packed = x_packed.reshape(
-                    batch_size, self.num_kv_heads, 1, self.head_dim, -1
+                x_packed = onnx_reshape_batch(
+                    x_packed, (self.num_kv_heads, 1, self.head_dim, -1)
                 )
             else:
-                x = x.view(
-                    batch_size,
-                    self.num_kv_heads,
-                    1,
-                    -1,
-                    self.kv_quant_num_groups,
-                    self.kv_quant_group_size,
+                x = onnx_reshape_batch(
+                    x,
+                    (
+                        self.num_kv_heads,
+                        1,
+                        -1,
+                        self.kv_quant_num_groups,
+                        self.kv_quant_group_size,
+                    ),
                 )
                 if self.use_clip:
                     x = self._clip_to_sigma(x, dim=-1)
                 absmax = x.abs().amax(dim=-1, keepdim=True)
                 scale = absmax * self.inv_qmax
                 x_packed = self._quantize_signed_to_storage(x, scale)
-                x_packed = x_packed.reshape(
-                    batch_size, self.num_kv_heads, 1, -1, self.head_dim
+                x_packed = onnx_reshape_batch(
+                    x_packed, (self.num_kv_heads, 1, -1, self.head_dim)
                 )
             if USE_FLOAT16_SCALE_BIAS:
                 scale = scale.half()
             return x_packed, scale
         else:
             if dim == -2:
-                x = x.view(
-                    batch_size,
-                    self.num_kv_heads,
-                    1,
-                    self.kv_quant_num_groups,
-                    self.kv_quant_group_size,
-                    -1,
+                x = onnx_reshape_batch(
+                    x,
+                    (
+                        self.num_kv_heads,
+                        1,
+                        self.kv_quant_num_groups,
+                        self.kv_quant_group_size,
+                        -1,
+                    ),
                 )
                 if self.use_clip:
                     x = self._clip_to_sigma(x, dim=-2)
@@ -1382,17 +1527,19 @@ class KVQuantizer(torch.nn.Module):
                 x_packed, scale, block_min = self._finalize_asymmetric_quant(
                     x, x_packed, scale, block_min, dim=-2
                 )
-                x_packed = x_packed.reshape(
-                    batch_size, self.num_kv_heads, 1, self.head_dim, -1
+                x_packed = onnx_reshape_batch(
+                    x_packed, (self.num_kv_heads, 1, self.head_dim, -1)
                 )
             else:
-                x = x.view(
-                    batch_size,
-                    self.num_kv_heads,
-                    1,
-                    -1,
-                    self.kv_quant_num_groups,
-                    self.kv_quant_group_size,
+                x = onnx_reshape_batch(
+                    x,
+                    (
+                        self.num_kv_heads,
+                        1,
+                        -1,
+                        self.kv_quant_num_groups,
+                        self.kv_quant_group_size,
+                    ),
                 )
                 if self.use_clip:
                     x = self._clip_to_sigma(x, dim=-1)
@@ -1402,23 +1549,27 @@ class KVQuantizer(torch.nn.Module):
                 x_packed, scale, block_min = self._finalize_asymmetric_quant(
                     x, x_packed, scale, block_min, dim=-1
                 )
-                x_packed = x_packed.reshape(
-                    batch_size, self.num_kv_heads, 1, -1, self.head_dim
+                x_packed = onnx_reshape_batch(
+                    x_packed, (self.num_kv_heads, 1, -1, self.head_dim)
                 )
             return x_packed, scale, block_min
 
-    def pack_cuda(self, x, dim, batch_size, num_kv_heads, head_dim_quarter):
+    def pack_cuda(self, x, dim, num_kv_heads, head_dim_quarter):
         x_i32 = x.to(torch.int32)
         if dim != -1:
-            x_i32 = x_i32.reshape(batch_size, num_kv_heads, 1, head_dim_quarter, 4, -1)
+            x_i32 = onnx_reshape_batch(
+                x_i32, (num_kv_heads, 1, head_dim_quarter, 4, -1)
+            )
         else:
-            x_i32 = x_i32.reshape(batch_size, num_kv_heads, 1, -1, head_dim_quarter, 4)
+            x_i32 = onnx_reshape_batch(
+                x_i32, (num_kv_heads, 1, -1, head_dim_quarter, 4)
+            )
         x0, x1, x2, x3 = torch.unbind(x_i32, dim=dim)
         return (
             x0 + x1 * self._256 + x2 * self._65536 + (x3 - self._128) * self._16777216
         )
 
-    def unpack_cuda(self, x_i32, dim, batch_size, num_kv_heads, head_dim):
+    def unpack_cuda(self, x_i32, dim, num_kv_heads, head_dim):
         r3 = x_i32 % self._16777216
         x3 = (x_i32 - r3) // self._16777216 + self._128
         x2 = r3 // self._65536
@@ -1427,118 +1578,132 @@ class KVQuantizer(torch.nn.Module):
         x0 = r2 % self._256
         unpacked = torch.stack([x0, x1, x2, x3], dim=dim)
         if dim != -1:
-            return unpacked.reshape(batch_size, num_kv_heads, 1, head_dim, -1)
-        return unpacked.reshape(batch_size, num_kv_heads, 1, -1, head_dim)
+            return onnx_reshape_batch(unpacked, (num_kv_heads, 1, head_dim, -1))
+        return onnx_reshape_batch(unpacked, (num_kv_heads, 1, -1, head_dim))
 
-    def pack_q4_k(self, x, batch_size):
-        x = x.view(batch_size, self.num_kv_heads, 1, self.head_dim_half, 2, -1)
+    def pack_q4_k(self, x):
+        x = onnx_reshape_batch(
+            x, (self.num_kv_heads, 1, self.head_dim_half, 2, -1)
+        )
         low, high = torch.unbind(x, dim=-2)
         return (low + high * 16).to(torch.uint8)
 
-    def pack_q4_v(self, x, batch_size):
-        x = x.view(batch_size, self.num_kv_heads, 1, -1, self.head_dim_half, 2)
+    def pack_q4_v(self, x):
+        x = onnx_reshape_batch(
+            x, (self.num_kv_heads, 1, -1, self.head_dim_half, 2)
+        )
         low, high = torch.unbind(x, dim=-1)
         return (low + high * 16).to(torch.uint8)
 
-    def unpack_q4_k(self, x, batch_size):
+    def unpack_q4_k(self, x):
         low = x % 16
         high = x // 16
-        return torch.stack([low, high], dim=-2).reshape(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+        return onnx_reshape_batch(
+            torch.stack([low, high], dim=-2),
+            (self.num_kv_heads, 1, self.head_dim, -1),
+        )
 
-    def unpack_q4_v(self, x, batch_size):
+    def unpack_q4_v(self, x):
         low = x % 16
         high = x // 16
-        return torch.stack([low, high], dim=-1).reshape(batch_size, self.num_kv_heads, 1, -1, self.head_dim)
+        return onnx_reshape_batch(
+            torch.stack([low, high], dim=-1),
+            (self.num_kv_heads, 1, -1, self.head_dim),
+        )
 
-    def quantize_key(self, keys, batch_size):
+    def quantize_key(self, keys):
         if self.is_rotary:
-            keys = self.rotate_k(keys, batch_size)
+            keys = self.rotate_k(keys)
         if self.use_shuffle:
             keys = keys.index_select(3, self.shuffle_idx)
         if self.use_hadamard:
-            keys = self.hadamard_k(keys, batch_size)
+            keys = self.hadamard_k(keys)
 
         if self.use_sym:
-            key_packed, key_scale = self._quantize_block(keys, dim=-2, batch_size=batch_size)
+            key_packed, key_scale = self._quantize_block(keys, dim=-2)
             key_bias = None
         else:
-            key_packed, key_scale, key_bias = self._quantize_block(keys, dim=-2, batch_size=batch_size)
+            key_packed, key_scale, key_bias = self._quantize_block(keys, dim=-2)
 
         if self.is_q4:
-            key_packed = self.pack_q4_k(key_packed, batch_size)
+            key_packed = self.pack_q4_k(key_packed)
         if self.is_q8_cuda:
             packed_head_dim = (self.head_dim // 8) if self.is_q4 else (self.head_dim // 4)
-            key_packed = self.pack_cuda(key_packed, -2, batch_size, self.num_kv_heads, packed_head_dim)
+            key_packed = self.pack_cuda(key_packed, -2, self.num_kv_heads, packed_head_dim)
         return key_packed, key_scale, key_bias
 
-    def dequantize_key(self, packed_key, key_scale, key_bias, batch_size):
+    def dequantize_key(self, packed_key, key_scale, key_bias):
         if USE_FLOAT16_SCALE_BIAS:
             key_scale = key_scale.float()
             if key_bias is not None:
                 key_bias = key_bias.float()
         if self.is_q8_cuda:
             unpack_head_dim = (self.head_dim // 2) if self.is_q4 else self.head_dim
-            packed_key = self.unpack_cuda(packed_key, -2, batch_size, self.num_kv_heads, unpack_head_dim)
+            packed_key = self.unpack_cuda(packed_key, -2, self.num_kv_heads, unpack_head_dim)
         if self.is_q4:
-            key_int = self.unpack_q4_k(packed_key, batch_size)
+            key_int = self.unpack_q4_k(packed_key)
             if self.use_sym:
                 key_int = self._decode_signed_q4_storage(key_int)
         else:
             key_int = self._decode_signed_q8_storage(packed_key) if self.use_sym else packed_key
         key_float = key_int.float()
         if self.is_grouped:
-            key_grouped = key_float.view(
-                batch_size,
-                self.num_kv_heads,
-                1,
-                self.kv_quant_num_groups,
-                self.kv_quant_group_size,
-                -1,
+            key_grouped = onnx_reshape_batch(
+                key_float,
+                (
+                    self.num_kv_heads,
+                    1,
+                    self.kv_quant_num_groups,
+                    self.kv_quant_group_size,
+                    -1,
+                ),
             )
             keys = key_grouped * key_scale if self.use_sym else key_grouped * key_scale + key_bias
-            keys = keys.reshape(batch_size, self.num_kv_heads, 1, self.head_dim, -1)
+            keys = onnx_reshape_batch(
+                keys, (self.num_kv_heads, 1, self.head_dim, -1)
+            )
         else:
             keys = key_float * key_scale if self.use_sym else key_float * key_scale + key_bias
         if self.use_hadamard:
-            keys = self.inverse_hadamard_k(keys, batch_size)
+            keys = self.inverse_hadamard_k(keys)
         if self.use_shuffle:
             keys = keys.index_select(3, self.unshuffle_idx)
         if self.is_rotary:
-            keys = self.inverse_rotate_k(keys, batch_size)
+            keys = self.inverse_rotate_k(keys)
         return keys
 
-    def forward(self, keys, values, batch_size, num_kv_heads, head_dim_quarter):
+    def forward(self, keys, values, num_kv_heads, head_dim_quarter):
         if self.is_rotary:
-            keys = self.rotate_k(keys, batch_size)
-            values = self.rotate_v(values, batch_size)
+            keys = self.rotate_k(keys)
+            values = self.rotate_v(values)
 
         if self.use_shuffle:
             keys = keys.index_select(3, self.shuffle_idx)
             values = values.index_select(-1, self.shuffle_idx)
 
         if self.use_hadamard:
-            keys = self.hadamard_k(keys, batch_size)
-            values = self.hadamard_v(values, batch_size)
+            keys = self.hadamard_k(keys)
+            values = self.hadamard_v(values)
 
         if self.use_sym:
-            k_packed, k_scale = self._quantize_block(keys, dim=-2, batch_size=batch_size)
-            v_packed, v_scale = self._quantize_block(values, dim=-1, batch_size=batch_size)
+            k_packed, k_scale = self._quantize_block(keys, dim=-2)
+            v_packed, v_scale = self._quantize_block(values, dim=-1)
             if self.is_q4:
-                k_packed = self.pack_q4_k(k_packed, batch_size)
-                v_packed = self.pack_q4_v(v_packed, batch_size)
+                k_packed = self.pack_q4_k(k_packed)
+                v_packed = self.pack_q4_v(v_packed)
             if self.is_q8_cuda:
-                k_packed = self.pack_cuda(k_packed, -2, batch_size, num_kv_heads, head_dim_quarter)
-                v_packed = self.pack_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
+                k_packed = self.pack_cuda(k_packed, -2, num_kv_heads, head_dim_quarter)
+                v_packed = self.pack_cuda(v_packed, -1, num_kv_heads, head_dim_quarter)
             return k_packed, k_scale, v_packed, v_scale
         else:
-            k_packed, k_scale, k_bias = self._quantize_block(keys, dim=-2, batch_size=batch_size)
-            v_packed, v_scale, v_bias = self._quantize_block(values, dim=-1, batch_size=batch_size)
+            k_packed, k_scale, k_bias = self._quantize_block(keys, dim=-2)
+            v_packed, v_scale, v_bias = self._quantize_block(values, dim=-1)
             if self.is_q4:
-                k_packed = self.pack_q4_k(k_packed, batch_size)
-                v_packed = self.pack_q4_v(v_packed, batch_size)
+                k_packed = self.pack_q4_k(k_packed)
+                v_packed = self.pack_q4_v(v_packed)
             if self.is_q8_cuda:
-                k_packed = self.pack_cuda(k_packed, -2, batch_size, num_kv_heads, head_dim_quarter)
-                v_packed = self.pack_cuda(v_packed, -1, batch_size, num_kv_heads, head_dim_quarter)
+                k_packed = self.pack_cuda(k_packed, -2, num_kv_heads, head_dim_quarter)
+                v_packed = self.pack_cuda(v_packed, -1, num_kv_heads, head_dim_quarter)
             return k_packed, k_scale, k_bias, v_packed, v_scale, v_bias
 
 
@@ -1775,12 +1940,11 @@ class ORT_LINEAR_ATTENTION(torch.autograd.Function):
 
 
 def recurrent_gated_delta_prefill(query, key, value, g, beta, initial_state):
-    batch_size = query.shape[0]
-    query_packed = query.reshape(batch_size, -1, LINEAR_NUM_KEY_HEADS * LINEAR_KEY_HEAD_DIM)
-    key_packed = key.reshape(batch_size, -1, LINEAR_NUM_KEY_HEADS * LINEAR_KEY_HEAD_DIM)
-    value_packed = value.reshape(batch_size, -1, LINEAR_NUM_VALUE_HEADS * LINEAR_VALUE_HEAD_DIM)
+    query_packed = onnx_reshape_batch(query, (-1, LINEAR_NUM_KEY_HEADS * LINEAR_KEY_HEAD_DIM))
+    key_packed = onnx_reshape_batch(key, (-1, LINEAR_NUM_KEY_HEADS * LINEAR_KEY_HEAD_DIM))
+    value_packed = onnx_reshape_batch(value, (-1, LINEAR_NUM_VALUE_HEADS * LINEAR_VALUE_HEAD_DIM))
     output_packed, state = ORT_LINEAR_ATTENTION.apply(query_packed, key_packed, value_packed, initial_state, g, beta)
-    output = output_packed.reshape(batch_size, -1, LINEAR_NUM_KEY_HEADS, LINEAR_VALUE_HEAD_DIM)
+    output = onnx_reshape_batch(output_packed, (-1, LINEAR_NUM_KEY_HEADS, LINEAR_VALUE_HEAD_DIM))
     return output, state
 
 
@@ -2221,7 +2385,6 @@ class ROTARY_IMAGE_PREFILL(torch.nn.Module):
     def _build_rotary_table(llm, mm_types, num_images, image_seqlen, max_seq_len):
         """Build 3-channel position IDs following upstream get_rope_index semantics."""
         seq_len = len(mm_types)
-        merge_size = VISION_SPATIAL_MERGE_SIZE
         grid_h = HEIGHT_FACTOR  # after merge
         grid_w = WIDTH_FACTOR   # after merge
 
@@ -2317,7 +2480,6 @@ class ROTARY_VIDEO_PREFILL(torch.nn.Module):
     def _build_rotary_table(llm, mm_types, num_frames, frame_seqlen, max_seq_len):
         """Build 3-channel position IDs for video following upstream get_rope_index."""
         seq_len = len(mm_types)
-        merge_size = VISION_SPATIAL_MERGE_SIZE
         grid_h = VIDEO_HEIGHT_FACTOR  # after merge
         grid_w = VIDEO_WIDTH_FACTOR   # after merge
 
@@ -2573,29 +2735,20 @@ class LLM_MAIN(torch.nn.Module):
             clip_sigma=CLIP_SIGMA,
             use_shuffle=USE_SHUFFLE,
         ).eval()
-        self.register_buffer("overflow_scale", torch.tensor([0.01], dtype=torch.float32))
-        hidden_rms_norm_eps = self.hidden_size * self.rms_norm_eps
-        qk_rms_norm_eps = self.head_dim * self.rms_norm_eps
-        if PREVENT_F16_OVERFLOW:
-            hidden_rms_norm_eps *= self.overflow_scale.square()
-            qk_rms_norm_eps *= self.overflow_scale.square()
-        self.register_buffer("hidden_rms_norm_eps", torch.tensor([hidden_rms_norm_eps], dtype=torch.float32))
-        self.register_buffer("qk_rms_norm_eps", torch.tensor([qk_rms_norm_eps], dtype=torch.float32))
-        # Constant scales for ORT-fused SimplifiedLayerNormalization on the hidden and
-        # full-attention QK norms. scale = N^-0.5 cancels the sqrt(N) that _fuse_weights
-        # folds into the following linear, so net output == the manual sum-based RMS norm
-        # (x * rsqrt(mean(x^2) + raw_eps)). SimplifiedLayerNorm accumulates in fp32
-        # (stash_type=1), so no PREVENT_F16_OVERFLOW prescale is needed here.
+        # SimplifiedLayerNorm scale = N^-0.5 cancels the sqrt(N) that _fuse_weights folds into the
+        # next linear, so output == the manual sum-based RMS norm; it accumulates in fp32
+        # (stash_type=1), so no low-precision prescale is needed here.
         self.register_buffer("hidden_norm_scale", torch.full((self.hidden_size,), self.hidden_size ** -0.5, dtype=torch.float32))
         self.register_buffer("qk_norm_scale", torch.full((self.head_dim,), self.head_dim ** -0.5, dtype=torch.float32))
-        # Linear-attention qk l2-norm and gated-delta output RMS norm reuse the same ORT-fused
-        # SimplifiedLayerNormalization. scale = head_dim^-0.5 reproduces the sum-based norm
-        # (x * rsqrt(sum(x^2) + N*epsilon)); the output-norm sqrt(N) + weight stay folded into
-        # out_proj (see _absorb_linear_input_norm), so passing rms_norm_eps there is exact, and
-        # the qk l2-norm keeps its raw 1e-6 via epsilon = 1e-6 / head_dim.
+        # Linear-attention qk l2-norm + gated-delta output RMS norm reuse SimplifiedLayerNorm with
+        # scale = head_dim^-0.5. The output-norm sqrt(N) + weight stay folded into out_proj (see
+        # _absorb_linear_input_norm); the qk l2-norm keeps its raw 1e-6 via eps = 1e-6 / head_dim.
         self.register_buffer("linear_head_norm_scale", torch.full((self.linear_key_head_dim,), self.linear_key_head_dim ** -0.5, dtype=torch.float32))
         self.linear_qk_norm_eps = 1e-6 / self.linear_key_head_dim
-        self.lm_head_weight = None
+        final_norm_weight = effective_qwen_rms_weight(
+            self.llm.model.language_model.norm
+        ).detach().clone().float()
+        self.register_buffer("final_norm_scale", final_norm_weight, persistent=False)
 
         replace_gelu_with_tanh_approximation(self.llm.model.language_model)
         self._fuse_weights()
@@ -2604,10 +2757,12 @@ class LLM_MAIN(torch.nn.Module):
         if REORDER_OPROJ_FOR_QUANT:
             self._reorder_oproj_for_quant(REORDER_KEY)
 
-    def _rotate_half(self, x, batch_size: int):
-        x = x.view(batch_size, -1, 1, self.qk_heads, 2, self.rotary_dim_half)
+    def _rotate_half(self, x):
+        x = onnx_reshape_batch(
+            x, (-1, 1, self.qk_heads, 2, self.rotary_dim_half)
+        )
         x = x.flip(-2)
-        return x.view(batch_size, -1, 1, self.qk_heads, self.rotary_dim)
+        return onnx_reshape_batch(x, (-1, 1, self.qk_heads, self.rotary_dim))
 
     def _fuse_weights(self):
         scale_factor = self.head_dim ** -0.25
@@ -2626,13 +2781,6 @@ class LLM_MAIN(torch.nn.Module):
                     self._absorb_linear_input_norm(layer, norm_factor)
                 self._fuse_gate_up_projection(layer, norm_factor)
 
-            final_norm_weight = (
-                effective_qwen_rms_weight(self.llm.model.language_model.norm).unsqueeze(0) * norm_factor
-            )
-            fused_lm_head_weight = (
-                self.llm.lm_head.weight.data.float() * final_norm_weight
-            ).contiguous()
-            self.lm_head_weight = torch.nn.Parameter(fused_lm_head_weight)
             del self.llm.model.language_model.norm
 
     def _fuse_full_qkv_projection(
@@ -2864,7 +3012,6 @@ class LLM_MAIN(torch.nn.Module):
         rotary_pos_emb_cos = all_inputs[self.rotary_cos_index]
         rotary_pos_emb_sin = all_inputs[self.rotary_sin_index]
         attention_mask = all_inputs[self.attn_mask_index]
-        batch_size = hidden_states.shape[0]
         # F16-KV OFF mode runs attention in float16; cast the shared causal mask once per forward.
         attn_mask_f16 = attention_mask.half() if (self.kv_f16 and not self.compute_in_f32) else None
 
@@ -2886,15 +3033,17 @@ class LLM_MAIN(torch.nn.Module):
             if layer_type == "full_attention":
                 attn = layer.self_attn
                 qkv = attn.qkv(hidden_states)
-                qkv = qkv.reshape(batch_size, -1, 2, self.qk_heads, self.head_dim)
+                qkv = onnx_reshape_batch(
+                    qkv, (-1, 2, self.qk_heads, self.head_dim)
+                )
                 qk, gate_value = torch.split(qkv, 1, dim=2)
 
                 qk = simplified_layer_norm(qk, self.qk_norm_scale, self.rms_norm_eps) * attn.qk_norm_weight
                 if self.full_rotary:
-                    qk = qk * rotary_pos_emb_cos + self._rotate_half(qk, batch_size) * rotary_pos_emb_sin
+                    qk = qk * rotary_pos_emb_cos + self._rotate_half(qk) * rotary_pos_emb_sin
                 else:
                     qk_rot, qk_pass = torch.split(qk, [self.rotary_dim, self.head_dim - self.rotary_dim], dim=-1)
-                    qk = torch.cat([qk_rot * rotary_pos_emb_cos + self._rotate_half(qk_rot, batch_size) * rotary_pos_emb_sin, qk_pass], dim=-1)
+                    qk = torch.cat([qk_rot * rotary_pos_emb_cos + self._rotate_half(qk_rot) * rotary_pos_emb_sin, qk_pass], dim=-1)
 
                 # F16-KV OFF mode: cast qk to float16 at the earliest clean point (post-RoPE, pre-split)
                 # so the shared cast feeds both query and key and the following split/reshape/permute run
@@ -2904,8 +3053,16 @@ class LLM_MAIN(torch.nn.Module):
 
                 query, key = torch.split(qk, [self.num_heads, self.num_key_value_heads], dim=-2)
                 gate, value = torch.split(gate_value, [self.num_heads, self.num_key_value_heads], dim=-2)
-                gate = gate.reshape(batch_size, -1, self.num_heads * self.head_dim)
-                query = query.reshape(batch_size, -1, self.num_key_value_heads, self.num_key_value_groups, self.head_dim)
+                gate = onnx_reshape_batch(gate, (-1, self.num_heads * self.head_dim))
+                query = onnx_reshape_batch(
+                    query,
+                    (
+                        -1,
+                        self.num_key_value_heads,
+                        self.num_key_value_groups,
+                        self.head_dim,
+                    ),
+                )
                 query = query.permute(0, 2, 3, 1, 4)
 
                 if self.kv_f16:
@@ -2919,7 +3076,7 @@ class LLM_MAIN(torch.nn.Module):
                 if self.kv_rotary_q4:
                     # ── ROTARY_Q4 ────────────────────────────────────
                     if self.kv_sym:
-                        packed_k, scale_k, packed_v, scale_v = self.quantizer(key, value, batch_size, self.num_key_value_heads, self.kv_pack_quarter)
+                        packed_k, scale_k, packed_v, scale_v = self.quantizer(key, value, self.num_key_value_heads, self.kv_pack_quarter)
                         k = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
                         v = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
                         k_s = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
@@ -2935,32 +3092,62 @@ class LLM_MAIN(torch.nn.Module):
                             v_s = v_s.float()
 
                         if self.kv_rotary_q4_cuda:
-                            k = self.quantizer.unpack_cuda(k, -2, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
-                            v = self.quantizer.unpack_cuda(v, -1, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
-                        k_unpacked = self.quantizer._decode_signed_q4_storage(self.quantizer.unpack_q4_k(k, batch_size)).float()
-                        q_rot = self.quantizer.rotate_q(query, batch_size)
+                            k = self.quantizer.unpack_cuda(k, -2, self.num_key_value_heads, self.kv_unpack_head_dim)
+                            v = self.quantizer.unpack_cuda(v, -1, self.num_key_value_heads, self.kv_unpack_head_dim)
+                        k_unpacked = self.quantizer._decode_signed_q4_storage(self.quantizer.unpack_q4_k(k)).float()
+                        q_rot = self.quantizer.rotate_q(query)
                         if self.quantizer.use_shuffle:
                             q_rot = q_rot.index_select(-1, self.quantizer.shuffle_idx)
-                        q_rot_g = q_rot.view(batch_size, self.num_key_value_heads, self.num_key_value_groups, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
+                        q_rot_g = onnx_reshape_batch(
+                            q_rot,
+                            (
+                                self.num_key_value_heads,
+                                self.num_key_value_groups,
+                                -1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                            ),
+                        )
                         q_rot_g = q_rot_g.transpose(-2, -3)
                         if self.quantizer.use_hadamard:
                             q_rot_g = self.quantizer.hadamard_q(q_rot_g)
-                        k_q_g = k_unpacked.view(batch_size, self.num_key_value_heads, 1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size, -1)
+                        k_q_g = onnx_reshape_batch(
+                            k_unpacked,
+                            (
+                                self.num_key_value_heads,
+                                1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                                -1,
+                            ),
+                        )
                         attn_raw_g = torch.matmul(q_rot_g, k_q_g)
                         attn_output = (attn_raw_g * k_s).sum(dim=-3) + attention_mask
                         attn_output = torch.softmax(attn_output, dim=-1)
 
-                        v_unpacked = self.quantizer._decode_signed_q4_storage(self.quantizer.unpack_q4_v(v, batch_size)).float()
-                        v_q_g = v_unpacked.view(batch_size, self.num_key_value_heads, 1, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
-                        v_dequant = (v_q_g * v_s).reshape(batch_size, self.num_key_value_heads, 1, -1, self.head_dim)
+                        v_unpacked = self.quantizer._decode_signed_q4_storage(self.quantizer.unpack_q4_v(v)).float()
+                        v_q_g = onnx_reshape_batch(
+                            v_unpacked,
+                            (
+                                self.num_key_value_heads,
+                                1,
+                                -1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                            ),
+                        )
+                        v_dequant = onnx_reshape_batch(
+                            v_q_g * v_s,
+                            (self.num_key_value_heads, 1, -1, self.head_dim),
+                        )
                         attn_output = torch.matmul(attn_output, v_dequant)
                         if self.quantizer.use_hadamard:
-                            attn_output = self.quantizer.inverse_hadamard_attn(attn_output, batch_size)
+                            attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
                         if self.quantizer.use_shuffle:
                             attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
-                        attn_output = self.quantizer.inverse_rotate_attn(attn_output, batch_size)
+                        attn_output = self.quantizer.inverse_rotate_attn(attn_output)
                     else:
-                        packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, batch_size, self.num_key_value_heads, self.kv_pack_quarter)
+                        packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, self.num_key_value_heads, self.kv_pack_quarter)
                         k = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
                         v = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
                         k_s = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
@@ -2982,36 +3169,66 @@ class LLM_MAIN(torch.nn.Module):
                             v_b = v_b.float()
 
                         if self.kv_rotary_q4_cuda:
-                            k = self.quantizer.unpack_cuda(k, -2, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
-                            v = self.quantizer.unpack_cuda(v, -1, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
-                        k_unpacked = self.quantizer.unpack_q4_k(k, batch_size).float()
-                        q_rot = self.quantizer.rotate_q(query, batch_size)
+                            k = self.quantizer.unpack_cuda(k, -2, self.num_key_value_heads, self.kv_unpack_head_dim)
+                            v = self.quantizer.unpack_cuda(v, -1, self.num_key_value_heads, self.kv_unpack_head_dim)
+                        k_unpacked = self.quantizer.unpack_q4_k(k).float()
+                        q_rot = self.quantizer.rotate_q(query)
                         if self.quantizer.use_shuffle:
                             q_rot = q_rot.index_select(-1, self.quantizer.shuffle_idx)
-                        q_rot_g = q_rot.view(batch_size, self.num_key_value_heads, self.num_key_value_groups, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
+                        q_rot_g = onnx_reshape_batch(
+                            q_rot,
+                            (
+                                self.num_key_value_heads,
+                                self.num_key_value_groups,
+                                -1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                            ),
+                        )
                         q_rot_g = q_rot_g.transpose(-2, -3)
                         if self.quantizer.use_hadamard:
                             q_rot_g = self.quantizer.hadamard_q(q_rot_g)
-                        k_q_g = k_unpacked.view(batch_size, self.num_key_value_heads, 1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size, -1)
+                        k_q_g = onnx_reshape_batch(
+                            k_unpacked,
+                            (
+                                self.num_key_value_heads,
+                                1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                                -1,
+                            ),
+                        )
                         attn_raw_g = torch.matmul(q_rot_g, k_q_g)
                         q_sum_g = q_rot_g.sum(dim=-1, keepdim=True)
                         attn_output = (attn_raw_g * k_s + q_sum_g * k_b).sum(dim=-3) + attention_mask
                         attn_output = torch.softmax(attn_output, dim=-1)
 
-                        v_unpacked = self.quantizer.unpack_q4_v(v, batch_size).float()
-                        v_q_g = v_unpacked.view(batch_size, self.num_key_value_heads, 1, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
-                        v_dequant = (v_q_g * v_s + v_b).reshape(batch_size, self.num_key_value_heads, 1, -1, self.head_dim)
+                        v_unpacked = self.quantizer.unpack_q4_v(v).float()
+                        v_q_g = onnx_reshape_batch(
+                            v_unpacked,
+                            (
+                                self.num_key_value_heads,
+                                1,
+                                -1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                            ),
+                        )
+                        v_dequant = onnx_reshape_batch(
+                            v_q_g * v_s + v_b,
+                            (self.num_key_value_heads, 1, -1, self.head_dim),
+                        )
                         attn_output = torch.matmul(attn_output, v_dequant)
                         if self.quantizer.use_hadamard:
-                            attn_output = self.quantizer.inverse_hadamard_attn(attn_output, batch_size)
+                            attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
                         if self.quantizer.use_shuffle:
                             attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
-                        attn_output = self.quantizer.inverse_rotate_attn(attn_output, batch_size)
+                        attn_output = self.quantizer.inverse_rotate_attn(attn_output)
 
                 elif self.kv_rotary:
                     # ── ROTARY_Q8 ────────────────────────────────────
                     if self.kv_sym:
-                        packed_k, scale_k, packed_v, scale_v = self.quantizer(key, value, batch_size, self.num_key_value_heads, self.kv_pack_quarter)
+                        packed_k, scale_k, packed_v, scale_v = self.quantizer(key, value, self.num_key_value_heads, self.kv_pack_quarter)
                         k = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
                         v = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
                         k_s = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
@@ -3030,42 +3247,72 @@ class LLM_MAIN(torch.nn.Module):
                             v_s = v_s.float()
 
                         if self.kv_rotary_q8_cuda:
-                            k = self.quantizer.unpack_cuda(k, -2, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
-                            v = self.quantizer.unpack_cuda(v, -1, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
+                            k = self.quantizer.unpack_cuda(k, -2, self.num_key_value_heads, self.kv_unpack_head_dim)
+                            v = self.quantizer.unpack_cuda(v, -1, self.num_key_value_heads, self.kv_unpack_head_dim)
                         k_signed = self.quantizer._decode_signed_q8_storage(k).float()
                         v_signed = self.quantizer._decode_signed_q8_storage(v).float()
 
                         if self.kv_q8_grouped:
-                            q_rot = self.quantizer.rotate_q(query, batch_size)
+                            q_rot = self.quantizer.rotate_q(query)
                             if self.quantizer.use_shuffle:
                                 q_rot = q_rot.index_select(-1, self.quantizer.shuffle_idx)
-                            q_rot_g = q_rot.view(batch_size, self.num_key_value_heads, self.num_key_value_groups, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
+                            q_rot_g = onnx_reshape_batch(
+                                q_rot,
+                                (
+                                    self.num_key_value_heads,
+                                    self.num_key_value_groups,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
                             q_rot_g = q_rot_g.transpose(-2, -3)
                             if self.quantizer.use_hadamard:
                                 q_rot_g = self.quantizer.hadamard_q(q_rot_g)
-                            k_q_g = k_signed.view(batch_size, self.num_key_value_heads, 1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size, -1)
+                            k_q_g = onnx_reshape_batch(
+                                k_signed,
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                    -1,
+                                ),
+                            )
                             attn_raw_g = torch.matmul(q_rot_g, k_q_g)
                             attn_output = (attn_raw_g * k_s).sum(dim=-3) + attention_mask
                             attn_output = torch.softmax(attn_output, dim=-1)
 
-                            v_q_g = v_signed.view(batch_size, self.num_key_value_heads, 1, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
-                            v_dequant = (v_q_g * v_s).reshape(batch_size, self.num_key_value_heads, 1, -1, self.head_dim)
+                            v_q_g = onnx_reshape_batch(
+                                v_signed,
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
+                            v_dequant = onnx_reshape_batch(
+                                v_q_g * v_s,
+                                (self.num_key_value_heads, 1, -1, self.head_dim),
+                            )
                             attn_output = torch.matmul(attn_output, v_dequant)
                             if self.quantizer.use_hadamard:
-                                attn_output = self.quantizer.inverse_hadamard_attn(attn_output, batch_size)
+                                attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
                             if self.quantizer.use_shuffle:
                                 attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
-                            attn_output = self.quantizer.inverse_rotate_attn(attn_output, batch_size)
+                            attn_output = self.quantizer.inverse_rotate_attn(attn_output)
                         else:
-                            q_rot = self.quantizer.rotate_q(query, batch_size)
+                            q_rot = self.quantizer.rotate_q(query)
                             attn_raw = torch.matmul(q_rot, k_signed)
                             attn_output = attn_raw * k_s + attention_mask
                             attn_output = torch.softmax(attn_output, dim=-1)
 
                             v_scaled = v_signed * v_s
-                            attn_output = self.quantizer.inverse_rotate_attn(torch.matmul(attn_output, v_scaled), batch_size)
+                            attn_output = self.quantizer.inverse_rotate_attn(torch.matmul(attn_output, v_scaled))
                     else:
-                        packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, batch_size, self.num_key_value_heads, self.kv_pack_quarter)
+                        packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, self.num_key_value_heads, self.kv_pack_quarter)
                         k = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
                         v = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
                         k_s = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
@@ -3091,43 +3338,73 @@ class LLM_MAIN(torch.nn.Module):
                             v_b = v_b.float()
 
                         if self.kv_rotary_q8_cuda:
-                            k = self.quantizer.unpack_cuda(k, -2, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
-                            v = self.quantizer.unpack_cuda(v, -1, batch_size, self.num_key_value_heads, self.kv_unpack_head_dim)
+                            k = self.quantizer.unpack_cuda(k, -2, self.num_key_value_heads, self.kv_unpack_head_dim)
+                            v = self.quantizer.unpack_cuda(v, -1, self.num_key_value_heads, self.kv_unpack_head_dim)
 
                         if self.kv_q8_grouped:
-                            q_rot = self.quantizer.rotate_q(query, batch_size)
+                            q_rot = self.quantizer.rotate_q(query)
                             if self.quantizer.use_shuffle:
                                 q_rot = q_rot.index_select(-1, self.quantizer.shuffle_idx)
-                            q_rot_g = q_rot.view(batch_size, self.num_key_value_heads, self.num_key_value_groups, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
+                            q_rot_g = onnx_reshape_batch(
+                                q_rot,
+                                (
+                                    self.num_key_value_heads,
+                                    self.num_key_value_groups,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
                             q_rot_g = q_rot_g.transpose(-2, -3)
                             if self.quantizer.use_hadamard:
                                 q_rot_g = self.quantizer.hadamard_q(q_rot_g)
-                            k_q_g = k.float().view(batch_size, self.num_key_value_heads, 1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size, -1)
+                            k_q_g = onnx_reshape_batch(
+                                k.float(),
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                    -1,
+                                ),
+                            )
                             attn_raw_g = torch.matmul(q_rot_g, k_q_g)
                             q_sum_g = q_rot_g.sum(dim=-1, keepdim=True)
                             attn_output = (attn_raw_g * k_s + q_sum_g * k_b).sum(dim=-3) + attention_mask
                             attn_output = torch.softmax(attn_output, dim=-1)
 
-                            v_q_g = v.float().view(batch_size, self.num_key_value_heads, 1, -1, self.quantizer.kv_quant_num_groups, self.quantizer.kv_quant_group_size)
-                            v_dequant = (v_q_g * v_s + v_b).reshape(batch_size, self.num_key_value_heads, 1, -1, self.head_dim)
+                            v_q_g = onnx_reshape_batch(
+                                v.float(),
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
+                            v_dequant = onnx_reshape_batch(
+                                v_q_g * v_s + v_b,
+                                (self.num_key_value_heads, 1, -1, self.head_dim),
+                            )
                             attn_output = torch.matmul(attn_output, v_dequant)
                             if self.quantizer.use_hadamard:
-                                attn_output = self.quantizer.inverse_hadamard_attn(attn_output, batch_size)
+                                attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
                             if self.quantizer.use_shuffle:
                                 attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
-                            attn_output = self.quantizer.inverse_rotate_attn(attn_output, batch_size)
+                            attn_output = self.quantizer.inverse_rotate_attn(attn_output)
                         else:
-                            q_rot = self.quantizer.rotate_q(query, batch_size)
+                            q_rot = self.quantizer.rotate_q(query)
                             attn_raw = torch.matmul(q_rot, k.float())
-                            q_sum = query.sum(dim=-1, keepdim=True)
+                            q_sum = q_rot.sum(dim=-1, keepdim=True)
                             attn_output = attn_raw * k_s + q_sum * k_b + attention_mask
                             attn_output = torch.softmax(attn_output, dim=-1)
 
                             v_dequant = v.float() * v_s + v_b
-                            attn_output = self.quantizer.inverse_rotate_attn(torch.matmul(attn_output, v_dequant), batch_size)
+                            attn_output = self.quantizer.inverse_rotate_attn(torch.matmul(attn_output, v_dequant))
 
                 elif self.kv_quantized:
-                    packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, batch_size, self.num_key_value_heads, self.head_dim_quarter)
+                    packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, self.num_key_value_heads, self.head_dim_quarter)
                     key_cache = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
                     value_cache = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
                     key_scale = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
@@ -3155,32 +3432,36 @@ class LLM_MAIN(torch.nn.Module):
                         value_bias = value_bias.float()
 
                     if self.kv_q8_cuda:
-                        key_cache = self.quantizer.unpack_cuda(key_cache, -2, batch_size, self.num_key_value_heads, self.head_dim)
-                        value_cache = self.quantizer.unpack_cuda(value_cache, -1, batch_size, self.num_key_value_heads, self.head_dim)
+                        key_cache = self.quantizer.unpack_cuda(key_cache, -2, self.num_key_value_heads, self.head_dim)
+                        value_cache = self.quantizer.unpack_cuda(value_cache, -1, self.num_key_value_heads, self.head_dim)
 
                     if self.kv_q8_grouped:
                         q_grouped = query
                         if self.quantizer.use_shuffle:
                             q_grouped = q_grouped.index_select(-1, self.quantizer.shuffle_idx)
-                        q_grouped = q_grouped.view(
-                            batch_size,
-                            self.num_key_value_heads,
-                            self.num_key_value_groups,
-                            -1,
-                            self.quantizer.kv_quant_num_groups,
-                            self.quantizer.kv_quant_group_size,
+                        q_grouped = onnx_reshape_batch(
+                            q_grouped,
+                            (
+                                self.num_key_value_heads,
+                                self.num_key_value_groups,
+                                -1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                            ),
                         )
                         q_grouped = q_grouped.transpose(-2, -3)
                         if self.quantizer.use_hadamard:
                             q_grouped = self.quantizer.hadamard_q(q_grouped)
 
-                        k_grouped = key_cache.float().view(
-                            batch_size,
-                            self.num_key_value_heads,
-                            1,
-                            self.quantizer.kv_quant_num_groups,
-                            self.quantizer.kv_quant_group_size,
-                            -1,
+                        k_grouped = onnx_reshape_batch(
+                            key_cache.float(),
+                            (
+                                self.num_key_value_heads,
+                                1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                                -1,
+                            ),
                         )
                         attn_raw_grouped = torch.matmul(q_grouped, k_grouped)
                         q_sum_grouped = q_grouped.sum(dim=-1, keepdim=True)
@@ -3189,26 +3470,23 @@ class LLM_MAIN(torch.nn.Module):
                         ).sum(dim=-3) + attention_mask
                         attn_output = torch.softmax(attn_output, dim=-1)
 
-                        v_grouped = value_cache.float().view(
-                            batch_size,
-                            self.num_key_value_heads,
-                            1,
-                            -1,
-                            self.quantizer.kv_quant_num_groups,
-                            self.quantizer.kv_quant_group_size,
+                        v_grouped = onnx_reshape_batch(
+                            value_cache.float(),
+                            (
+                                self.num_key_value_heads,
+                                1,
+                                -1,
+                                self.quantizer.kv_quant_num_groups,
+                                self.quantizer.kv_quant_group_size,
+                            ),
                         )
-                        value_dequant = (
-                            v_grouped * value_scale + value_bias
-                        ).reshape(
-                            batch_size,
-                            self.num_key_value_heads,
-                            1,
-                            -1,
-                            self.head_dim,
+                        value_dequant = onnx_reshape_batch(
+                            v_grouped * value_scale + value_bias,
+                            (self.num_key_value_heads, 1, -1, self.head_dim),
                         )
                         attn_output = torch.matmul(attn_output, value_dequant)
                         if self.quantizer.use_hadamard:
-                            attn_output = self.quantizer.inverse_hadamard_attn(attn_output, batch_size)
+                            attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
                         if self.quantizer.use_shuffle:
                             attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
                     else:
@@ -3240,7 +3518,10 @@ class LLM_MAIN(torch.nn.Module):
                         attn_output = torch.softmax(attn_output, dim=-1)
                         attn_output = torch.matmul(attn_output, value_cache)
 
-                attn_output = attn_output.permute(0, 3, 1, 2, 4).reshape(batch_size, -1, attn.o_proj.in_features)
+                attn_output = onnx_reshape_batch(
+                    attn_output.permute(0, 3, 1, 2, 4),
+                    (-1, attn.o_proj.in_features),
+                )
                 if ATTN_OUTPUT_GATE:
                     attn_output = attn_output * torch.sigmoid(gate)
                 hidden_states = residual + attn.o_proj(attn_output)
@@ -3258,7 +3539,14 @@ class LLM_MAIN(torch.nn.Module):
                 conv_state_out = conv_input[:, -LINEAR_CONV_STATE_LEN:]
                 conv_output = F.conv1d(conv_input.transpose(1, 2), linear.conv1d.weight, linear.conv1d.bias, padding=0, groups=LINEAR_CONV_DIM)
                 conv_output = F.silu(conv_output).transpose(1, 2)
-                conv_output = conv_output.reshape(batch_size, -1, self.linear_num_key_heads * 2 + self.linear_num_value_heads, self.linear_key_head_dim)
+                conv_output = onnx_reshape_batch(
+                    conv_output,
+                    (
+                        -1,
+                        self.linear_num_key_heads * 2 + self.linear_num_value_heads,
+                        self.linear_key_head_dim,
+                    ),
+                )
 
                 qk, value = torch.split(conv_output, [self.linear_num_key_heads * 2, self.linear_num_value_heads], dim=2)
                 qk = simplified_layer_norm(qk, self.linear_head_norm_scale, self.linear_qk_norm_eps)
@@ -3266,7 +3554,9 @@ class LLM_MAIN(torch.nn.Module):
 
                 core_attn_out, recurrent_state_out = recurrent_gated_delta_prefill(query, key, value, g, beta, recurrent_state)
                 core_attn_out = simplified_layer_norm(core_attn_out, self.linear_head_norm_scale, self.rms_norm_eps)
-                core_attn_out = core_attn_out.reshape(batch_size, -1, self.linear_value_dim)
+                core_attn_out = onnx_reshape_batch(
+                    core_attn_out, (-1, self.linear_value_dim)
+                )
                 core_attn_out = core_attn_out * F.silu(z)
 
                 hidden_states = residual + linear.out_proj(core_attn_out)
@@ -3282,8 +3572,8 @@ class LLM_MAIN(torch.nn.Module):
             gate_part, up_part = torch.split(gate_up, [layer.mlp.down_proj.in_features, layer.mlp.down_proj.in_features], dim=-1)
             hidden_states = residual + layer.mlp.down_proj(layer.mlp.act_fn(gate_part) * up_part)
 
-        hidden_states = simplified_layer_norm(hidden_states[:, -1], self.hidden_norm_scale, self.rms_norm_eps)
-        logits = F.linear(hidden_states, self.lm_head_weight)
+        hidden_states = simplified_layer_norm(hidden_states[:, -1:], self.final_norm_scale, self.rms_norm_eps)
+        logits = onnx_reshape_batch(self.llm.lm_head(hidden_states), (-1,))
 
         if self.kv_any_quantized:
             if self.kv_sym:
@@ -3513,17 +3803,16 @@ def write_onnx_metadata(onnx_path, metadata):
     """Stamp metadata_props without re-serializing external *.data weights."""
     import onnx
     model = onnx.load(onnx_path, load_external_data=False)
-    existing = {prop.key: prop for prop in model.metadata_props}
-    for key, value in metadata.items():
-        if key in existing:
-            existing[key].value = value
-        else:
-            model.metadata_props.add(key=key, value=value)
+    canonical = {prop.key: prop.value for prop in model.metadata_props}
+    canonical.update(metadata)
+    model.ClearField("metadata_props")
+    for key in sorted(canonical):
+        model.metadata_props.add(key=key, value=canonical[key])
     onnx.save(model, onnx_path)
 
 
 def run_exported_onnx_inference():
-    """Run the standalone ONNX inference script against this export folder."""
+    """Run the merged ONNX inference script against this export folder."""
     inference_script = SCRIPT_DIR / "Inference_Qwen_ONNX.py"
     if not inference_script.exists():
         raise FileNotFoundError(f"Inference script not found: {inference_script}")
@@ -3577,17 +3866,28 @@ if DO_EXPORT:
             "eos_token_ids":           _eos_ids,
         }
         chat_token_meta = collect_special_token_ids(download_path)
+        _stop_token_candidates = list(STOP_TOKEN)
+        if isinstance(_eos, (list, tuple)):
+            _stop_token_candidates.extend(_eos)
+        elif _eos is not None:
+            _stop_token_candidates.append(_eos)
+        for _key in ("chat_endoftext_id", "chat_im_end_id"):
+            _token_id = chat_token_meta.get(_key)
+            if _token_id is not None:
+                _stop_token_candidates.append(_token_id)
+        _stop_token_ids = list(dict.fromkeys(int(token_id) for token_id in _stop_token_candidates))
 
-        batch_size = BEAM_SIZE
+        # Representative values used only to trace dynamic decoding graph inputs.
+        batch_size = 1
         ids_len_dummy = 10
         history_len_dummy = 0
         ids_len = torch.tensor([ids_len_dummy], dtype=torch.int64)
         history_len = torch.tensor([history_len_dummy], dtype=torch.int64)
         cache_len = torch.tensor([history_len_dummy], dtype=torch.int64)   # prefill-window width fed to Main
         kv_seq_len = ids_len + history_len
-        beam_size = torch.tensor([BEAM_SIZE], dtype=torch.int64)
-        top_k = torch.tensor([TOP_K], dtype=torch.int64)
-        logits = torch.ones((BEAM_SIZE, VOCAB_SIZE), dtype=torch.float32)
+        beam_size = torch.tensor([1], dtype=torch.int64)
+        top_k = torch.tensor([3], dtype=torch.int32)
+        logits = torch.ones((batch_size, VOCAB_SIZE), dtype=torch.float32)
 
         full_state_tensors = build_full_state_tensors(batch_size)
         linear_state_tensors = build_linear_state_tensors(batch_size)
@@ -3865,11 +4165,25 @@ if DO_EXPORT:
         gc.collect()
 
         # ── Export decoding modules ──
-        save_id_in = torch.zeros((BEAM_SIZE, 4), dtype=torch.int32)
+        save_id_in = torch.zeros((batch_size, 4), dtype=torch.int32)
         torch.onnx.export(
             GREEDY_SEARCH().eval(),
-            (logits, save_id_in),
+            (logits,),
             onnx_model_Greedy,
+            input_names=["logits"],
+            output_names=["max_logits_idx"],
+            dynamic_axes={
+                "logits": {0: "batch"},
+                "max_logits_idx": {0: "batch"},
+            },
+            opset_version=OPSET,
+            dynamo=False,
+        )
+
+        torch.onnx.export(
+            PENALTY_GREEDY_SEARCH().eval(),
+            (logits, save_id_in),
+            onnx_model_Penalty_Greedy,
             input_names=["logits", "save_id_in"],
             output_names=["max_logits_idx", "save_id_out"],
             dynamic_axes={
@@ -3917,7 +4231,7 @@ if DO_EXPORT:
             dynamo=False,
         )
 
-        previous_prob = torch.zeros((BEAM_SIZE, 1), dtype=torch.float32)
+        previous_prob = torch.zeros((batch_size, 1), dtype=torch.float32)
         torch.onnx.export(
             SECOND_BEAM_SEARCH(total_state_tensors).eval(),
             tuple(state_inputs + [logits, save_id_in, previous_prob, beam_size, top_k]),
@@ -3941,8 +4255,33 @@ if DO_EXPORT:
         )
         del previous_prob
 
-        penalty_value = torch.tensor([REPEAT_PENALTY], dtype=torch.float32)
-        penalty_range = torch.tensor([PENALTY_RANGE], dtype=torch.int64)
+        # Beam decode must retain every hypothesis on each recurrent step, so final row selection cannot
+        # be folded into FirstBeam/SecondBeam without either breaking feedback shapes or gathering on every
+        # token. Export one stateless utility graph and invoke it only when the winning state is persisted.
+        gather_dynamic_axes = {}
+        for input_name, output_name in zip(state_input_names, state_output_names):
+            gather_dynamic_axes[input_name] = dict(state_dynamic_axes[input_name])
+            output_axes = {
+                axis: axis_name
+                for axis, axis_name in state_dynamic_axes[output_name].items()
+                if axis != 0
+            }
+            if output_axes:
+                gather_dynamic_axes[output_name] = output_axes
+        torch.onnx.export(
+            GATHER_FIRST_BEAM().eval(),
+            tuple(state_inputs),
+            onnx_model_Gather_FirstBeam,
+            input_names=state_input_names,
+            output_names=state_output_names,
+            dynamic_axes=gather_dynamic_axes,
+            opset_version=OPSET,
+            dynamo=False,
+        )
+        del gather_dynamic_axes
+
+        penalty_value = torch.tensor([1.0], dtype=torch.float32)
+        penalty_range = torch.tensor([20], dtype=torch.int64)
         torch.onnx.export(
             APPLY_PENALTY().eval(),
             (logits, save_id_in, penalty_value, penalty_range),
@@ -3972,6 +4311,26 @@ if DO_EXPORT:
             opset_version=OPSET,
             dynamo=False,
         )
+
+        sampling_temperature = torch.tensor([0.8], dtype=torch.float32)
+        sampling_top_k = torch.tensor([50], dtype=torch.int32)
+        sampling_top_p = torch.tensor([0.95], dtype=torch.float32)
+        sampling_repetition_penalty = torch.tensor([1.0], dtype=torch.float32)
+        sampling_previous_ids = torch.zeros((1, 4), dtype=torch.int32)
+        torch.onnx.export(
+            TOPK_TOPP_SAMPLING().eval(),
+            (logits[[0]], sampling_temperature, sampling_top_k, sampling_top_p, sampling_repetition_penalty, sampling_previous_ids),
+            onnx_model_TopKTopP_Sampling,
+            input_names=["logits", "temperature", "top_k", "top_p", "repetition_penalty", "previous_ids"],
+            output_names=["sampled_id", "save_id_out"],
+            dynamic_axes={
+                "previous_ids": {1: "history_len"},
+                "save_id_out": {1: "history_len"},
+            },
+            opset_version=OPSET,
+            dynamo=False,
+        )
+        del sampling_temperature, sampling_top_k, sampling_top_p, sampling_repetition_penalty, sampling_previous_ids
 
         slice_start = torch.tensor([0], dtype=torch.int64)
         slice_end = torch.tensor([5], dtype=torch.int64)
@@ -4035,6 +4394,41 @@ if DO_EXPORT:
             dynamo=False,
         )
         del cat_a_ins, cat_a_names, cat_b_ins, cat_b_names, cat_out_names, cat_axes
+
+        # ── Export KV_Concat_FirstBeam (batch-1 prefix + repeated beam suffix) ──
+        beam_cat_prefix_ins, beam_cat_prefix_names = [], []
+        beam_cat_suffix_ins, beam_cat_suffix_names = [], []
+        beam_cat_out_names, beam_cat_axes = [], {}
+        for name, dim in FULL_STATE_SPECS:
+            prefix_tensor = single_full_state_tensors[name]
+            suffix_tensor = full_state_tensors[name]
+            for layer_index in range(NUM_FULL_ATTENTION_LAYERS):
+                prefix_name = f"in_prefix_{name}_{layer_index}"
+                suffix_name = f"in_beam_{name}_{layer_index}"
+                output_name = f"out_{name}_{layer_index}"
+                beam_cat_prefix_ins.append(prefix_tensor)
+                beam_cat_prefix_names.append(prefix_name)
+                beam_cat_suffix_ins.append(suffix_tensor)
+                beam_cat_suffix_names.append(suffix_name)
+                beam_cat_out_names.append(output_name)
+                beam_cat_axes[prefix_name] = {dim: "prefix_len"}
+                beam_cat_axes[suffix_name] = {0: "beam_size", dim: "suffix_len"}
+                beam_cat_axes[output_name] = {0: "beam_size", dim: "concat_len"}
+        torch.onnx.export(
+            KV_CONCAT(NUM_FULL_ATTENTION_LAYERS, HEAD_DIM, first_beam=True).eval(),
+            tuple(beam_cat_prefix_ins + beam_cat_suffix_ins),
+            onnx_model_KV_Concat_FirstBeam,
+            input_names=beam_cat_prefix_names + beam_cat_suffix_names,
+            output_names=beam_cat_out_names,
+            dynamic_axes=beam_cat_axes,
+            opset_version=OPSET,
+            dynamo=False,
+        )
+        del (
+            beam_cat_prefix_ins, beam_cat_prefix_names,
+            beam_cat_suffix_ins, beam_cat_suffix_names,
+            beam_cat_out_names, beam_cat_axes,
+        )
 
         # ── Export RopeShift (mRoPE key re-rotation after sliding-window KV eviction) ──
         def _seq4(tensor):
@@ -4135,6 +4529,7 @@ if DO_EXPORT:
                 "native_llm_metadata_version": 1,
                 "producer":                    "Export_Qwen.py",
             },
+            MODEL_FILE_NAME_METADATA,
             {
                 "num_layers":                  len(LAYER_TYPES),
                 "num_full_attention_layers":   NUM_FULL_ATTENTION_LAYERS,
@@ -4210,7 +4605,8 @@ if DO_EXPORT:
                 "kv_qdq_friendly_asym":    USE_QDQ_FRIENDLY_ASYM if _kv_is_quant and not _kv_sym else None,
             },
             {
-                "stop_token_ids": ",".join(str(int(t)) for t in STOP_TOKEN) if STOP_TOKEN else None,
+                "stop_token_ids": ",".join(str(token_id) for token_id in _stop_token_ids)
+                if _stop_token_ids else None,
             },
             model_config_meta,
             chat_token_meta,
@@ -4223,9 +4619,12 @@ if DO_EXPORT:
             onnx_model_Rotary_Image_Prefill, onnx_model_Rotary_Image_Decode,
             onnx_model_Rotary_Video_Prefill, onnx_model_Rotary_Video_Decode,
             onnx_model_Rotary_Text_Prefill, onnx_model_Rotary_Text_Decode,
-            onnx_model_Main, onnx_model_Greedy, onnx_model_First_Beam,
+            onnx_model_Main, onnx_model_Greedy, onnx_model_Penalty_Greedy,
+            onnx_model_TopKTopP_Sampling, onnx_model_First_Beam,
             onnx_model_Second_Beam, onnx_model_Penalty, onnx_model_Argmax,
             onnx_model_KV_Slice, onnx_model_KV_Split2, onnx_model_KV_Concat,
+            onnx_model_KV_Concat_FirstBeam,
+            onnx_model_Gather_FirstBeam,
             onnx_model_Rope_Shift,
         ]
         _written, _skipped = [], []
@@ -4245,6 +4644,25 @@ if DO_EXPORT:
             print("[Metadata] Skipped (kept usable, metadata not written):")
             for _entry in _skipped:
                 print(f"    {_entry}")
+
+        import Shared_Merged
+        print("\n[SharedMerged] Building multimodal merged strategy graphs + shared initializer bundle ...")
+        _bundle = Shared_Merged.build_shared_merged_bundle(
+            ONNX_DIR,
+            model_file_names=MODEL_FILE_NAMES,
+            delete_constituents=True,
+        )
+        for _name, _path in _bundle["graphs"].items():
+            print(f"    {_name} ({Path(_path).stat().st_size} bytes)")
+        print(f"    {MODEL_FILE_NAMES['shared_initializers_data']} ({Path(_bundle['shared_data']).stat().st_size} bytes)")
+
+        for _target in _bundle["graphs"].values():
+            try:
+                write_onnx_metadata(_target, onnx_metadata)
+            except Exception as _exc:  # noqa: BLE001
+                print(f"[Metadata] Merged graph metadata skipped for {Path(_target).name}: {_exc}")
+        for _removed in _bundle.get("removed_constituents", []):
+            print(f"    Deleted absorbed split constituent: {_removed}")
 
         del (
             tokenizer,
