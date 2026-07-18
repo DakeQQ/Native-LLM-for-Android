@@ -115,10 +115,6 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 | Android 15 | Nubia Z50    | 8_Gen2-CPU              | MiniCPM4-0.5B<br>q4f32 | 78 token/s               |
 
 
-## Demo Results
-### Qwen2VL-2B / 1024 Context
-![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_QwenVL.gif?raw=true)
-
 ## 概述
 
 展示在 Android 设备上运行原生大型语言模型 (LLM) 的示范。目前支持的模型包括：
