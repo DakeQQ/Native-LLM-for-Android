@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MaterialSwitch thumb: bright contrast knob on the accent track when checked, muted when off.
+     Auto-adapts to the day/night palette via the shared color tokens. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/textOnYellow" android:state_checked="true" />
+    <item android:color="@color/textMuted" />
+</selector>
