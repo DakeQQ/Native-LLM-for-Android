@@ -1,9 +1,9 @@
 # Native-LLM-for-Android
 
-Quick Try: [Qwen3-1.7B-Android](https://drive.google.com/file/d/11K-ldQJmDITUk5pEmfKSpFXLxmGEl8jF/view?usp=drive_link)
+Quick Try: [Qwen3.5-0.8B-Android](https://drive.google.com/file/d/1hHS7fHkmmKWfTdog3uqFIGOcq73H2Hks/view?usp=sharing)
 
-### Qwen3-1.7B / 4096 Context
-![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen.gif?raw=true)
+### Qwen3.5-0.8B / 4096 Context
+![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen3.5.gif)
 
 ## Overview
 Demonstration of running a native Large Language Model (LLM) on Android devices. Currently supported models include:
