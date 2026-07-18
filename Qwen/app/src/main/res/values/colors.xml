@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ===================================================================== -->
+    <!-- LIGHT mode — high-contrast daylight counterpart of the dark "Energy ·  -->
+    <!-- Glass" theme. Crisp white panels on a cool light-grey backdrop, deep   -->
+    <!-- amber accent (the daylight analog of the night energy-yellow) and dark -->
+    <!-- ink text. Same token NAMES as res/values-night/colors.xml, so every    -->
+    <!-- @color reference in the drawables/layouts swaps automatically.         -->
+    <!-- Manual-stop button accent (red, distinct from the amber send slot). -->
+    <color name="stopRed">#D32F2F</color>
+    <!-- ===================================================================== -->
+
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Backgrounds (light) -->
+     <color name="bgDark">#EAF1FF</color>        <!-- cool light energy field -->
+     <color name="bgDarkAlt">#FFF7E6</color>     <!-- warm amber wash for the static backdrop -->
+    <color name="surface">#FFFFFF</color>       <!-- opaque panel surface -->
+
+    <!-- Electric blue (user / primary) — deepened for contrast on white. -->
+    <color name="electricBlue">#1B5FE0</color>
+    <color name="electricBlueDeep">#1442A8</color>
+    <color name="electricBlueGlow">#3B7BFF</color>
+
+    <!-- Energy amber (assistant / accent) — dark enough to read on light surfaces. -->
+    <color name="energyYellow">#B25E00</color>
+    <color name="energyYellowDeep">#8A4600</color>
+    <color name="yellowGlow">#4DB25E00</color>  <!-- avatar aura -->
+     <color name="postProcessOrange">#E8751A</color>
+     <color name="postProcessOrangeStroke">#C85F0F</color>
+     <color name="postProcessOrangeSoft">#26E8751A</color>
+     <color name="blueGlow">#263B7BFF</color>    <!-- static backdrop rail / glow -->
+
+    <!-- Tech highlights (darkened so hairlines stay visible on white). -->
+    <color name="techCyan">#0E8AAB</color>      <!-- luminous hairlines / sheens -->
+    <color name="statusOnline">#0E9E63</color>  <!-- live "online" dot -->
+    <color name="statusGlow">#3310A36B</color>  <!-- faint ring around the status dot -->
+     <color name="memoryBarWine">#7A1230</color>
+     <color name="memoryBarRed">#D7262E</color>
+     <color name="memoryBarOrange">#F07818</color>
+     <color name="memoryBarYellow">#F4C430</color>
+     <color name="memoryBarYellowGreen">#A8D83F</color>
+     <color name="memoryBarTealGreen">#18A889</color>
+
+    <!-- Glass surfaces — light panels with a translucent dark-blue hairline. -->
+    <color name="glassFill">#FFFFFFFF</color>        <!-- white panel fill -->
+    <color name="glassFillStrong">#F1F4FB</color>    <!-- faint grey panel fill -->
+    <color name="glassHighlight">#33FFFFFF</color>   <!-- top sheen -->
+    <color name="glassStroke">#33123A7A</color>      <!-- hairline border -->
+    <color name="glassStrokeStrong">#59123A7A</color><!-- focused border -->
+
+    <!-- System-prompt editor sheet: light mode already uses opaque glass fills. Kept separate so dark mode
+         can block underlying chat text without changing the main command deck's transparency. -->
+    <color name="systemPromptPanelFill">#FFFFFFFF</color>
+    <color name="systemPromptPanelFillStrong">#F1F4FB</color>
+
+    <!-- User bubble (deep royal-blue, opaque) + crisp white text. The blue was deepened from the old
+         medium tone so the white words keep strong contrast (~7:1, not the old ~4:1) across the whole
+         gradient and stay easily readable in daylight / light mode. -->
+    <color name="userFillTop">#1B50CC</color>
+    <color name="userFillBottom">#0F348F</color>
+    <color name="userStroke">#0C2B7A</color>
+    <color name="userText">#FFFFFF</color>
+
+    <!-- Assistant bubble (light warm-amber tint) + dark ink text. -->
+    <color name="assistantFillTop">#FFE7BF</color>
+    <color name="assistantFillBottom">#FFD79C</color>
+    <color name="assistantStroke">#E0A24E</color>
+    <color name="assistantText">#3A2A12</color>
+
+    <!-- Collapsible "thinking" aside panel (cool, faint, dashed). -->
+    <color name="thinkBlockFill">#14123A7A</color>
+    <color name="thinkBlockStroke">#59123A7A</color>
+     <color name="thinkText">#34445E</color>
+
+    <!-- Think-mode toggle accent washes (checked base ring + pressed wash). -->
+    <color name="thinkToggleCheckedBase">#55B25E00</color>
+    <color name="thinkTogglePressed">#2EB25E00</color>
+
+    <!-- Slim-slider inactive track: a delicate translucent blue on the panel surface. -->
+    <color name="sliderTrackInactive">#33123A7A</color>
+
+     <!-- Remaining-memory bar track: subtle in daylight, semantic fill color is set in code. -->
+     <color name="memoryTrackFill">#14123A7A</color>
+     <color name="memoryTrackStroke">#33123A7A</color>
+
+    <!-- Compute / Memory page surfaces and tables (light). -->
+    <color name="computeScreenBg">#EAF1FF</color>   <!-- processor page canvas (unchanged in light) -->
+    <color name="computeCardStart">#FFFFFF</color>
+    <color name="computeCardEnd">#F1F4FB</color>
+    <color name="computeCardStroke">#33123A7A</color>
+    <color name="computeTableFill">#F7FAFF</color>
+    <color name="computeTableStroke">#33123A7A</color>
+    <color name="computePillFill">#1AB25E00</color>
+    <color name="computePillStroke">#66B25E00</color>
+    <color name="computeIconButtonFill">#14123A7A</color>
+    <color name="computeIconButtonRipple">#33123A7A</color>
+    <color name="computeTableHeaderBg">#DDE4F1</color>
+    <color name="computeTableEmphasisBg">#26B25E00</color>
+    <color name="computeTableStripeBg">#18123A7A</color>
+    <color name="computeTableDivider">#22123A7A</color>
+
+    <!-- Tech-slider "circle bar head": white core inside the energy-amber ring thumb, plus a
+         soft translucent-amber glow halo that blooms on touch. -->
+    <color name="sliderThumbCore">#FFFFFF</color>
+    <color name="sliderHalo">#33B25E00</color>
+
+    <!-- Text -->
+    <color name="textPrimary">#0E1A30</color>
+    <color name="textMuted">#54657F</color>
+    <!-- Performance-panel metric labels: in light mode they stay identical to the muted label tone
+         (the dark-mode counterpart in values-night is brightened). -->
+    <color name="perfMetricLabel">#54657F</color>
+    <color name="textOnYellow">#FFFFFF</color>
+
+    <!-- Telemetry chart (MetricChartView). Two high-contrast series — cyan vs magenta — with brighter
+         glow hues; panel + grid + axis tones sit on the light backdrop. Mirrored in values-night. -->
+    <color name="chartSeriesA">#0696B8</color>       <!-- CPU (cyan) -->
+    <color name="chartSeriesAGlow">#29B6D6</color>
+    <color name="chartSeriesB">#D81B7A</color>       <!-- RAM (magenta) -->
+    <color name="chartSeriesBGlow">#F0589F</color>
+    <!-- Throughput chart: Prefill = blue, Decode = orange-yellow (distinct from the CPU/RAM series).
+         Deep enough to stay legible on the light panel; brightened in values-night for dark mode. -->
+    <color name="chartPrefill">#1A54F0</color>       <!-- Prefill (sapphire blue) -->
+    <color name="chartPrefillGlow">#5A93F5</color>
+    <color name="chartDecode">#E8890C</color>        <!-- Decode (orange-yellow) -->
+    <color name="chartDecodeGlow">#FFB74D</color>
+    <color name="chartGrid">#22123A7A</color>
+    <color name="chartAxisText">#54657F</color>
+    <color name="chartPanelFill">#FFFFFF</color>
+    <color name="chartPanelStroke">#33123A7A</color>
+</resources>

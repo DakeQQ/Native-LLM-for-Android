@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tech-style decode slider. The thumb is a "circle bar head": a hollow energy-yellow ring
+         around a deep-navy core that floats clear of the track via a gap, with a soft yellow glow
+         halo blooming on touch. Track is a thin rounded rail; no ticks / value bubble / stop dot. -->
+    <style name="Widget.App.Slider" parent="Widget.Material3.Slider">
+        <item name="labelBehavior">gone</item>
+        <item name="tickVisible">false</item>
+        <!-- Track rail -->
+        <item name="trackHeight">4dp</item>
+        <item name="trackInsideCornerSize">2dp</item>
+        <item name="trackColorActive">@color/energyYellow</item>
+        <item name="trackColorInactive">@color/sliderTrackInactive</item>
+        <item name="trackStopIndicatorSize">0dp</item>
+        <!-- Circle bar head: hollow yellow ring + deep-navy core, lifted off the track by a gap.
+             thumbWidth/thumbHeight (equal -> a true circle) MUST be set: they override thumbRadius,
+             and the Material3 default (4dp x 44dp) renders as a thin vertical "line". -->
+        <item name="thumbWidth">18dp</item>
+        <item name="thumbHeight">18dp</item>
+        <item name="thumbColor">@color/sliderThumbCore</item>
+        <item name="thumbStrokeColor">@color/energyYellow</item>
+        <item name="thumbStrokeWidth">3dp</item>
+        <item name="thumbElevation">2dp</item>
+        <item name="thumbTrackGapSize">4dp</item>
+        <!-- Glow halo -->
+        <item name="haloColor">@color/sliderHalo</item>
+        <item name="haloRadius">18dp</item>
+    </style>
+
+    <style name="Widget.App.DecodeModeButton" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">36dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:minHeight">0dp</item>
+        <item name="android:paddingStart">6dp</item>
+        <item name="android:paddingEnd">6dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Widget.App.DecodeValue" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:background">@drawable/bg_value_pill</item>
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minWidth">40dp</item>
+        <item name="android:paddingStart">5dp</item>
+        <item name="android:paddingTop">2dp</item>
+        <item name="android:paddingEnd">5dp</item>
+        <item name="android:paddingBottom">2dp</item>
+        <item name="android:textColor">@color/energyYellow</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+</resources>

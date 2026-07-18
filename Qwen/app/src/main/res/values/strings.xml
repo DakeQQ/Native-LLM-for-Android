@@ -1,0 +1,205 @@
+<resources>
+    <string name="send">发送 Send</string>
+    <string name="model_loading_verify">校验模型… Verifying…</string>
+    <string name="model_loading_runtime">加载文字模型… Loading text model…</string>
+    <string name="model_loading_tokenizer">准备分词器… Preparing tokenizer…</string>
+    <string name="model_loading_vision">加载视觉模型… Loading vision model…</string>
+    <string name="model_retry_action">重试加载 Retry</string>
+    <string name="model_load_error_missing_bundle">未在安装包中找到 ONNX 模型。\nNo ONNX model was found in the app bundle.</string>
+    <string name="model_load_error_runtime">文字模型运行时初始化失败，请重试。\nText model runtime initialization failed; please retry.</string>
+    <string name="model_load_error_tokenizer">分词器初始化失败，请检查模型包。\nTokenizer initialization failed; check the model bundle.</string>
+    <string name="model_load_error_memory">加载模型时内存不足，请关闭其他应用后重试。\nNot enough memory to load the model; close other apps and retry.</string>
+    <string name="model_load_error_assets">模型资产校验或暂存失败：%1$s\nModel asset validation or staging failed: %1$s</string>
+    <string name="model_load_error_unknown">模型加载发生未预期错误：%1$s\nUnexpected model loading error: %1$s</string>
+    <string name="decode_loading_action">策略切换中… Switching…</string>
+    <string name="maintenance_loading_action">上下文维护中… Maintaining…</string>
+    <string name="model_unavailable_action">模型不可用 Unavailable</string>
+    <string name="stop">停止 Stop</string>
+    <string name="stopping">停止中… Stopping…</string>
+    <string name="generation_notification_channel">本地生成 Local generation</string>
+    <string name="generation_notification_channel_description">本地模型在后台生成回复 On-device model generation while the app is in background</string>
+    <string name="generation_notification_title">正在生成回复 Generating response</string>
+    <string name="generation_notification_text">点按返回对话 Tap to return to chat</string>
+    <string name="model_loading_notification_title">正在加载本地模型 Loading on-device model</string>
+    <string name="model_loading_notification_text">加载将在后台继续 Loading continues in the background</string>
+    <string name="default_compute_array" translatable="false">32 M</string>
+    <string name="default_compute_iterations" translatable="false">10</string>
+    <string name="default_memory_tokens" translatable="false">2048</string>
+    <string name="default_prefill_tokens" translatable="false">256</string>
+    <string name="default_decode_tokens" translatable="false">4095</string>
+    <string name="default_beam_size" translatable="false">3</string>
+    <string name="default_top_k" translatable="false">3</string>
+    <string name="default_repeat_penalty" translatable="false">0.80</string>
+    <string name="default_penalty_range" translatable="false">20</string>
+    <string name="default_sampling_temperature" translatable="false">0.80</string>
+    <string name="default_sampling_top_k" translatable="false">3</string>
+    <string name="default_sampling_top_p" translatable="false">0.95</string>
+    <string name="default_sampling_penalty" translatable="false">1.20</string>
+    <string name="think_chevron_expanded" translatable="false">▾</string>
+    <string name="clear">喂孟婆汤 Wipe the Slate</string>
+    <string name="type_your_message">请输入 Type your message</string>
+    <string name="jump_to_bottom">回到底部 Bottom</string>
+    <string name="think_mode">思考模式 Think Mode</string>
+    <string name="think_mode_off">无脑说话 Brain Gone</string>
+    <string name="think_mode_on">说话过脑子 Brain On</string>
+    <string name="decode_title">解码策略 Decode Strategy</string>
+    <string name="decode_mode_greedy">Greedy</string>
+    <string name="decode_mode_beam">Beam</string>
+    <string name="decode_mode_sampler">Sampler</string>
+    <string name="beam_label">束宽 Beam</string>
+    <string name="top_k_label">候选 Top-K</string>
+    <string name="penalty_label">重复惩罚 Repeat</string>
+    <string name="penalty_range_label">惩罚范围 Window</string>
+    <string name="temperature_label">温度 Temperature</string>
+    <string name="top_p_label">核采样 Top-P</string>
+    <string name="memory_label">记忆 Memory</string>
+    <string name="memory_remaining_label">记忆窗口 Memory</string>
+    <string name="memory_remaining_value">空闲 Free %1$d%% · 容量 Cap %2$d</string>
+    <string name="memory_band_value">触发 Trigger %2$d%% → 重置 Reset %1$d%%</string>
+    <string name="memory_threshold_accessibility">记忆重置与触发阈值 Memory reset and trigger thresholds</string>
+    <string name="memory_threshold_state">记忆重置阈值 %1$d%%，触发阈值 %2$d%%。Memory reset %1$d%%, trigger %2$d%%.</string>
+    <string name="memory_green_decrease">降低重置阈值 Decrease reset threshold</string>
+    <string name="memory_green_increase">提高重置阈值 Increase reset threshold</string>
+    <string name="memory_red_decrease">降低触发阈值 Decrease trigger threshold</string>
+    <string name="memory_red_increase">提高触发阈值 Increase trigger threshold</string>
+    <string name="prefill_label">回溯 Look-back</string>
+    <string name="decode_limit_label">上限 Limit</string>
+    <string name="organize_memory_label">整理记忆 Organize Memory</string>
+    <string name="organize_memory_summary">整理记忆 Organize Memory\n开启：移除系统词与思维链，以文字提醒替换视觉词元后重算\nOn: rebuild with vision notes</string>
+    <string name="penalty_off">关 Off</string>
+    <string name="perf_prefill">Prefill</string>
+    <string name="perf_decode">Decode</string>
+    <string name="perf_token_rate">%1$s tok/s</string>
+    <string name="perf_pending">—</string>
+    <string name="perf_panel_title">性能监控 Performance</string>
+    <string name="perf_cpu">CPU</string>
+    <string name="perf_mem">RAM</string>
+    <string name="perf_cpu_value">%1$d%%</string>
+    <string name="perf_mem_value">%1$d MB</string>
+    <string name="perf_measuring">…</string>
+    <!-- Telemetry chart screen (MetricChartActivity) -->
+    <string name="chart_title_system">系统监控 System Monitor</string>
+    <string name="chart_subtitle_system">处理器与内存 · 时间 CPU &amp; RAM over time</string>
+    <string name="chart_title_throughput">吞吐量 Throughput</string>
+    <string name="chart_subtitle_throughput">词元总量与速度 Tokens vs speed</string>
+    <string name="chart_series_cpu">CPU %</string>
+    <string name="chart_series_mem">RAM MB</string>
+    <string name="chart_series_prefill">Prefill</string>
+    <string name="chart_series_decode">Decode</string>
+    <string name="chart_no_data">暂无数据 No data yet</string>
+    <string name="chart_hint">双指缩放 · 拖动平移 Pinch to zoom · drag to pan</string>
+    <string name="chart_zoom_in">放大 Zoom in</string>
+    <string name="chart_zoom_out">缩小 Zoom out</string>
+    <string name="chart_fit">重置视图 Reset view</string>
+    <string name="chart_clear">清除数据 Clear data</string>
+    <string name="chart_clear_confirm_title">清除统计数据 Clear statistics</string>
+    <string name="chart_clear_confirm_message">确定清除所有预填充与解码速度统计吗？此操作无法撤销。\nClear all prefill &amp; decode speed statistics? This cannot be undone.</string>
+    <string name="chart_clear_confirm_positive">清除 Clear</string>
+    <string name="chart_clear_confirm_negative">取消 Cancel</string>
+    <string name="edit_message_title">编辑消息 Edit message</string>
+    <string name="edit_message_resend">重新发送 Resend</string>
+    <string name="edit_message_cancel">取消 Cancel</string>
+    <!-- Slot system-prompt editor -->
+    <string name="system_prompt_title">系统提示词 System Prompt</string>
+    <string name="system_prompt_subtitle">角色设定 Assistant behavior</string>
+    <string name="system_prompt_scope">下轮 Next</string>
+    <string name="system_prompt_editor_label">提示词内容 Prompt</string>
+    <string name="system_prompt_hint">输入系统提示词（留空则关闭）Enter the system prompt (leave empty to disable)</string>
+    <string name="system_prompt_meta">留空关闭 · 下轮生效 Empty disables · next turn</string>
+    <string name="system_prompt_counter">%1$d / %2$d 字 Chars</string>
+    <string name="system_prompt_clear">清空 Clear</string>
+    <string name="system_prompt_save">保存 Save</string>
+    <string name="system_prompt_reset">恢复默认 Reset</string>
+    <string name="system_prompt_cancel">取消 Cancel</string>
+    <string name="system_prompt_saved">系统提示词已更新 System prompt updated</string>
+    <string name="system_prompt_save_failed">系统提示词应用失败，请重试。 Could not apply system prompt; retry.</string>
+    <string name="system_prompt_applying_action">应用中 Applying…</string>
+    <string name="copy_message">复制 Copy</string>
+    <string name="copied_to_clipboard">已复制 Copied</string>
+    <string name="think_section_active">让我想想 Let me cook</string>
+    <string name="think_section_done">让我想想 Let me cook</string>
+    <string name="think_section_skipped">智能体决定跳过思考 Agent decided to skip thinking</string>
+    <string name="post_processing_status">整理记忆 Consolidating</string>
+    <string name="post_processing_lock_hint">整理记忆中，请稍候 Organizing memory, please wait</string>
+    <string name="inference_lock_hint">推理中，请稍候 Generating, please wait</string>
+    <string name="rollback_context_reset">无法恢复原上下文，已从编辑内容重新开始。 Context was reset before resending.</string>
+    <string name="generation_error_busy">推理运行时正忙，请稍后重试。 Runtime busy; please retry.</string>
+    <string name="generation_error_not_ready">所选模型或策略尚未就绪，请稍后重试。 Model or strategy is not ready; please retry.</string>
+    <string name="generation_error_vision">视觉处理失败，请重新拍摄后重试。 Vision processing failed; capture again and retry.</string>
+    <string name="generation_error_memory">可用内存不足，请清理对话或切换文字模式。 Not enough memory; clear the chat or use text mode.</string>
+    <string name="generation_error_input">无法读取输入，请重新输入后重试。 Input could not be read; enter it again.</string>
+    <string name="generation_error_model">模型文件与运行时接口不匹配，请重新安装模型包。 Model bundle does not match this runtime.</string>
+    <string name="generation_error_retry_reset">生成失败；下次发送将重置上下文。 Generation failed; the next send will reset context.</string>
+    <string name="generation_error_generic">生成失败，请重试；若问题持续，请清除对话。 Generation failed; retry or clear the chat.</string>
+    <string name="theme_toggle">主题 Theme</string>
+
+    <!-- Compute / Memory benchmark page -->
+    <string name="compute_mem_title">计算/内存测试 Compute / Memory</string>
+    <string name="compute_mem_subtitle">带宽与算力基准 Bandwidth &amp; compute</string>
+    <string name="compute_mem_back">返回 Back</string>
+    <string name="compute_mem_params_title">测试参数 Test Parameters</string>
+    <string name="compute_mem_array">数组 Array</string>
+    <string name="compute_mem_array_value">%1$d M</string>
+    <string name="compute_mem_iterations">迭代 Iters</string>
+    <string name="compute_mem_little_threads">小核 Little</string>
+    <string name="compute_mem_big_threads">大核 Big</string>
+    <string name="compute_mem_efficiency">效率 Eff.</string>
+    <string name="compute_mem_efficiency_value">%1$d%%</string>
+    <string name="compute_mem_efficiency_default">80%</string>
+    <string name="compute_mem_skip">跳过 Skip</string>
+    <string name="compute_mem_all">全部 All</string>
+    <string name="compute_mem_no_core_group">请至少选择一个核心组。
+Select at least one core group.</string>
+    <string name="compute_mem_run">运行测试 Run Test</string>
+    <string name="compute_mem_running">测试中… Running…\n请稍候，约数分钟。Please wait a few minutes.</string>
+    <string name="compute_mem_result_title">测试结果 Results</string>
+    <string name="compute_mem_result_idle">点击「运行测试」开始。\nTap Run Test to start.</string>
+    <string name="compute_mem_bw_caption">带宽 Bandwidth · GB/s</string>
+    <string name="compute_mem_compute_caption">算力 Compute · F32/F16 GFLOP/s · INT8 GOP/s</string>
+    <string name="compute_mem_estimate_title">解码速度估算 Estimated Decode</string>
+    <string name="compute_mem_estimate_disclaimer">⚠ 估算值：由实测只读带宽按可达效率推算的解码速度，非真实推理速度。Estimated attainable decode rate from measured read bandwidth — NOT actual speed.</string>
+    <string name="compute_mem_estimate_idle">运行测试后显示各模型的解码估算速度。\nRun the test to estimate decode rates.</string>
+    <string name="compute_mem_estimate_caption">解码估算 Decode · 可用带宽 usable %1$s GB/s = 只读 read %2$s × %3$d%%</string>
+    <string name="compute_mem_estimate_note">估算 ≈ 只读带宽 × 效率 / (P·每权重字节)；效率含反量化、KV 与激活读写、线程开销，故为可达值而非上限。Q4F32/Q8F32 = 动态量化：低位权重 + FP32 scale/zero 元数据 + FP32 matvec，不是纯 Q4/Q8。</string>
+
+    <!-- Live camera · zero-copy RGB preview -->
+    <string name="camera_title">相机 Camera</string>
+    <string name="camera_window_title">相机 · 零拷贝 RGB Camera · Zero-Copy</string>
+    <string name="camera_capture">拍摄 Capture</string>
+    <string name="camera_close">关闭 Close</string>
+    <string name="camera_status_idle">点按拍照 · 长按录影\nTap photo · Hold video</string>
+    <string name="camera_status_opening">正在连接相机…\nConnecting camera…</string>
+    <string name="camera_status_capturing">拍摄中…\nCapturing…</string>
+    <string name="camera_status_no_frame">暂无画面\nNo frame</string>
+    <string name="camera_retry">重试 Retry</string>
+    <string name="camera_error_unavailable">没有可用相机。\nNo camera is available.</string>
+    <string name="camera_error_open">无法打开相机，请重试。\nCould not open the camera; retry.</string>
+    <string name="camera_error_session">无法启动相机预览，请重试。\nCould not start camera preview; retry.</string>
+    <string name="camera_permission_denied">需要相机权限 Camera permission required</string>
+    <string name="vision_models_load_failed">视觉模型加载失败。\nVision model loading failed.</string>
+    <string name="vision_models_loading">正在加载视觉模型…\nLoading vision models…</string>
+    <string name="decode_config_load_failed">解码策略加载失败。\nDecode strategy loading failed.</string>
+    <!-- Vision (image/video) multimodal -->
+    <string name="camera_status_video_recording">录影中 · 松开发送\nRecording · Release</string>
+    <string name="camera_video_progress">已录 %1$s\nRecorded %1$s</string>
+    <string name="camera_video_progress_full">已满 %1$s\nFull %1$s</string>
+    <string name="camera_video_timeout">视频已满，采用最新片段。\nLimit reached; using latest clip.</string>
+    <string name="empty_input_prompt">请输入问题 Enter Questions</string>
+    <string name="model_load_failed_fallback">模型加载失败。\nModel loading failed.</string>
+    <string name="input_too_long">一次输入太多单词\nInput too many words at once.</string>
+    <string name="history_cleared">已清除 Cleared</string>
+    <string name="vision_image_bubble_desc">已拍摄的图像 Captured image</string>
+    <string name="vision_video_bubble_desc">已录制的视频片段 Recorded video clip</string>
+    <string name="media_preview_failed">媒体预览保存失败，模型输入不受影响。 Preview could not be saved; model input is unaffected.</string>
+
+    <!-- Vision processing monitor (image = elapsed; video = elapsed + RTF over the sampled window) -->
+    <string name="vision_preprocess_time_image">预处理 %1$.2fs\nPreprocessing %1$.2fs</string>
+    <string name="vision_preprocess_time_video">预处理 %1$.2fs · RTF %2$.2f\nPreprocessing %1$.2fs · RTF %2$.2f</string>
+    <string name="vision_time_image">视觉 %1$.2fs\nVision %1$.2fs</string>
+    <string name="vision_time_video">视觉 %1$.2fs · RTF %2$.2f\nVision %1$.2fs · RTF %2$.2f</string>
+
+    <!-- Settings · loaded model identity -->
+    <string name="model_info_pending_labeled">模型 Model · 加载中… Loading…</string>
+    <string name="model_info_summary">模型 Model · %1$s · %2$s</string>
+</resources>
+

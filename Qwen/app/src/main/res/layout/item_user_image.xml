@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- User-side vision thumbnail shown in the chat transcript. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="end"
+    android:paddingStart="56dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
+
+    <TextView
+        android:id="@+id/messageTimeTop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="3dp"
+        android:alpha="0.72"
+        android:includeFontPadding="false"
+        android:textColor="@color/textMuted"
+        android:textSize="11sp" />
+
+    <LinearLayout
+        android:layout_width="180dp"
+        android:layout_height="wrap_content"
+        android:background="@drawable/user_message_background"
+        android:orientation="vertical"
+        android:padding="4dp"
+        android:gravity="end">
+
+        <ImageView
+            android:id="@+id/messageImage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true"
+            android:contentDescription="@string/vision_image_bubble_desc" />
+
+        <TextView
+            android:id="@+id/messageCaption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="1dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="4dp"
+            android:textColor="@color/userText"
+            android:textSize="11sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/messageTimeBottom"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:alpha="0.72"
+        android:includeFontPadding="false"
+        android:textColor="@color/textMuted"
+        android:textSize="11sp" />
+</LinearLayout>

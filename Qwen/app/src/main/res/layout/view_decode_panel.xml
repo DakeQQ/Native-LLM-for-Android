@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/decode_content"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingBottom="0dp"
+    android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:drawablePadding="8dp"
+                android:gravity="center_vertical"
+                android:text="@string/decode_title"
+                android:textColor="@color/textPrimary"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                app:drawableStartCompat="@drawable/ic_tune" />
+
+            <TextView
+                android:id="@+id/model_info_value"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:gravity="end|center_vertical"
+                android:maxLines="1"
+                android:text="@string/model_info_pending_labeled"
+                android:textColor="@color/techCyan"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/decode_strategy_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            app:checkedButton="@id/decode_mode_greedy"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/decode_mode_greedy"
+                style="@style/Widget.App.DecodeModeButton"
+                android:text="@string/decode_mode_greedy" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/decode_mode_beam"
+                style="@style/Widget.App.DecodeModeButton"
+                android:text="@string/decode_mode_beam" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/decode_mode_sampler"
+                style="@style/Widget.App.DecodeModeButton"
+                android:text="@string/decode_mode_sampler" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="0dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:maxLines="3"
+                android:text="@string/organize_memory_summary"
+                android:textColor="@color/textMuted"
+                android:textSize="11sp" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/organize_memory_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:checked="false"
+                android:contentDescription="@string/organize_memory_label"
+                app:thumbTint="@color/switch_thumb_tint"
+                app:trackTint="@color/switch_track_tint" />
+        </LinearLayout>
+
+        <ViewStub
+            android:id="@+id/decode_strategy_controls_stub"
+            android:inflatedId="@+id/decode_strategy_controls"
+            android:layout="@layout/view_decode_strategy_controls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="96dp"
+                android:layout_height="wrap_content"
+                android:text="@string/memory_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/memory_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="32"
+                android:value="2048"
+                android:valueFrom="256"
+                android:valueTo="8160" />
+
+            <TextView
+                android:id="@+id/memory_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/bg_value_pill"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:minWidth="48dp"
+                android:paddingStart="9dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="3dp"
+                android:text="@string/default_memory_tokens"
+                android:textColor="@color/energyYellow"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/prefill_controls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="0dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="96dp"
+                android:layout_height="wrap_content"
+                android:text="@string/prefill_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/prefill_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="32"
+                android:value="256"
+                android:valueFrom="0"
+                android:valueTo="8160" />
+
+            <TextView
+                android:id="@+id/prefill_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/bg_value_pill"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:minWidth="48dp"
+                android:paddingStart="9dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="3dp"
+                android:text="@string/default_prefill_tokens"
+                android:textColor="@color/energyYellow"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="0dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="96dp"
+                android:layout_height="wrap_content"
+                android:text="@string/decode_limit_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/decode_limit_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="1"
+                android:value="4095"
+                android:valueFrom="2"
+                android:valueTo="8192" />
+
+            <TextView
+                android:id="@+id/decode_limit_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/bg_value_pill"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:minWidth="48dp"
+                android:paddingStart="9dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="3dp"
+                android:text="@string/default_decode_tokens"
+                android:textColor="@color/energyYellow"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
