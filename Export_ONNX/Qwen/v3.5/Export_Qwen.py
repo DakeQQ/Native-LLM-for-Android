@@ -126,10 +126,12 @@ MAX_SEQ_LEN                      = 4096                                         
 ORT_LINEAR_ATTENTION_CHUNK_SIZE  = 128                                                    # Internal chunk size hint for com.microsoft::LinearAttention prefill. This is inside one LLM_Main graph, not runtime subgraph fragmentation.
 
 # Image Vision Config
-HEIGHT_FACTOR                    = 25                                                     # Adjust this value to determine the resize shape and vision resolution.
-WIDTH_FACTOR                     = 25                                                     # Adjust this value to determine the resize shape and vision resolution.
+VISION_INPUT_SIDE                = 960                                                    # Image/video raw inputs are square-only.
+IMAGE_SPATIAL_FACTOR             = 25                                                     # Square image grid factor.
+HEIGHT_FACTOR                    = 25                                                     # Image grid height after merge.
+WIDTH_FACTOR                     = 25                                                     # Image grid width after merge.
 IMAGE_RESIZE                     = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]                # 32 = self.patch_size * self.merge_size
-INPUT_IMAGE_SIZE                 = [960, 960]                                             # Input image shape. Should be a multiple of GPU group (e.g., 16) for optimal efficiency.
+INPUT_IMAGE_SIZE                 = [VISION_INPUT_SIDE, VISION_INPUT_SIDE]                 # Static square image input [height, width].
 VISION_BATCH_SIZE                = 1                                                      # Maximum number of images supported in multi-image mode.
 DYNAMIC_IMAGE_SHAPE              = False                                                  # Allow for a dynamic number of image inputs. (Experiment features, may cause errors)
 
@@ -138,10 +140,10 @@ VIDEO_FPS                        = 2.0                                          
 VIDEO_MAX_FRAMES                 = 768                                                    # Max frames before temporal patching.
 VIDEO_MIN_FRAMES                 = 4                                                      # Min frames.
 VIDEO_NUM_FRAMES                 = 8                                                      # Actual frames used. Must be even and divisible by TEMPORAL_PATCH_SIZE.
-VIDEO_HEIGHT_FACTOR              = 20                                                     # Video height factor (grid_h = factor * merge_size).
-VIDEO_WIDTH_FACTOR               = 20                                                     # Video width factor (grid_w = factor * merge_size).
+VIDEO_HEIGHT_FACTOR              = 20                                                     # Video grid height after merge.
+VIDEO_WIDTH_FACTOR               = 20                                                     # Video grid width after merge.
 VIDEO_RESIZE                     = [VIDEO_HEIGHT_FACTOR * 32, VIDEO_WIDTH_FACTOR * 32]    # Target frame spatial size.
-INPUT_VIDEO_SIZE                 = [960, 960]                                             # Input video frame shape (H, W).
+INPUT_VIDEO_SIZE                 = [VISION_INPUT_SIDE, VISION_INPUT_SIDE]                 # Static square video-frame input [height, width].
 DYNAMIC_VIDEO_SHAPE              = False                                                  # Allow dynamic video frame count/spatial.
 
 # KV cache quantization
@@ -4528,6 +4530,7 @@ if DO_EXPORT:
             {
                 "native_llm_metadata_version": 1,
                 "producer":                    "Export_Qwen.py",
+                "chat_supports_thinking":      True,
             },
             MODEL_FILE_NAME_METADATA,
             {

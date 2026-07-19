@@ -1,5 +1,7 @@
 import argparse
+import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import List
@@ -14,7 +16,7 @@ from transformers import AutoTokenizer
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the Qwen3.5-VL merged-ONNX multimodal inference demo.")
+    parser = argparse.ArgumentParser(description="Run a merged-ONNX Qwen multimodal inference demo.")
     parser.add_argument(
         "--model-folder",
         type=Path,
@@ -166,8 +168,90 @@ def load_image_letterbox(path, target_h, target_w):
 def sample_video_frames(video_path, target_fps, num_frames, min_frames, max_frames, frame_size):
     try:
         import cv2
-    except ImportError as exc:
-        raise RuntimeError("Video mode requires opencv-python (cv2). Install with: pip install opencv-python") from exc
+    except ImportError:
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=avg_frame_rate,nb_frames,duration:format=duration",
+                "-of", "json", video_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        probe_data = json.loads(probe.stdout)
+        stream = probe_data.get("streams", [{}])[0]
+        rate_text = stream.get("avg_frame_rate", "0/1")
+        numerator, denominator = (float(value) for value in rate_text.split("/", 1))
+        source_fps = numerator / denominator if denominator else float(target_fps)
+        duration = float(
+            stream.get("duration")
+            or probe_data.get("format", {}).get("duration")
+            or 0.0
+        )
+        frame_count_text = stream.get("nb_frames")
+        total_frames = (
+            int(frame_count_text)
+            if frame_count_text not in (None, "N/A")
+            else int(round(duration * source_fps))
+        )
+        if source_fps <= 0 or total_frames <= 0:
+            raise RuntimeError(f"Unable to probe video timing: {video_path}")
+
+        frame_step = max(source_fps / max(float(target_fps), 1e-6), 1.0)
+        candidate_indices = np.arange(
+            0, total_frames, frame_step, dtype=np.float64
+        ).astype(np.int64)
+        if candidate_indices.size == 0:
+            candidate_indices = np.array([0], dtype=np.int64)
+        if candidate_indices.size < min_frames:
+            candidate_indices = np.linspace(
+                0, total_frames - 1, min_frames, dtype=np.int64
+            )
+        if candidate_indices.size > max_frames:
+            candidate_indices = candidate_indices[:max_frames]
+        if candidate_indices.size >= num_frames:
+            sampled_indices = candidate_indices[
+                np.linspace(0, candidate_indices.size - 1, num_frames, dtype=np.int64)
+            ]
+        else:
+            sampled_indices = np.concatenate(
+                [
+                    candidate_indices,
+                    np.full(
+                        num_frames - candidate_indices.size,
+                        candidate_indices[-1],
+                        dtype=np.int64,
+                    ),
+                ]
+            )
+
+        target_height, target_width = frame_size
+        expected_bytes = target_height * target_width * 3
+        frames = []
+        for frame_index in sampled_indices.tolist():
+            timestamp = frame_index / source_fps
+            decoded = subprocess.run(
+                [
+                    "ffmpeg", "-v", "error", "-ss", f"{timestamp:.9f}",
+                    "-i", video_path, "-frames:v", "1",
+                    "-vf", f"scale={target_width}:{target_height}:flags=bicubic",
+                    "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
+                ],
+                check=True,
+                capture_output=True,
+            ).stdout
+            if len(decoded) != expected_bytes:
+                continue
+            frame = np.frombuffer(decoded, dtype=np.uint8).reshape(
+                target_height, target_width, 3
+            )
+            frames.append(np.transpose(frame, (2, 0, 1)).copy())
+        if not frames:
+            raise RuntimeError(f"Unable to decode any frames from video: {video_path}")
+        while len(frames) < num_frames:
+            frames.append(frames[-1])
+        return np.stack(frames[:num_frames], axis=0), sampled_indices.tolist()
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -455,6 +539,21 @@ def _save_id_input_names(strategy, is_decode, inputs):
     return candidates
 
 
+def _vision_input_map(inputs):
+    """Map standalone Vision output names to their merged-prefill input names."""
+    mapped = {}
+    for input_name in inputs:
+        if input_name.endswith("vision_hidden_states"):
+            mapped["vision_hidden_states"] = input_name
+            continue
+        marker = "in_deepstack_feature_"
+        if marker in input_name:
+            index = input_name.rsplit("_", 1)[-1]
+            if index.isdigit():
+                mapped[f"deepstack_feature_{index}"] = input_name
+    return mapped
+
+
 def plan_merged_io(sess, strategy, state_count, is_decode):
     inputs = [item.name for item in sess.get_inputs()]
     outputs = [item.name for item in sess.get_outputs()]
@@ -502,7 +601,7 @@ def plan_merged_io(sess, strategy, state_count, is_decode):
         "beam_idx_out": beam_idx_out,
         "beam_prob_out": beam_prob_out,
         "beam_prev_prob_in": "beam_previous_prob" if strategy in ("beam", "penalty_beam") and is_decode else None,
-        "vision_hidden_in": next((name for name in inputs if name.endswith("vision_hidden_states")), None),
+        "vision_inputs": _vision_input_map(inputs),
     }
 
 
@@ -592,12 +691,13 @@ def _run_vision(mode, image_pre, video_pre, vision_sess, vision_batch, input_ima
     vision_binding = vision_sess.io_binding()
     for meta, value in zip(vision_sess.get_inputs(), preprocess_outputs):
         vision_binding.bind_ortvalue_input(meta.name, value)
-    _bind_outputs_device(vision_binding, [vision_sess.get_outputs()[0].name])
+    vision_output_names = [item.name for item in vision_sess.get_outputs()]
+    _bind_outputs_device(vision_binding, vision_output_names)
     run_iobinding(vision_sess, vision_binding)
-    return vision_binding.get_outputs()[0]
+    return dict(zip(vision_output_names, vision_binding.get_outputs()))
 
 
-def run_merged_iobinding(mode, query, vision_hidden_states=None):
+def run_merged_iobinding(mode, query, vision_outputs=None):
     strategy = _resolve_strategy()
     prefill_role = _graph_role(mode, "prefill", strategy)
     decode_role = _graph_role(mode, "decode", strategy)
@@ -619,6 +719,11 @@ def run_merged_iobinding(mode, query, vision_hidden_states=None):
     prefill_io_plan = plan_merged_io(prefill_sess, strategy, state_count, is_decode=False)
     decode_io_plan = plan_merged_io(decode_sess, strategy, state_count, is_decode=True)
     decode_input_dtypes = _session_input_dtypes(decode_sess)
+    vision_hidden_states = (
+        vision_outputs.get("vision_hidden_states")
+        if vision_outputs is not None
+        else None
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
     if mode == "video":
@@ -655,10 +760,12 @@ def run_merged_iobinding(mode, query, vision_hidden_states=None):
         bind_prefill_input("prefill_history_len", np.array([0]))
     if "prefill_cache_len" in prefill_io_plan["in_names"]:
         bind_prefill_input("prefill_cache_len", np.array([0]))
-    if prefill_io_plan["vision_hidden_in"] is not None:
-        if vision_hidden_states is None:
-            raise RuntimeError(f"{mode} prefill graph requires vision_hidden_states.")
-        prefill_binding.bind_ortvalue_input(prefill_io_plan["vision_hidden_in"], vision_hidden_states)
+    for output_name, input_name in prefill_io_plan["vision_inputs"].items():
+        if vision_outputs is None or output_name not in vision_outputs:
+            raise RuntimeError(
+                f"{mode} prefill graph requires Vision output {output_name!r}."
+            )
+        prefill_binding.bind_ortvalue_input(input_name, vision_outputs[output_name])
     for name in prefill_io_plan["state_in"]:
         # Prefill always runs a SINGLE hypothesis (batch 1); the beam-first head replicates
         # the resulting KV/linear state to beam_size on output. Binding the past-state inputs
@@ -841,5 +948,5 @@ else:
 
 for input_mode, current_query in test_modes:
     print(f"\n{'=' * 56}\n  Running test: mode={input_mode}, query=\"{current_query}\"\n{'=' * 56}")
-    vision_hidden = _run_vision(input_mode, image_preprocess_sess, video_preprocess_sess, vision_sess, vision_batch_size, input_image_size, input_video_size, video_num_frames)
-    run_merged_iobinding(input_mode, current_query, vision_hidden)
+    vision_outputs = _run_vision(input_mode, image_preprocess_sess, video_preprocess_sess, vision_sess, vision_batch_size, input_image_size, input_video_size, video_num_frames)
+    run_merged_iobinding(input_mode, current_query, vision_outputs)

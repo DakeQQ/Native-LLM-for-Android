@@ -759,6 +759,14 @@ def _drop_initializers(graph, names: set[str]) -> None:
         graph.initializer.extend(keep)
 
 
+def _drop_unused_initializers(graph) -> int:
+    used = {name for node in graph.node for name in node.input if name}
+    used.update(value.name for value in graph.output)
+    unused = {init.name for init in graph.initializer if init.name not in used}
+    _drop_initializers(graph, unused)
+    return len(unused)
+
+
 def _find_embed_gather(graph):
     inits = _init_map(graph)
     candidates = []
@@ -1700,6 +1708,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
             f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
             f"embedding now reuses {info['shared_weight']!r} ({info['lmhead_op']})."
         )
+    _drop_unused_initializers(primary_model.graph)
     load_external_data_for_model(primary_model, str(primary_path.parent))
     external_by_name = Shared_Merged.write_shared_initializers(primary_model, out_folder / shared_model_name)
 
@@ -1729,6 +1738,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
         model = Shared_Merged.transplant_quantized_main(target, clean_primary)
         del target
         unify_embed_lmhead_graph(model, method_kind, block_size=primary_plan.block_size, quiet=True)
+        _drop_unused_initializers(model.graph)
         Shared_Merged.redirect_shared_initializers_to_external(model, external_by_name)
         _persist(file_name, model)
         del model

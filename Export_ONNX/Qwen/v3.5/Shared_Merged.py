@@ -363,9 +363,89 @@ def _hidden_source_for_prefill(source_folder: Path, modality: str, embed: onnx.M
     return merged, f"{concat_prefix}concat_hidden_states"
 
 
+def _deepstack_input_names(main: onnx.ModelProto) -> list[str]:
+    names = [value.name for value in main.graph.input if value.name.startswith("deepstack_features_")]
+    return sorted(names, key=lambda name: int(name.rsplit("_", 1)[1]))
+
+
+def _zero_like_model(source_info: onnx.ValueInfoProto, output_name: str, opset: int) -> onnx.ModelProto:
+    input_info = copy.deepcopy(source_info)
+    input_info.name = f"{output_name}_input"
+    output_info = copy.deepcopy(source_info)
+    output_info.name = output_name
+    element_type = source_info.type.tensor_type.elem_type
+    numpy_dtype = onnx.helper.tensor_dtype_to_np_dtype(element_type)
+    zero_name = f"{output_name}_scalar"
+    zero = numpy_helper.from_array(np.array(0, dtype=numpy_dtype), name=zero_name)
+    node = onnx.helper.make_node(
+        "Mul", [input_info.name, zero_name], [output_name], name=f"{output_name}_node"
+    )
+    graph = onnx.helper.make_graph(
+        [node], f"{output_name}_graph", [input_info], [output_info], [zero]
+    )
+    return onnx.helper.make_model(
+        graph,
+        producer_name="Shared_Merged.py",
+        opset_imports=[onnx.helper.make_opsetid("", opset)],
+    )
+
+
+def _with_zero_deepstack(
+    hidden_model: onnx.ModelProto,
+    hidden_name: str,
+    deepstack_inputs: list[str],
+    phase: str,
+) -> tuple[onnx.ModelProto, list[tuple[str, str]]]:
+    if not deepstack_inputs:
+        return hidden_model, []
+    hidden_info = value_info_by_name(hidden_model).get(hidden_name)
+    if hidden_info is None:
+        raise RuntimeError(f"Cannot build deepstack zeros: missing value_info for {hidden_name!r}.")
+    default_opset = max(
+        (item.version for item in hidden_model.opset_import if item.domain == ""),
+        default=13,
+    )
+    zero_name = f"{phase}_zero_deepstack"
+    zero_model = _zero_like_model(hidden_info, zero_name, default_opset)
+    hidden_model = merge_models_no_check(
+        hidden_model,
+        zero_model,
+        [(hidden_name, f"{zero_name}_input")],
+    )
+    return hidden_model, [(zero_name, input_name) for input_name in deepstack_inputs]
+
+
+def _prefill_deepstack_map(
+    hidden_model: onnx.ModelProto,
+    hidden_name: str,
+    main: onnx.ModelProto,
+    modality: str,
+) -> tuple[onnx.ModelProto, list[tuple[str, str]]]:
+    deepstack_inputs = _deepstack_input_names(main)
+    if not deepstack_inputs:
+        return hidden_model, []
+    if modality == "text":
+        return _with_zero_deepstack(hidden_model, hidden_name, deepstack_inputs, "prefill")
+
+    concat_prefix = "concat_image_" if modality == "image" else "concat_video_"
+    available = set(value_info_by_name(hidden_model))
+    io_map = []
+    for index, input_name in enumerate(deepstack_inputs):
+        output_name = f"{concat_prefix}out_deepstack_feature_{index}"
+        if output_name not in available:
+            raise RuntimeError(
+                f"{modality} concat graph is missing deepstack output {output_name!r}."
+            )
+        io_map.append((output_name, input_name))
+    return hidden_model, io_map
+
+
 def _base_prefill(source_folder: Path, main: onnx.ModelProto, modality: str, model_file_names: dict[str, str] | None, embed: onnx.ModelProto | None = None):
     embed = _with_embed(source_folder, model_file_names, embed)
     hidden_model, hidden_name = _hidden_source_for_prefill(source_folder, modality, embed, model_file_names)
+    hidden_model, deepstack_map = _prefill_deepstack_map(
+        hidden_model, hidden_name, main, modality
+    )
     rotary = _with_rotary(source_folder, modality, "prefill", model_file_names)
     merged = merge_models_no_check(hidden_model, rotary, [])
     merged = merge_models_no_check(
@@ -376,13 +456,19 @@ def _base_prefill(source_folder: Path, main: onnx.ModelProto, modality: str, mod
             ("prefill_rotary_cos", "rotary_cos"),
             ("prefill_rotary_sin", "rotary_sin"),
             ("prefill_attention_mask", "attention_mask"),
-        ],
+        ] + deepstack_map,
     )
     return merged, "prefill_kv_seq_len", [hidden_model, rotary]
 
 
 def _base_decode(source_folder: Path, main: onnx.ModelProto, modality: str, model_file_names: dict[str, str] | None, embed: onnx.ModelProto | None = None):
     embed = _with_embed(source_folder, model_file_names, embed)
+    embed, deepstack_map = _with_zero_deepstack(
+        embed,
+        "embed_text_hidden_states",
+        _deepstack_input_names(main),
+        "decode",
+    )
     rotary = _with_rotary(source_folder, modality, "decode", model_file_names)
     mask_info = next(item for item in main.graph.input if item.name == "attention_mask")
     mask_dtype = onnx.helper.tensor_dtype_to_np_dtype(mask_info.type.tensor_type.elem_type)
@@ -398,7 +484,7 @@ def _base_decode(source_folder: Path, main: onnx.ModelProto, modality: str, mode
             ("decode_rotary_cos", "rotary_cos"),
             ("decode_rotary_sin", "rotary_sin"),
             ("decode_zero_attention_mask", "attention_mask"),
-        ],
+        ] + deepstack_map,
     )
     return merged, "decode_kv_seq_len_next", [embed, rotary]
 
@@ -575,6 +661,63 @@ def _target_main_remap(target: onnx.ModelProto) -> dict[str, str]:
     return remap
 
 
+def _target_deepstack_sources(target: onnx.ModelProto) -> list[str]:
+    names = {value.name for value in target.graph.input}
+    names.update(init.name for init in target.graph.initializer)
+    for node in target.graph.node:
+        names.update(node.output)
+
+    for prefix in (
+        "concat_image_out_deepstack_feature_",
+        "concat_video_out_deepstack_feature_",
+    ):
+        sources = [name for name in names if name.startswith(prefix)]
+        if sources:
+            return sorted(sources, key=lambda name: int(name.rsplit("_", 1)[1]))
+    for zero_name in ("decode_zero_deepstack", "prefill_zero_deepstack"):
+        if zero_name in names:
+            return [zero_name]
+    return []
+
+
+def remap_transplanted_deepstack_inputs(
+    nodes: list[onnx.NodeProto], target: onnx.ModelProto
+) -> int:
+    """Map text-prefill donor zeros to the target shell's deepstack tensors."""
+    donor_prefix = "prefill_zero_deepstack_"
+
+    def is_donor_feature(name: str) -> bool:
+        if name == "prefill_zero_deepstack":
+            return True
+        return name.startswith(donor_prefix) and name[len(donor_prefix):].isdigit()
+
+    locations = []
+    for node in nodes:
+        for input_index, name in enumerate(node.input):
+            if is_donor_feature(name):
+                locations.append((node, input_index))
+    if not locations:
+        return 0
+
+    sources = _target_deepstack_sources(target)
+    if not sources:
+        raise RuntimeError(
+            "Quantized Main uses deepstack inputs, but the target shell provides none."
+        )
+    if len(sources) == 1:
+        for node, input_index in locations:
+            node.input[input_index] = sources[0]
+        return len(locations)
+    if len(locations) != len(sources):
+        raise RuntimeError(
+            "Deepstack transplant mismatch: "
+            f"donor uses={len(locations)}, target sources={len(sources)}."
+        )
+    for (node, input_index), source in zip(locations, sources):
+        node.input[input_index] = source
+    return len(locations)
+
+
 def transplant_quantized_main(target: onnx.ModelProto, quantized_primary: onnx.ModelProto) -> onnx.ModelProto:
     remap = _target_main_remap(target)
     primary_main_nodes = [
@@ -584,6 +727,7 @@ def transplant_quantized_main(target: onnx.ModelProto, quantized_primary: onnx.M
     ]
     if not primary_main_nodes:
         raise RuntimeError("Quantized primary graph has no Main node block to transplant.")
+    remap_transplanted_deepstack_inputs(primary_main_nodes, target)
 
     merged = copy.deepcopy(target)
     new_nodes: list[onnx.NodeProto] = []
