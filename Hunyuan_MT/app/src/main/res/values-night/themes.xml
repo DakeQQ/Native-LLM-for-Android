@@ -1,4 +1,0 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- The energy theme is already dark; night mode reuses the same definition. -->
-    <style name="Theme.MyApplication" parent="Theme.NativeLLM" />
-</resources>
