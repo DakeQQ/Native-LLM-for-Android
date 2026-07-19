@@ -23,7 +23,7 @@ inline std::mutex g_vision_pixels_mutex;
 // Prewarm and Run_LLM share the vision sessions and cached hidden under one mutex. Capture sequence IDs
 // reject stale results; cache misses encode inline.
 inline std::mutex            g_vision_encode_mutex;
-inline OrtValue*             g_pending_vision_hidden  = nullptr;   // cached ViT output (owned; device tensor)
+inline std::vector<OrtValue*> g_pending_vision_outputs;             // cached ViT outputs (owned; device tensors)
 inline uint8_t               g_vision_hidden_modality = VISION_NONE;
 inline uint32_t              g_vision_hidden_seq      = 0;         // capture seq the cached hidden was built for
 inline bool                  g_vision_hidden_ready    = false;

@@ -96,6 +96,22 @@ static void releasePendingVisionHidden();
 static void setRuntimeTerminate(bool terminate);
 
 // Token streaming.
+static thread_local int g_flow_turn_id = -1;
+static thread_local int g_flow_flush_index = 0;
+
+static std::string formatTokenIdsTail(const std::vector<int>& ids, size_t limit) {
+    const size_t start = ids.size() > limit ? ids.size() - limit : 0;
+    std::string result = "[";
+    for (size_t index = start; index < ids.size(); ++index) {
+        if (index != start) {
+            result.push_back(',');
+        }
+        result.append(std::to_string(ids[index]));
+    }
+    result.push_back(']');
+    return result;
+}
+
 inline void append_output_words(std::string& out, int id) {
     static thread_local std::string scratch;
     const std::string& words = tokenizer->decode_id(id, scratch);
@@ -113,16 +129,24 @@ inline void flush_stream(JNIEnv* env) {
     if (stream_buf.empty()) {
         return;
     }
+    const size_t byteCount = stream_buf.size();
+    bool callbackInvoked = false;
+    bool callbackException = false;
     if (g_main_cls != nullptr && g_on_token != nullptr) {
         jstring js = newJStringFromUtf8(env, stream_buf);
         if (js != nullptr) {
+            callbackInvoked = true;
             env->CallStaticVoidMethod(g_main_cls, g_on_token, js);
             env->DeleteLocalRef(js);
             if (env->ExceptionCheck()) {
+                callbackException = true;
                 env->ExceptionClear();
             }
         }
     }
+    LOGI("FLOW stream_flush turn=%d seq=%d bytes=%zu callback=%d exception=%d",
+         g_flow_turn_id, ++g_flow_flush_index, byteCount,
+         callbackInvoked ? 1 : 0, callbackException ? 1 : 0);
     stream_buf.clear();
     tokens_since_flush = 0;
     last_flush_ms = now_ms();
@@ -224,7 +248,6 @@ static bool loadModel(ModelId id, JNIEnv* env, jobject assetManager, int epType,
 static void buildChatTemplates() {
     chat_user_prefix_ids              = { chat_im_start_id, chat_user_id, chat_newline_id };
     chat_assistant_prefix_ids         = { chat_im_end_id, chat_newline_id, chat_im_start_id, chat_assistant_id, chat_newline_id };
-    chat_empty_think_block_ids        = { chat_think_start_id, chat_double_newline_id, chat_think_end_id, chat_double_newline_id };
     // Thinking ON pre-fills only the opening "<think>\n"; the model then generates the reasoning body
     // and closes it with </think> (Qwen3.5 thinking template).
     chat_think_prefix_ids             = { chat_think_start_id, chat_newline_id };
@@ -359,6 +382,8 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     const int meta_dbl_newline = reqInt("chat_double_newline_id");
     const int meta_think_start = reqInt("chat_think_start_id");
     const int meta_think_end   = reqInt("chat_think_end_id");
+        const bool meta_supports_thinking = optInt(
+            "chat_supports_thinking", meta_linear_layers > 0 ? 1 : 0) != 0;
 
     const std::string meta_stop_ids = lookupModelMetadata(api, md, alloc, "stop_token_ids");
 
@@ -439,6 +464,7 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     chat_double_newline_id = meta_dbl_newline;
     chat_think_start_id    = meta_think_start;
     chat_think_end_id      = meta_think_end;
+    g_supports_thinking    = meta_supports_thinking;
     chat_image_token_id    = meta_image_token;
     chat_video_token_id    = meta_video_token;
     chat_vision_start_id   = meta_vision_start;
@@ -471,9 +497,11 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
         stopStart = comma + 1;
     }
     // The exporter/model generation config can name only <|endoftext|>, while the chat template closes
-    // assistant turns with <|im_end|>. Treat configured IDs as additive so either terminator always stops.
+    // assistant turns with <|im_end|>. A generated <|im_start|> begins another role block and must also
+    // terminate before its raw chat-template prefix reaches the transcript.
     appendStopToken(meta_endoftext);
     appendStopToken(meta_im_end);
+    appendStopToken(meta_im_start);
 
     g_spatial_merge_size   = meta_spatial_merge > 0 ? meta_spatial_merge : 2;
     g_patch_size           = meta_patch_size > 0 ? meta_patch_size : 16;
@@ -513,9 +541,10 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
 
     buildChatTemplates();
 
-        LOGI("model metadata applied: layers=%d kv_blocks=%d kv_tensors=%d max_seq_len=%d "
-         "(mem=%d prefill=%d decode=%d)",
+     LOGI("model metadata applied: layers=%d kv_blocks=%d kv_tensors=%d max_seq_len=%d "
+            "thinking=%d (mem=%d prefill=%d decode=%d)",
             num_layers, g_kv_blocks, num_keys_values, max_seq_len,
+            g_supports_thinking ? 1 : 0,
          DEFAULT_MEMORY_TOKENS, DEFAULT_PREFILL_TOKENS, DEFAULT_MAX_DECODE_TOKENS);
     if (g_multimodal) {
         LOGI("model metadata applied: vision input_image_size=%dx%d (HxW), image_token=%d video_token=%d",
@@ -2383,10 +2412,10 @@ inline static bool is_stop_token(int id) {
 
 // The Locked variant requires g_vision_encode_mutex; the wrapper waits out any active prewarm.
 static void releasePendingVisionHiddenLocked() {
-    if (g_pending_vision_hidden != nullptr && mMain.api != nullptr) {
-        mMain.api->ReleaseValue(g_pending_vision_hidden);
+    if (!g_pending_vision_outputs.empty() && mMain.api != nullptr) {
+        releaseValues(mMain.api, g_pending_vision_outputs);
     }
-    g_pending_vision_hidden  = nullptr;
+    g_pending_vision_outputs.clear();
     g_vision_hidden_ready    = false;
     g_vision_hidden_modality = VISION_NONE;
 }
@@ -3157,15 +3186,15 @@ static inline bool visionCancelRequested() {
 // Preprocess(static pixel_values) -> 5 device outs -> Vision -> vision_hidden. This is the expensive,
 // query-INDEPENDENT ViT pass, so it can be pre-computed the moment the user captures (Prewarm_Vision)
 // while they type the query. Assumes the caller holds g_vision_encode_mutex (serializes every user of
-// the vision encoder sessions). Returns the owned vision_hidden or nullptr on failure/cancel.
-static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
+// the vision encoder sessions). Returns all owned deepstack + vision hidden outputs, or empty on failure/cancel.
+static std::vector<OrtValue*> runVisionEncodeOnly(uint8_t visionMode) {
     const OrtApi* api = mMain.api;
     ModelRuntime& pre     = (visionMode == VISION_IMAGE) ? mImagePreprocess : mVideoPreprocess;
     OrtValue* pixelValues = (visionMode == VISION_IMAGE) ? g_image_pixel_values : g_video_pixel_values;
     if (visionCancelRequested() || api == nullptr || pixelValues == nullptr ||
         !sessionReady(pre) || !sessionReady(mVision) ||
         !ensureBinding(pre) || !ensureBinding(mVision)) {
-        return nullptr;
+        return {};
     }
 
     const bool isVideo = visionMode == VISION_VIDEO;
@@ -3186,7 +3215,7 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
              static_cast<long long>(inputCount), static_cast<long long>(inputChannels),
              static_cast<long long>(inputHeight), static_cast<long long>(inputWidth),
              isVideo ? g_video_num_frames : g_vision_batch_size, expectedHeight, expectedWidth);
-        return nullptr;
+           return {};
     }
 
     // 1) Preprocess: the static pre-bound pixel_values -> 5 device outputs. Hold the pixels mutex only
@@ -3198,7 +3227,7 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
         std::lock_guard<std::mutex> lock(g_vision_pixels_mutex);
         resetBinding(pre);
         if (!bindIn(pre, 0, pixelValues)) {
-            return nullptr;
+            return {};
         }
         for (int i = 0; i < preOutN; ++i) {
             bindOutDevice(pre, i);
@@ -3206,13 +3235,13 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
         if (!runBinding(pre) || !fetchOutputsInto(pre, preOut) ||
             preOut.size() < static_cast<size_t>(preOutN)) {
             releaseValues(api, preOut);
-            return nullptr;
+            return {};
         }
     }
     const auto preprocessFinished = std::chrono::steady_clock::now();
     if (visionCancelRequested()) {
         releaseValues(api, preOut);
-        return nullptr;
+        return {};
     }
     const int64_t patchTokens = preOut.empty() ? -1 : tensorDim(api, preOut[0], 0);
 
@@ -3223,7 +3252,9 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
     for (int i = 0; i < visInN && i < static_cast<int>(preOut.size()); ++i) {
         ok = bindIn(mVision, i, preOut[i]) && ok;
     }
-    bindOutDevice(mVision, 0);
+    for (int i = 0; i < static_cast<int>(mVision.outputNames.size()); ++i) {
+        ok = bindOutDevice(mVision, i) && ok;
+    }
     std::vector<OrtValue*> visOut;
     const auto visionStarted = std::chrono::steady_clock::now();
     ok = ok && runBinding(mVision) && fetchOutputsInto(mVision, visOut) && !visOut.empty();
@@ -3231,11 +3262,15 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
     releaseValues(api, preOut);   // consumed by Vision
     if (!ok || visOut.empty() || visOut[0] == nullptr) {
         releaseValues(api, visOut);
-        return nullptr;
+        return {};
     }
-    OrtValue* visionHidden = visOut[0];
-    visOut[0] = nullptr;
-    releaseValues(api, visOut);
+    const int visionHiddenIndex = static_cast<int>(visOut.size()) - 1;
+    if (visOut[static_cast<size_t>(visionHiddenIndex)] == nullptr) {
+        LOGE("Vision encoder output contract has no final vision hidden tensor");
+        releaseValues(api, visOut);
+        return {};
+    }
+    OrtValue* visionHidden = visOut[static_cast<size_t>(visionHiddenIndex)];
         const int64_t hiddenTokens = tensorDim(api, visionHidden, 1);
         const int64_t expectedHiddenTokens = isVideo ? g_video_embed_size : g_image_embed_size;
         const int64_t merge = std::max<int64_t>(1, g_spatial_merge_size);
@@ -3245,8 +3280,8 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
              isVideo ? "video" : "image", pre.fileName.c_str(),
              static_cast<long long>(patchTokens), static_cast<long long>(expectedPatchTokens),
              static_cast<long long>(hiddenTokens), static_cast<long long>(expectedHiddenTokens));
-        releaseOne(api, visionHidden);
-        return nullptr;
+        releaseValues(api, visOut);
+        return {};
         }
         const auto preprocessMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             preprocessFinished - preprocessStarted).count();
@@ -3260,8 +3295,8 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
          static_cast<long long>(patchTokens), static_cast<long long>(hiddenTokens),
          static_cast<long long>(preprocessMs), static_cast<long long>(visionMs));
     if (visionCancelRequested()) {
-        releaseOne(api, visionHidden);
-        return nullptr;
+        releaseValues(api, visOut);
+        return {};
     }
     if (visionMode == VISION_VIDEO && !g_video_fixed_length_input) {
         if (pre.binding != nullptr) {
@@ -3270,25 +3305,28 @@ static OrtValue* runVisionEncodeOnly(uint8_t visionMode) {
         std::lock_guard<std::mutex> lock(g_vision_pixels_mutex);
         releaseDynamicVideoInputLocked();
     }
-    return visionHidden;
+    return visOut;
 }
 
 // Transfer a matching cached hidden to this turn, or encode inline. The mutex serializes every vision
 // session user and ensures stale cached output is released before another encode.
-static OrtValue* getOrEncodeVisionHidden(uint8_t visionMode) {
+static std::vector<OrtValue*> getOrEncodeVisionOutputs(uint8_t visionMode) {
     const uint32_t seq = g_vision_capture_seq.load(std::memory_order_acquire);
     std::lock_guard<std::mutex> lock(g_vision_encode_mutex);
+    LOGI("Vision cache handoff: request=%u seq=%u ready=%d cached_mode=%u cached_seq=%u outputs=%zu",
+         static_cast<unsigned>(visionMode), seq, g_vision_hidden_ready ? 1 : 0,
+         static_cast<unsigned>(g_vision_hidden_modality), g_vision_hidden_seq,
+         g_pending_vision_outputs.size());
     if (g_vision_hidden_ready && g_vision_hidden_modality == visionMode &&
-        g_vision_hidden_seq == seq && g_pending_vision_hidden != nullptr) {
-        OrtValue* hidden = g_pending_vision_hidden;   // hand cache ownership to the caller
-        g_pending_vision_hidden  = nullptr;
+        g_vision_hidden_seq == seq && !g_pending_vision_outputs.empty()) {
+        std::vector<OrtValue*> outputs = std::move(g_pending_vision_outputs);
         g_vision_hidden_ready    = false;
         g_vision_hidden_modality = VISION_NONE;
         if (visionMode == VISION_VIDEO && !g_video_fixed_length_input) {
             std::lock_guard<std::mutex> pixelLock(g_vision_pixels_mutex);
             releaseDynamicVideoInputLocked();
         }
-        return hidden;
+        return outputs;
     }
     releasePendingVisionHiddenLocked();   // drop any stale pre-encode, then compute fresh inline
     return runVisionEncodeOnly(visionMode);
@@ -3317,17 +3355,17 @@ Java_com_example_myapplication_MainActivity_Prewarm_1Vision(JNIEnv* env, jclass 
         return JNI_FALSE;
     }
     if (g_vision_hidden_ready && g_vision_hidden_modality == mode && g_vision_hidden_seq == seq &&
-        g_pending_vision_hidden != nullptr) {
+        !g_pending_vision_outputs.empty()) {
         return JNI_TRUE;   // already pre-encoded for exactly this capture
     }
     releasePendingVisionHiddenLocked();   // drop any stale encode from an earlier capture
-    OrtValue* hidden = runVisionEncodeOnly(mode);
-    if (hidden != nullptr) {
+    std::vector<OrtValue*> outputs = runVisionEncodeOnly(mode);
+    if (!outputs.empty()) {
         if (visionCancelRequested()) {
-            mMain.api->ReleaseValue(hidden);
+            releaseValues(mMain.api, outputs);
             return JNI_FALSE;
         }
-        g_pending_vision_hidden  = hidden;
+        g_pending_vision_outputs = std::move(outputs);
         g_vision_hidden_modality = mode;
         g_vision_hidden_seq      = seq;
         g_vision_hidden_ready    = true;
@@ -3719,6 +3757,13 @@ Java_com_example_myapplication_MainActivity_Supports_1Prefill_1Lookback(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_com_example_myapplication_MainActivity_Supports_1Thinking(JNIEnv* env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    return g_supports_thinking ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Configure_1Memory_1Thresholds(JNIEnv* env, jclass clazz,
                                                                           jint red_percent,
                                                                           jint green_percent) {
@@ -3854,10 +3899,12 @@ static jstring makeRunResult(JNIEnv* env, const char* category, const char* code
 }
 
 static jstring runError(JNIEnv* env, const char* code) {
+    LOGE("FLOW native_error turn=%d code=%s", g_flow_turn_id, code);
     return makeRunResult(env, "LLM_ERROR", code);
 }
 
 static jstring runCancelled(JNIEnv* env) {
+    LOGI("FLOW native_cancelled turn=%d", g_flow_turn_id);
     return makeRunResult(env, "LLM_STATUS", "CANCELLED");
 }
 
@@ -3865,7 +3912,12 @@ static jstring runCancelled(JNIEnv* env) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz*/, jstring jquery,
                                                      jboolean clear, jboolean use_think, jint turn_id) {
+    g_flow_turn_id = static_cast<int>(turn_id);
+    g_flow_flush_index = 0;
+    const bool requestedThink = use_think == JNI_TRUE;
+    const bool effectiveThink = requestedThink && g_supports_thinking;
     if (g_busy.exchange(true, std::memory_order_acq_rel)) {
+        LOGE("FLOW native_busy turn=%d", static_cast<int>(turn_id));
         return runError(env, "BUSY");
     }
     struct BusyGuard { ~BusyGuard() { g_busy.store(false, std::memory_order_release); } } busy_guard;
@@ -3875,6 +3927,11 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     const bool pendingPrestartManualStop = g_pending_prestart_manual_stop.exchange(false, std::memory_order_acq_rel);
     g_cancel.store(false, std::memory_order_relaxed);
     g_manual_stop.store(false, std::memory_order_relaxed);
+    LOGI("FLOW native_start turn=%d clear=%d think_requested=%d think_effective=%d "
+         "thinking_supported=%d prestart_cancel=%d prestart_manual=%d",
+         static_cast<int>(turn_id), clear == JNI_TRUE ? 1 : 0, requestedThink ? 1 : 0,
+         effectiveThink ? 1 : 0, g_supports_thinking ? 1 : 0,
+         pendingPrestartCancel ? 1 : 0, pendingPrestartManualStop ? 1 : 0);
     if (pendingPrestartCancel) {
         if (pendingPrestartManualStop) {
             LOGI("Run_LLM: consumed manual pre-start stop before native decode began");
@@ -3914,7 +3971,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
     if (clear == JNI_TRUE || isVisionTurn) {
         // The pending modality was already consumed above. Keep its matching speculative ViT output
-        // across this mandatory fresh-context reset so getOrEncodeVisionHidden can take ownership.
+        // across this mandatory fresh-context reset so getOrEncodeVisionOutputs can take ownership.
         clear_history(isVisionTurn ? "vision_turn_fresh_context" : "java_clear_flag", isVisionTurn);
     }
     const MemoryProfile memory = snapshotMemoryProfile();
@@ -3966,9 +4023,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     // for vision, user and system prefixes.
     const std::vector<int> visionContent = isVisionTurn
             ? buildVisionContentIds(visionMode) : std::vector<int>{};
-    const size_t thinkSuffixLen = use_think != JNI_TRUE
-            ? chat_empty_think_block_ids.size()
-            : chat_think_prefix_ids.size();
+        const size_t thinkSuffixLen = effectiveThink ? chat_think_prefix_ids.size() : 0;
     const size_t commonPromptSize = (injectSystem ? activeSystemBlock.size() : 0) +
             chat_user_prefix_ids.size() + queryIds.size() + chat_assistant_prefix_ids.size() +
             thinkSuffixLen;
@@ -3981,9 +4036,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     get_ids.insert(get_ids.end(), visionContent.begin(), visionContent.end());
     get_ids.insert(get_ids.end(), queryIds.begin(), queryIds.end());
     get_ids.insert(get_ids.end(), chat_assistant_prefix_ids.begin(), chat_assistant_prefix_ids.end());
-    if (use_think != JNI_TRUE) {
-        get_ids.insert(get_ids.end(), chat_empty_think_block_ids.begin(), chat_empty_think_block_ids.end());
-    } else {
+    if (effectiveThink) {
         get_ids.insert(get_ids.end(), chat_think_prefix_ids.begin(), chat_think_prefix_ids.end());
     }
 
@@ -4012,11 +4065,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         visionHistoryPromptIds.insert(visionHistoryPromptIds.end(), queryIds.begin(), queryIds.end());
         visionHistoryPromptIds.insert(visionHistoryPromptIds.end(),
                                       chat_assistant_prefix_ids.begin(), chat_assistant_prefix_ids.end());
-        if (use_think != JNI_TRUE) {
-            visionHistoryPromptIds.insert(visionHistoryPromptIds.end(),
-                                          chat_empty_think_block_ids.begin(),
-                                          chat_empty_think_block_ids.end());
-        } else {
+        if (effectiveThink) {
             visionHistoryPromptIds.insert(visionHistoryPromptIds.end(),
                                           chat_think_prefix_ids.begin(),
                                           chat_think_prefix_ids.end());
@@ -4128,6 +4177,14 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         get_ids.swap(promptWithHistoryClose);
     }
     ids_len = static_cast<int64_t>(get_ids.size());
+            LOGI("FLOW prompt turn=%d modality=%u query_ids=%zu prompt_ids=%lld tail=%s stops=%s "
+                "saved_kv=%lld saved_vision=%d beam=%d sampling=%d repeat_penalty=%.3f clear=%d",
+            static_cast<int>(turn_id), static_cast<unsigned>(visionMode), queryIds.size(),
+            static_cast<long long>(ids_len), formatTokenIdsTail(get_ids, 24).c_str(),
+            formatTokenIdsTail(g_stop_token_ids, g_stop_token_ids.size()).c_str(),
+            static_cast<long long>(saved_kv_len), saved_kv_has_vision ? 1 : 0,
+                strat.beam ? 1 : 0, strat.sampling ? 1 : 0, strat.repeatPenalty,
+                clear == JNI_TRUE ? 1 : 0);
     // Snapshot the turn-start restore point: history_pos is the mRoPE position fed to this turn's prefill
     // (diverges from saved_kv_len when the retained window holds a vision segment), and saved_kv_has_vision
     // records whether that window carries un-rebuildable vision KV so a later rollback can preserve it.
@@ -4201,26 +4258,41 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         const int pIdsLenIn = findInputIdx(pg, "prefill_ids_len");
         const int pHistoryLenIn = findInputIdx(pg, "prefill_history_len");
         const int pCacheLenIn = findInputIdx(pg, "prefill_cache_len");
-        const int pVisionIn = isVisionTurn
-            ? findInputIdx(pg, visionMode == VISION_IMAGE
-                ? "concat_image_vision_hidden_states"
-                : "concat_video_vision_hidden_states")
-            : -1;
+        std::vector<int> pVisionInputs;
+        int pVisionHiddenOutput = -1;
+        bool visionInputContractValid = !isVisionTurn;
+        if (isVisionTurn) {
+            const char* concatPrefix = visionMode == VISION_IMAGE
+                    ? "concat_image_" : "concat_video_";
+            pVisionInputs.assign(mVision.outputNames.size(), -1);
+            visionInputContractValid = !pVisionInputs.empty() &&
+                    mVision.outputTypes.size() == pVisionInputs.size();
+            pVisionHiddenOutput = static_cast<int>(pVisionInputs.size()) - 1;
+            for (size_t i = 0; i < pVisionInputs.size(); ++i) {
+                const std::string inputName = static_cast<int>(i) == pVisionHiddenOutput
+                        ? std::string(concatPrefix) + "vision_hidden_states"
+                        : std::string(concatPrefix) + "in_deepstack_feature_" + std::to_string(i);
+                const int inputIndex = findInputIdx(pg, inputName.c_str());
+                pVisionInputs[i] = inputIndex;
+                visionInputContractValid = inputIndex >= num_main_states &&
+                        pg.inputTypes[inputIndex] == mVision.outputTypes[i] &&
+                        visionInputContractValid;
+            }
+            visionInputContractValid = pVisionHiddenOutput >= 0 && visionInputContractValid;
+        }
         if (pTokenIn < num_main_states || dTokenIn < num_main_states || dKvSeqIn < num_main_states ||
             pIdsLenIn < num_main_states || pHistoryLenIn < num_main_states ||
             (!isVisionTurn && pCacheLenIn < num_main_states) ||
-            (isVisionTurn && pVisionIn < num_main_states) ||
+            !visionInputContractValid ||
             !isIntegerTensorType(pg.inputTypes[pTokenIn]) ||
             !isIntegerTensorType(dg.inputTypes[dTokenIn]) ||
             !isIntegerTensorType(dg.inputTypes[dKvSeqIn]) ||
             !isIntegerTensorType(pg.inputTypes[pIdsLenIn]) ||
             !isIntegerTensorType(pg.inputTypes[pHistoryLenIn]) ||
-            (pCacheLenIn >= 0 && !isIntegerTensorType(pg.inputTypes[pCacheLenIn])) ||
-            (pVisionIn >= 0 &&
-             (mVision.outputTypes.empty() || pg.inputTypes[pVisionIn] != mVision.outputTypes[0]))) {
+            (pCacheLenIn >= 0 && !isIntegerTensorType(pg.inputTypes[pCacheLenIn]))) {
             LOGE("Run_LLM(merged): invalid phase input contract (prefill=%s token=%d ids=%d history=%d "
-             "cache=%d vision=%d; decode=%s token=%d kv=%d)", pg.fileName.c_str(), pTokenIn,
-             pIdsLenIn, pHistoryLenIn, pCacheLenIn, pVisionIn,
+             "cache=%d vision_outputs=%zu; decode=%s token=%d kv=%d)", pg.fileName.c_str(), pTokenIn,
+             pIdsLenIn, pHistoryLenIn, pCacheLenIn, pVisionInputs.size(),
              dg.fileName.c_str(), dTokenIn, dKvSeqIn);
             return runError(env, "MODEL_CONTRACT");
         }
@@ -4362,16 +4434,20 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         };
 
         // ---- vision encode (image/video): raw ViT hidden; the merged prefill graph does the concat ----
+        std::vector<OrtValue*> visionOutputs;
         OrtValue* visionHidden = nullptr;
         int64_t   visionGrowth = 0;
         if (isVisionTurn) {
-            visionHidden = getOrEncodeVisionHidden(visionMode);
-            if (visionHidden == nullptr) {
-                LOGE("Run_LLM(merged): vision encode failed; aborting vision turn");
+            visionOutputs = getOrEncodeVisionOutputs(visionMode);
+            if (visionOutputs.size() != pVisionInputs.size()) {
+                LOGE("Run_LLM(merged): vision output count mismatch (actual=%zu expected=%zu); "
+                     "aborting vision turn", visionOutputs.size(), pVisionInputs.size());
+                releaseValues(mApi, visionOutputs);
                 return visionCancelRequested()
                         ? runCancelled(env)
                         : runError(env, "VISION_ENCODE");
             }
+            visionHidden = visionOutputs[static_cast<size_t>(pVisionHiddenOutput)];
             if (visionMode == VISION_IMAGE) {
                 visionGrowth = std::max<int64_t>(0, tensorDim(mApi, visionHidden, 1));   // image concat grows seq
             }
@@ -4510,7 +4586,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             releaseBuffer(mApi, emptySaveIdBuf);
         };
         if (!inputBuffersOk) {
-            releaseOne(mApi, visionHidden);
+            releaseValues(mApi, visionOutputs);
             releaseInputBuffers();
             return runError(env, "ALLOCATION");
         }
@@ -4521,7 +4597,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             if (!runKVSplit2(savedInputs, splitAt, prefillPrefixKV, prefillWindowKV)) {
                 LOGE("Run_LLM(merged): prefill KV split failed (history=%lld cache=%lld)",
                      static_cast<long long>(saved_kv_len), static_cast<long long>(prefillCacheLen));
-                releaseOne(mApi, visionHidden);
+                releaseValues(mApi, visionOutputs);
                 releasePrefillSlices();
                 releaseInputBuffers();
                 clearAllModelBindingRefs();
@@ -4551,21 +4627,27 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         if (pCacheLenIn >= 0) {
             prefillBound = bindIn(pg, pCacheLenIn, cacheLenBuf.value) && prefillBound;
         }
-        if (visionHidden != nullptr) {
-            prefillBound = bindIn(pg, pVisionIn, visionHidden) && prefillBound;
+        for (size_t i = 0; i < visionOutputs.size(); ++i) {
+            prefillBound = bindIn(pg, pVisionInputs[i], visionOutputs[i]) && prefillBound;
         }
         prefillBound = bindStrategyInputs(pg, emptySaveIdBuf.value) && prefillBound;
         for (int i = 0; i < static_cast<int>(pg.outputNames.size()); ++i) {
             prefillBound = bindOutDevice(pg, i) && prefillBound;
         }
 
+        LOGI("FLOW prefill_begin turn=%d graph=%s ids=%lld expanded=%lld history=%lld cache=%lld "
+             "vision_outputs=%zu bound=%d cancel=%d",
+             static_cast<int>(turn_id), pg.fileName.c_str(), static_cast<long long>(ids_len),
+             static_cast<long long>(prefillTokenCount), static_cast<long long>(history_pos),
+             static_cast<long long>(reusedHistory ? prefillCacheLen : 0), visionOutputs.size(),
+             prefillBound ? 1 : 0, g_cancel.load(std::memory_order_acquire) ? 1 : 0);
         const auto prefill_start_clock = std::chrono::steady_clock::now();
         const int64_t prefill_start_ms = now_ms();
         std::vector<OrtValue*> prefillOut;
         if (!prefillBound || !runBinding(pg) || !fetchOutputsInto(pg, prefillOut) ||
             prefillOut.size() < static_cast<size_t>(num_main_states)) {
             releaseValues(mApi, prefillOut);
-            releaseOne(mApi, visionHidden);
+            releaseValues(mApi, visionOutputs);
             releasePrefillSlices();
             releaseInputBuffers();
             clearAllModelBindingRefs();
@@ -4573,7 +4655,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                     ? runCancelled(env)
                     : runError(env, "PREFILL_RUN");
         }
-        releaseOne(mApi, visionHidden);   // consumed by the merged prefill (concat happened inside)
+        releaseValues(mApi, visionOutputs);   // consumed by the merged prefill (concat happened inside)
         const float prefill_s = std::chrono::duration<float>(
                 std::chrono::steady_clock::now() - prefill_start_clock).count();
         const float prefill_rate = (prefill_s > 0.0f)
@@ -4720,7 +4802,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         int generated = 0, numDecode = 0;
         // Thinking ON pre-fills "<think>\n" into the prompt (never decoded), so start already inside the
         // think block: the reasoning body is excluded from the retained answer, exactly as a generated <think>.
-        int replyThinkDepth = (use_think == JNI_TRUE) ? 1 : 0;
+        int replyThinkDepth = effectiveThink ? 1 : 0;
         bool kvStateValid = true;
         bool pendingTokenInState = false;  // selected/streamed, but not yet consumed by a decode graph
         int64_t absNext = initialKvSeq;
@@ -4732,6 +4814,14 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         const bool canRecycleDecode = !isBeam && !hasLinearState() && !isVisionTurn &&
             mKVSlice.session != nullptr && mRopeShift.session != nullptr;
         if (!canRecycleDecode) { decodeBudget = std::min(decodeBudget, rotaryRoom); }
+        LOGI("FLOW prefill_end turn=%d token=%d stop=%d kv_seq=%lld prefill_ms=%lld "
+             "decode_budget=%d rotary_room=%d cancel=%d output=%s",
+             static_cast<int>(turn_id), selectedToken, is_stop_token(selectedToken) ? 1 : 0,
+             static_cast<long long>(initialKvSeq),
+             static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                 std::chrono::steady_clock::now() - prefill_start_clock).count()),
+             decodeBudget, rotaryRoom, g_cancel.load(std::memory_order_acquire) ? 1 : 0,
+             pMaxIdx >= 0 ? pg.outputNames[pMaxIdx] : "<missing>");
         if (rebuildCleanStateFromIds) {
             replyVec.reserve(static_cast<size_t>(std::max(0, decodeBudget)));
         }
@@ -4747,7 +4837,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         reset_output_words_decoder();
         stream_buf.clear();
-        if (use_think == JNI_TRUE) {
+        if (effectiveThink) {
             // The <think> token lives in the pre-filled prompt, so the model never streams it. Emit the open
             // sentinel here so the UI opens the reasoning panel; the model still closes it with </think>.
             stream_buf.append(kThinkOpenSentinel);
@@ -4798,6 +4888,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             LOGE("Run_LLM(merged): could not initialize decode ping-pong bindings");
             kvStateValid = false;
         }
+        LOGI("FLOW decode_begin turn=%d first_token=%d stop=%d budget=%d bindings=%d cancel=%d",
+             static_cast<int>(turn_id), selectedToken, is_stop_token(selectedToken) ? 1 : 0,
+             decodeBudget, decodeBindingsReady ? 1 : 0,
+             g_cancel.load(std::memory_order_acquire) ? 1 : 0);
 
         // ---- decode loop: dual bindings retain static outputs/scalars and peer fixed-shape inputs ----
         while (numDecode < decodeBudget && selectedToken >= 0 && !is_stop_token(selectedToken) &&
@@ -4916,6 +5010,20 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                 }
             }
         }
+
+            const char* decodeExitReason = numDecode >= decodeBudget ? "budget"
+                : selectedToken < 0 ? "invalid_token"
+                : is_stop_token(selectedToken) ? "stop"
+                : g_cancel.load(std::memory_order_acquire) ? "cancel"
+                : !kvStateValid ? "state_invalid"
+                : "other";
+            LOGI("FLOW decode_end turn=%d reason=%s generated=%d steps=%d token=%d stop=%d "
+                 "cancel=%d manual=%d state_valid=%d pending_stream_bytes=%zu",
+                 static_cast<int>(turn_id), decodeExitReason, generated, numDecode, selectedToken,
+                 is_stop_token(selectedToken) ? 1 : 0,
+                 g_cancel.load(std::memory_order_acquire) ? 1 : 0,
+                 g_manual_stop.load(std::memory_order_acquire) ? 1 : 0,
+                 kvStateValid ? 1 : 0, stream_buf.size());
 
         // ---- beam finalize: buffer + record row 0; the shared final flush emits one complete reply ----
         if (isBeam && saveId != nullptr) {
@@ -5078,6 +5186,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                   prefill_rate, decode_rate, finalRemaining, memoryCapacity);
         pushPerfStats(env, prefill_rate, decode_rate, finalRemaining, memoryCapacity,
                   static_cast<int>(prefillTokenCount), generated, true);
+           LOGI("FLOW native_complete turn=%d generated=%d prefill_rate=%.2f decode_rate=%.2f "
+               "remaining=%d state_valid=%d",
+               static_cast<int>(turn_id), generated, prefill_rate, decode_rate,
+               finalRemaining, kvStateValid ? 1 : 0);
 
         auto cleanupMerged = [&]() {
             releaseValues(mApi, stateVec);
@@ -5140,7 +5252,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_myapplication_MainActivity_Stop_1LLM(JNIEnv* /*env*/, jclass /*clazz*/, jboolean manual) {
     const bool isManual = manual == JNI_TRUE;
-    if (!g_busy.load(std::memory_order_acquire)) {
+    const bool busy = g_busy.load(std::memory_order_acquire);
+    LOGI("FLOW stop_request turn=%d manual=%d busy=%d", g_flow_turn_id,
+         isManual ? 1 : 0, busy ? 1 : 0);
+    if (!busy) {
         // Publish the manual-stop classification before the cancel flag (release) so a pre-start consumer
         // that observes the cancel exchange also observes the matching manual-stop value.
         g_pending_prestart_manual_stop.store(isManual, std::memory_order_release);

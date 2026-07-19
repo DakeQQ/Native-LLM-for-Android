@@ -196,6 +196,7 @@ inline int   penaltyRange  = DEFAULT_PENALTY_RANGE;
 inline float temperature   = DEFAULT_TEMPERATURE;
 inline float topP          = DEFAULT_TOP_P;
 inline bool  g_organize_memory = DEFAULT_ORGANIZE_MEMORY;
+inline bool  g_supports_thinking = false;
 
 // Tokenization and prompt state.
 inline Tokenizer* tokenizer = nullptr;

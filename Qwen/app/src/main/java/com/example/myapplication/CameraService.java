@@ -81,8 +81,7 @@ public class CameraService implements GLSurfaceView.Renderer {
     // Fallback capture size (matches DEFAULT_INPUT_IMAGE_SIZE in native) used for text-only models or
     // before a model's metadata has been applied.
     private static final int DEFAULT_CAM_SIZE = 960;
-    // Camera producer geometry. When video is available, use its widescreen geometry as the shared
-    // source; GLRender letterboxes that source into the square image target without stretching it.
+    // Camera producer geometry selected nearest to the model metadata dimensions.
     private final int camW;
     private final int camH;
     private final String cameraId;
@@ -122,6 +121,7 @@ public class CameraService implements GLSurfaceView.Renderer {
     private boolean glResumed;
     private volatile boolean cameraOpenRequested;
     private final AtomicInteger cameraGeneration = new AtomicInteger();
+    private final AtomicInteger previewSessionGeneration = new AtomicInteger();
     private final AtomicInteger glSurfaceGeneration = new AtomicInteger();
 
     // Offscreen capture path uses the model geometry so the chat snapshot and inference frame match
@@ -130,10 +130,6 @@ public class CameraService implements GLSurfaceView.Renderer {
     private final int computeBufH;
     private final int videoComputeBufW;
     private final int videoComputeBufH;
-    // Visible floating preview: bind to the model input geometry (typically 960x960) so the window and
-    // captured frame use the same aspect. Sensor orientation + lens facing still drive upright rotation.
-    private final int previewBufW;
-    private final int previewBufH;
     private final int sensorOrientation;
     private final boolean lensFacingFront;
 
@@ -191,18 +187,17 @@ public class CameraService implements GLSurfaceView.Renderer {
         } catch (Throwable ignored) {
         }
         this.videoFrameCapacity = Math.max(0, frameCapacity);
-        int desiredProducerW = this.videoFrameCapacity > 0 ? resolvedVideoW : resolvedW;
-        int desiredProducerH = this.videoFrameCapacity > 0 ? resolvedVideoH : resolvedH;
         CameraSelection selection = preparedCameraSelection(
-            context, desiredProducerW, desiredProducerH);
+            context, resolvedW, resolvedH);
         this.cameraId = selection.cameraId;
         this.camW = selection.outputSize.getWidth();
         this.camH = selection.outputSize.getHeight();
-        this.previewBufW = this.camW;
-        this.previewBufH = this.camH;
         this.targetFpsRange = selection.fpsRange;
         this.sensorOrientation = ((selection.sensorOrientation % 360) + 360) % 360;
         this.lensFacingFront = selection.lensFacingFront;
+        Log.i(TAG, "Model camera geometry: image=" + computeBufW + "x" + computeBufH +
+            " video=" + videoComputeBufW + "x" + videoComputeBufH +
+            " camera=" + camW + "x" + camH + " sensor=" + sensorOrientation);
         boolean fixedLength = true;
         try {
             fixedLength = nativeIsVideoFixedLength();
@@ -232,21 +227,12 @@ public class CameraService implements GLSurfaceView.Renderer {
             if (imageSize[0] > 0) imageWidth = imageSize[0];
             if (imageSize[1] > 0) imageHeight = imageSize[1];
         }
-        int producerWidth = imageWidth;
-        int producerHeight = imageHeight;
-        if (nativeGetVideoNumFrames() > 0) {
-            int[] videoSize = nativeGetInputVideoSize();
-            if (videoSize != null && videoSize.length == 2) {
-                if (videoSize[0] > 0) producerWidth = videoSize[0];
-                if (videoSize[1] > 0) producerHeight = videoSize[1];
-            }
-        }
         CameraSelection selection = selectCamera(
-                context.getApplicationContext(), producerWidth, producerHeight);
+                context.getApplicationContext(), imageWidth, imageHeight);
         synchronized (CAMERA_SELECTION_LOCK) {
             cachedCameraSelection = selection;
-            cachedSelectionWidth = producerWidth;
-            cachedSelectionHeight = producerHeight;
+            cachedSelectionWidth = imageWidth;
+            cachedSelectionHeight = imageHeight;
         }
     }
 
@@ -531,22 +517,22 @@ public class CameraService implements GLSurfaceView.Renderer {
 
     /** Preview buffer width used by the floating TextureView aspect transform. */
     public int getPreviewBufferWidth() {
-        return previewBufW;
+        return camW;
     }
 
     /** Preview buffer height used by the floating TextureView aspect transform. */
     public int getPreviewBufferHeight() {
-        return previewBufH;
+        return camH;
     }
 
     /** Degrees to rotate the preview buffer so it appears upright for the given display rotation. */
     public int getPreviewContentRotation(int displayRotationDegrees) {
-        // Empirically this device family needs an extra 90 deg CCW vs the textbook formula (the landscape
-        // preview buffer + TextureView transform pipeline), so subtract 90.
-        if (lensFacingFront) {
-            return (sensorOrientation + displayRotationDegrees + 90) % 360;
-        }
-        return (sensorOrientation - displayRotationDegrees - 90 + 360) % 360;
+        // Camera2 buffers are in sensor coordinates. Rotate them into the current display orientation;
+        // front-facing sensors use the mirrored sign convention from the Android camera2 contract.
+        int relativeRotation = lensFacingFront
+                ? (sensorOrientation + displayRotationDegrees) % 360
+                : (sensorOrientation - displayRotationDegrees + 360) % 360;
+        return (relativeRotation + 270) % 360;
     }
 
     /** Exported model input size {width, height} (input_image_size); {0,0} for a text-only model. */
@@ -605,8 +591,8 @@ public class CameraService implements GLSurfaceView.Renderer {
         int textureId = nativeGetCameraTextureId();
         if (textureId > 0) {
             surfaceTexture = new SurfaceTexture(textureId);
-            // The producer stays at the video geometry when video is available. GLRender derives a
-            // per-request fit for the square image output or the widescreen video output.
+            // Camera2 uses the selected model-nearest producer size; each capture request uses the
+            // exact image/video dimensions reported by the loaded model metadata.
             surfaceTexture.setDefaultBufferSize(camW, camH);
             surfaceTexture.setOnFrameAvailableListener(st -> glView.requestRender());
             requestOpenCamera();
@@ -704,6 +690,7 @@ public class CameraService implements GLSurfaceView.Renderer {
         Handler sessionHandler = handler;
         try {
             closeCaptureSession();
+            final int sessionGeneration = previewSessionGeneration.incrementAndGet();
             releaseCameraInputSurface();
             cameraInputSurface = new Surface(surfaceTexture);
             CaptureRequest.Builder builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -725,10 +712,8 @@ public class CameraService implements GLSurfaceView.Renderer {
                     command -> sessionHandler.post(command),
                     new CameraCaptureSession.StateCallback() {
                         @Override public void onConfigured(@NonNull CameraCaptureSession session) {
-                            // The session can finish configuring after the user already closed the
-                            // camera (device/thread torn down). Bail out and swallow the state-machine
-                            // exceptions that would otherwise crash this background thread.
                             if (!cameraOpenRequested || generation != cameraGeneration.get() ||
+                                    sessionGeneration != previewSessionGeneration.get() ||
                                     cameraDevice != device || bgHandler == null) {
                                 session.close();
                                 return;
@@ -739,13 +724,18 @@ public class CameraService implements GLSurfaceView.Renderer {
                                 reportCameraReady();
                             } catch (CameraAccessException | IllegalStateException e) {
                                 Log.e(TAG, "setRepeatingRequest failed", e);
-                                reportCameraError(R.string.camera_error_session);
+                                if (sessionGeneration == previewSessionGeneration.get()) {
+                                    reportCameraError(R.string.camera_error_session);
+                                }
                             }
                         }
                         @Override public void onConfigureFailed(@NonNull CameraCaptureSession session) {
                             session.close();
-                            Log.e(TAG, "camera session configure failed");
-                            reportCameraError(R.string.camera_error_session);
+                            if (cameraOpenRequested && generation == cameraGeneration.get() &&
+                                    sessionGeneration == previewSessionGeneration.get()) {
+                                Log.e(TAG, "camera session configure failed");
+                                reportCameraError(R.string.camera_error_session);
+                            }
                         }
                     });
             device.createCaptureSession(sessionConfig);
@@ -781,6 +771,7 @@ public class CameraService implements GLSurfaceView.Renderer {
     }
 
     private void closeCaptureSession() {
+        previewSessionGeneration.incrementAndGet();
         if (captureSession != null) {
             captureSession.close();
             captureSession = null;

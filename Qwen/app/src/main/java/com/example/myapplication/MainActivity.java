@@ -91,6 +91,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class MainActivity extends AppCompatActivity {
+    private static final String FLOW_TAG = "QwenFlow";
     public static final int font_size = 18;
     private ToggleButton thinkButton;
     private Button sendButton;
@@ -642,6 +643,10 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         modelReadyUiInitialized = true;
+        boolean thinkingSupported = Supports_Thinking();
+        thinkButton.setChecked(false);
+        thinkButton.setEnabled(thinkingSupported);
+        thinkButton.setAlpha(thinkingSupported ? 1.0f : 0.45f);
         applySavedSystemPrompt();
         refreshMemoryControlsFromNative();
         Start_Chat();
@@ -1085,9 +1090,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (text == null || text.isEmpty()) {
+            Log.w(FLOW_TAG, "token_empty generation=" + generationId);
             return;
         }
         boolean scheduleFrame = false;
+        int pendingChars;
         synchronized (STREAM_UI_LOCK) {
             if (pendingStreamGenerationId != generationId) {
                 pendingStreamUiText.setLength(0);
@@ -1099,7 +1106,11 @@ public class MainActivity extends AppCompatActivity {
                 streamUiFrameScheduled = true;
                 scheduleFrame = true;
             }
+            pendingChars = pendingStreamUiText.length();
         }
+        Log.i(FLOW_TAG, "token_callback generation=" + generationId + " chars=" + text.length() +
+                " pendingChars=" + pendingChars + " scheduleFrame=" + scheduleFrame +
+                " active=" + isActiveGeneration(generationId));
         if (scheduleFrame) {
             mainHandler.post(() -> Choreographer.getInstance()
                     .postFrameCallback(STREAM_UI_FRAME_CALLBACK));
@@ -1118,10 +1129,15 @@ public class MainActivity extends AppCompatActivity {
             }
             generationId = pendingStreamGenerationId;
             if (!isActiveGeneration(generationId)) {
+                Log.w(FLOW_TAG, "ui_flush_drop generation=" + generationId + " active=" +
+                        activeGenerationId + " chatting=" + chatting + " chars=" +
+                        pendingStreamUiText.length());
                 pendingStreamUiText.setLength(0);
                 return;
             }
             if (activity == null) {
+                Log.w(FLOW_TAG, "ui_flush_defer generation=" + generationId + " reason=no_activity chars=" +
+                        pendingStreamUiText.length());
                 return;
             }
             text = pendingStreamUiText.toString();
@@ -1129,6 +1145,7 @@ public class MainActivity extends AppCompatActivity {
             pendingStreamUiText.setLength(0);
         }
         if (isActiveGeneration(generationId)) {
+            Log.i(FLOW_TAG, "ui_flush_apply generation=" + generationId + " chars=" + text.length());
             activity.removeLoadingBubble();
             activity.captureVisionTimingIfPending();
             activity.addStreamingServerText(text, eventTimeMillis);
@@ -1162,6 +1179,12 @@ public class MainActivity extends AppCompatActivity {
     private static void onPerfStats(float prefillRate, float decodeRate, int remaining, int capacity,
                                     int prefillTokens, int decodeTokens, boolean finalSample) {
         final long generationId = callbackGenerationId();
+        if (finalSample) {
+            Log.i(FLOW_TAG, "perf_final generation=" + generationId + " prefillRate=" + prefillRate +
+                    " decodeRate=" + decodeRate + " prefillTokens=" + prefillTokens +
+                    " decodeTokens=" + decodeTokens + " remaining=" + remaining +
+                    " capacity=" + capacity);
+        }
         final boolean benchmarkCapture;
         synchronized (BENCHMARK_CAPTURE_LOCK) {
             benchmarkCapture = benchmarkCaptureActive;
@@ -1701,6 +1724,9 @@ public class MainActivity extends AppCompatActivity {
         activeGenerationId = generationId;
         chatting = true;
         stopRequested = false;
+        Log.i(FLOW_TAG, "start generation=" + generationId + " turn=" + usrTurnId +
+            " clear=" + clear_flag + " think=" + thinkButton.isChecked() +
+            " queryChars=" + (usrInputText == null ? -1 : usrInputText.length()));
         setGenerating(true);           // swap Send -> Stop so the user can halt this reply
         resetPerfStats();              // show the "measuring" placeholder until this turn's numbers land
         llmThread = new LLMThread(usrInputText, thinkButton.isChecked(), clear_flag,
@@ -1738,6 +1764,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestStopGeneration(boolean manual) {
         LLMThread worker = llmThread;
+        Log.i(FLOW_TAG, "stop_request manual=" + manual + " worker=" +
+            (worker == null ? "null" : worker.generationId) + " forward=" +
+            (worker != null && worker.shouldForwardStop()) + " alreadyRequested=" + stopRequested);
         if (worker == null || !worker.shouldForwardStop() || (manual && stopRequested)) {
             return;
         }
@@ -1755,6 +1784,9 @@ public class MainActivity extends AppCompatActivity {
     // start a new generation or mutate the KV cache (e.g. edit rollback).
     private void cancelOngoingGeneration() {
         LLMThread worker = llmThread;
+        Log.i(FLOW_TAG, "cancel_previous worker=" + (worker == null ? "null" : worker.generationId) +
+            " alive=" + (worker != null && worker.isAlive()) + " nativeFinished=" +
+            (worker != null && worker.nativeFinished));
         invalidateGenerationCallbacks();
         if (worker != null && worker.shouldForwardStop()) {
             Stop_LLM(false);
@@ -1833,14 +1865,25 @@ public class MainActivity extends AppCompatActivity {
             // ONE native call runs prefill + the whole decode loop, streaming via onTokenStream(). Returns
             // a structured status/error or a "<prefill>|<decode>" tok/s payload.
             String runResult = "";
+                final long startedMs = SystemClock.elapsedRealtime();
             try {
-                runResult = awaitModelConfigBarrier()
-                        ? Run_LLM(query, clear, thinkMode, turnId)
-                        : RUN_ERROR_PREFIX + "NOT_READY";
+                boolean configReady = awaitModelConfigBarrier();
+                Log.i(FLOW_TAG, "native_call generation=" + generationId + " turn=" + turnId +
+                    " configReady=" + configReady + " clear=" + clear + " think=" + thinkMode);
+                runResult = configReady
+                    ? Run_LLM(query, clear, thinkMode, turnId)
+                    : RUN_ERROR_PREFIX + "NOT_READY";
+                } catch (Throwable error) {
+                Log.e(FLOW_TAG, "native_exception generation=" + generationId + " turn=" + turnId,
+                    error);
+                runResult = RUN_ERROR_PREFIX + "NATIVE_EXCEPTION";
             } finally {
                 nativeFinished = true;
                 GenerationService.stop(appContext);
             }
+                Log.i(FLOW_TAG, "native_return generation=" + generationId + " turn=" + turnId +
+                    " elapsedMs=" + (SystemClock.elapsedRealtime() - startedMs) +
+                    " result=" + runResult);
             final String result = runResult;
             final LLMThread finishedThread = this;
             mainHandler.post(() -> {
@@ -1898,8 +1941,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void completeGenerationOnMain(long generationId, String result) {
         if (!isActiveGeneration(generationId)) {
+            Log.w(FLOW_TAG, "complete_drop generation=" + generationId + " active=" +
+                    activeGenerationId + " chatting=" + chatting + " result=" + result);
             return;
         }
+        Log.i(FLOW_TAG, "complete_main generation=" + generationId + " result=" + result);
         // The worker can finish before the next VSync; commit its coalesced tail before closing the
         // generation gate so short replies and manual stops never lose final text.
         flushPendingStreamUi();
@@ -4016,6 +4062,8 @@ public class MainActivity extends AppCompatActivity {
     private static native int[] Get_Memory_Limits();
     // True only when the loaded architecture can split/reattach KV without recurrent linear state.
     private static native boolean Supports_Prefill_Lookback();
+    // True only when the model's official chat template supports an explicit thinking prefix.
+    private static native boolean Supports_Thinking();
     // Live-tunable hysteresis band (% of cap): RED = rebuild trigger, GREEN = post-reset target (green < red
     // enforced natively). Get returns {red, green}.
     private static native boolean Configure_Memory_Thresholds(int RED_PERCENT, int GREEN_PERCENT);

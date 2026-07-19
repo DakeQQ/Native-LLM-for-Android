@@ -3,7 +3,6 @@ package com.example.myapplication;
 import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -135,12 +134,13 @@ public class CameraFloatingPreview implements DefaultLifecycleObserver {
             return;
         }
         active = true;
-        showPopup();
         if (!CameraService.hasPreparedCameraSelection()) {
+            showPopup();
             showCameraError(R.string.camera_error_unavailable);
             return;
         }
         ensureCameraService();
+        showPopup();
         showCameraConnecting();
         cameraService.start();
         bindFloatingPreviewSurface();
@@ -432,15 +432,7 @@ public class CameraFloatingPreview implements DefaultLifecycleObserver {
         if (rgba == null || w <= 0 || h <= 0) {
             return null;
         }
-        int maxSide = IMAGE_THUMB_MAX_SIDE_PX;
-        int largest = Math.max(w, h);
-        if (largest > maxSide) {
-            return toScaledRgbaBitmap(rgba, w, h, maxSide);
-        }
-        Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-        rgba.position(0);
-        bmp.copyPixelsFromBuffer(rgba);
-        return bmp;
+        return toScaledRgbaBitmap(rgba, w, h, IMAGE_THUMB_MAX_SIDE_PX);
     }
 
     private Bitmap toVideoBubbleFrame(java.nio.ByteBuffer rgba, int w, int h, Bitmap reusable) {
@@ -580,18 +572,19 @@ public class CameraFloatingPreview implements DefaultLifecycleObserver {
         previewFrame.addView(livePreview, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // Match the image model aspect ratio; the camera frame is fitted without distortion.
+        // Size the preview frame directly from the exported image metadata.
         int base = Math.min(dp(320),
                 activity.getResources().getDisplayMetrics().widthPixels - dp(56));
         int frameW = base;
         int frameH = base;
-        int[] modelSize = CameraService.getInputImageSize();
-        if (modelSize != null && modelSize.length == 2 && modelSize[0] > 0 && modelSize[1] > 0) {
+        int[] previewSize = CameraService.getInputImageSize();
+        if (previewSize != null && previewSize.length == 2 &&
+            previewSize[0] > 0 && previewSize[1] > 0) {
             int maxH = dp(360);
-            frameH = Math.round(base * (modelSize[1] / (float) modelSize[0]));
+            frameH = Math.round(base * (previewSize[1] / (float) previewSize[0]));
             if (frameH > maxH) {
                 frameH = maxH;
-                frameW = Math.round(maxH * (modelSize[0] / (float) modelSize[1]));
+            frameW = Math.round(maxH * (previewSize[0] / (float) previewSize[1]));
             }
         }
         LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(frameW, frameH);
@@ -761,7 +754,8 @@ public class CameraFloatingPreview implements DefaultLifecycleObserver {
         }
     }
 
-    // Restore the camera aspect, rotate upright, then fit with letterboxing.
+    // Keep the TextureView itself at the producer buffer's aspect ratio. Rotation is applied to the
+    // View, not its texture matrix, so Camera2 never sees different X/Y texture scale factors.
     private void configureTransform(int viewW, int viewH) {
         if (livePreview == null || cameraService == null || viewW <= 0 || viewH <= 0) {
             return;
@@ -772,23 +766,18 @@ public class CameraFloatingPreview implements DefaultLifecycleObserver {
             return;
         }
         int rot = cameraService.getPreviewContentRotation(displayRotationDegrees());
-        Matrix matrix = new Matrix();
-        float cx = viewW / 2f;
-        float cy = viewH / 2f;
-        // Undo TextureView's implicit stretch.
-        float fitScale = Math.min(viewW / (float) pW, viewH / (float) pH);
-        float fittedW = pW * fitScale;
-        float fittedH = pH * fitScale;
-        matrix.postScale(fittedW / viewW, fittedH / viewH, cx, cy);
-        matrix.postRotate(rot, cx, cy);
-        // Uniformly fit the rotated frame without cropping.
-        boolean swap = (rot % 180 != 0);
-        float shownW = swap ? fittedH : fittedW;
-        float shownH = swap ? fittedW : fittedH;
-        float fitFinal = Math.min(viewW / shownW, viewH / shownH);
-        matrix.postScale(fitFinal, fitFinal, cx, cy);
-        livePreview.setTransform(matrix);
-        livePreview.invalidate();
+        boolean swap = rot % 180 != 0;
+        float orientedW = swap ? pH : pW;
+        float orientedH = swap ? pW : pH;
+        float scale = Math.max(viewW / orientedW, viewH / orientedH);
+        int rawViewW = Math.max(1, Math.round(pW * scale));
+        int rawViewH = Math.max(1, Math.round(pH * scale));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                rawViewW, rawViewH, Gravity.CENTER);
+        livePreview.setLayoutParams(params);
+        livePreview.setPivotX(rawViewW * 0.5f);
+        livePreview.setPivotY(rawViewH * 0.5f);
+        livePreview.setRotation(rot);
     }
 
     private int displayRotationDegrees() {

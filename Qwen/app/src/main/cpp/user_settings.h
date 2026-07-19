@@ -228,7 +228,6 @@ inline int input_video_width  = DEFAULT_INPUT_IMAGE_SIZE;  // metadata "input_vi
 inline std::array<int, 3> chat_user_prefix_ids{};
 inline std::array<int, 5> chat_assistant_prefix_ids{};
 inline std::array<int, 2> chat_think_prefix_ids{};
-inline std::array<int, 4> chat_empty_think_block_ids{};
 inline std::array<int, 2> chat_previous_assistant_close_ids{};
 inline std::array<int, 3> chat_system_prefix_ids{};
 inline std::array<int, 2> chat_system_suffix_ids{};
