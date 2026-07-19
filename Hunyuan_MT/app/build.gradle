@@ -1,0 +1,103 @@
+plugins {
+    id 'com.android.application'
+}
+
+def modelAssetsRoot = file('src/main/assets')
+def modelBundleDir = file('src/main/assets/Hunyuan-MT')
+def generatedManifestDir = layout.buildDirectory.dir('generated/modelBundleManifest')
+def generateModelBundleManifest = tasks.register('generateModelBundleManifest') {
+    def vocabFiles = fileTree(modelBundleDir) {
+        include '**/vocab_*.txt'
+    }
+    inputs.files(vocabFiles)
+    outputs.file(generatedManifestDir.map { it.file('model_bundle.sha256') })
+    doLast {
+        def outputFile = generatedManifestDir.get().file('model_bundle.sha256').asFile
+        outputFile.parentFile.mkdirs()
+        def lines = vocabFiles.files.sort { left, right -> left.path <=> right.path }.collect { asset ->
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            asset.withInputStream { stream ->
+                byte[] buffer = new byte[1024 * 1024]
+                int read
+                while ((read = stream.read(buffer)) != -1) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            def hash = digest.digest().collect { String.format('%02x', it & 0xff) }.join()
+            def relativePath = modelAssetsRoot.toPath().relativize(asset.toPath()).toString().replace('\\', '/')
+            "${hash}  ${relativePath}"
+        }
+        outputFile.setText(lines.join('\n') + '\n', 'UTF-8')
+    }
+}
+
+android {
+    namespace 'com.example.myapplication'
+    defaultConfig {
+        applicationId "com.example.myapplication"
+        compileSdk 37
+        minSdk 29
+        targetSdk 37
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++20'
+                abiFilters 'arm64-v8a'
+                arguments '-DANDROID_STL=c++_shared'
+            }
+            ndk{
+                //noinspection ChromeOsAbiSupport
+                abiFilters 'arm64-v8a'
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Sign release with the debug key so `assembleRelease` is installable for local
+            // testing. Replace with a real release keystore before distribution.
+            signingConfig signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_25
+        targetCompatibility JavaVersion.VERSION_25
+    }
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            version '4.1.2'
+        }
+    }
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['libs']
+            assets.srcDir(generatedManifestDir)
+        }
+    }
+    androidResources {
+        noCompress += ['onnx', 'data']
+    }
+    ndkVersion '30.0.14904198'
+}
+
+tasks.named('preBuild').configure {
+    dependsOn(generateModelBundleManifest)
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'com.google.android.material:material:1.13.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+    implementation 'org.commonmark:commonmark:0.29.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-strikethrough:0.29.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-tables:0.29.0'
+    implementation 'org.commonmark:commonmark-ext-task-list-items:0.29.0'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
+}
