@@ -23,7 +23,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/beam_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/beam_slider"
@@ -53,7 +53,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/top_k_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/top_k_slider"
@@ -91,7 +91,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/penalty_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/penalty_slider"
@@ -121,7 +121,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/penalty_range_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/penalty_range_slider"
@@ -160,7 +160,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/temperature_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/sampling_temperature_slider"
@@ -190,7 +190,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/top_k_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/sampling_top_k_slider"
@@ -220,7 +220,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/top_p_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/sampling_top_p_slider"
@@ -250,7 +250,7 @@
                 android:layout_height="wrap_content"
                 android:text="@string/penalty_label"
                 android:textColor="@color/textMuted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/sampling_penalty_slider"
