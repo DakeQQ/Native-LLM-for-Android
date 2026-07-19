@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Collapsible "internal contemplation" panel: a faint, cool, translucent sheet with a soft dashed
+     muted border, deliberately dimmer than the warm amber answer bubble so the reasoning reads as a
+     quiet aside rather than the reply itself. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/thinkBlockFill" />
+    <corners android:radius="@dimen/ui_corner_radius" />
+    <stroke
+        android:width="1dp"
+        android:color="@color/thinkBlockStroke"
+        android:dashWidth="4dp"
+        android:dashGap="3dp" />
+</shape>

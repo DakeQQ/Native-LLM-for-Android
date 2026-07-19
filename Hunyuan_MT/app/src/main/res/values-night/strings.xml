@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="send">翻译 Translate</string>
+    <string name="clear">清空 Clear</string>
+    <string name="type_your_message">输入文本 Enter text</string>
+</resources>

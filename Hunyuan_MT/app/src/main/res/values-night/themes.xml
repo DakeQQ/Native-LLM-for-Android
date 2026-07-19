@@ -1,0 +1,36 @@
+<resources>
+    <!--
+        DARK-mode override of Theme.NativeLLM. All colours resolve from res/values-night/colors.xml
+        (same token names as the light set), so only the system-bar icon polarity differs here:
+        light (bright) status/navigation icons over the black backdrop.
+    -->
+    <style name="Theme.NativeLLM" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Electric blue primary -->
+        <item name="colorPrimary">@color/electricBlue</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/electricBlueDeep</item>
+        <!-- Energy yellow accent -->
+        <item name="colorSecondary">@color/energyYellow</item>
+        <item name="colorOnSecondary">@color/textOnYellow</item>
+        <item name="colorTertiary">@color/energyYellow</item>
+        <!-- Surfaces -->
+        <item name="android:colorBackground">@color/bgDark</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/textPrimary</item>
+        <item name="colorControlHighlight">@color/electricBlueGlow</item>
+        <!-- The root view already paints the full-screen bg_main_gradient, so drop the window background
+             to remove one full-screen overdraw layer. No visual change: the gradient and its hairline
+             accents stay on the content view (their coordinate space is unchanged). -->
+        <item name="android:windowBackground">@null</item>
+        <!-- System bars — transparent so the ambient backdrop bleeds edge-to-edge. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Bright bar icons on the dark backdrop. -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <style name="Theme.NativeLLM.OpaqueContent">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>

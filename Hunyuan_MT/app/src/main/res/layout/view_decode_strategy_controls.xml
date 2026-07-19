@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:id="@+id/beam_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="0dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/beam_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/beam_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="1"
+                android:value="3"
+                android:valueFrom="2"
+                android:valueTo="10" />
+
+            <TextView
+                android:id="@+id/beam_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_beam_size" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/top_k_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/top_k_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="1"
+                android:value="3"
+                android:valueFrom="2"
+                android:valueTo="10" />
+
+            <TextView
+                android:id="@+id/top_k_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_top_k" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/direct_penalty_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/penalty_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/penalty_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="0.05"
+                android:value="0.8"
+                android:valueFrom="0.0"
+                android:valueTo="1.0" />
+
+            <TextView
+                android:id="@+id/penalty_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_repeat_penalty" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/penalty_range_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/penalty_range_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="1"
+                android:value="20"
+                android:valueFrom="1"
+                android:valueTo="256" />
+
+            <TextView
+                android:id="@+id/penalty_range_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_penalty_range" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/sampler_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="0dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/temperature_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/sampling_temperature_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="0.05"
+                android:value="0.8"
+                android:valueFrom="0.1"
+                android:valueTo="2.0" />
+
+            <TextView
+                android:id="@+id/sampling_temperature_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_sampling_temperature" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/top_k_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/sampling_top_k_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="1"
+                android:value="3"
+                android:valueFrom="1"
+                android:valueTo="50" />
+
+            <TextView
+                android:id="@+id/sampling_top_k_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_sampling_top_k" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/top_p_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/sampling_top_p_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="0.05"
+                android:value="0.95"
+                android:valueFrom="0.05"
+                android:valueTo="1.0" />
+
+            <TextView
+                android:id="@+id/sampling_top_p_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_sampling_top_p" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:text="@string/penalty_label"
+                android:textColor="@color/textMuted"
+                android:textSize="12sp" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/sampling_penalty_slider"
+                style="@style/Widget.App.Slider"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:stepSize="0.05"
+                android:value="1.2"
+                android:valueFrom="1.0"
+                android:valueTo="2.0" />
+
+            <TextView
+                android:id="@+id/sampling_penalty_value"
+                style="@style/Widget.App.DecodeValue"
+                android:text="@string/default_sampling_penalty" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
