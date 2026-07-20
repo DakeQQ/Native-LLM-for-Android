@@ -40,14 +40,6 @@ inline constexpr std::array<const char*, kModelCount> kModelExternalFileNames = 
 #undef X
 };
 
-inline std::array<std::string, kModelCount> gModelExternalFileNames = [] {
-    std::array<std::string, kModelCount> names;
-    for (int i = 0; i < kModelCount; ++i) {
-        names[i] = kModelExternalFileNames[i];
-    }
-    return names;
-}();
-
 // Shared merged-initializer descriptor filenames: compile-time defaults straight from the model table,
 // plus mutable copies the runtime overwrites from stamped ONNX metadata (mirrors gModelFileNames).
 inline constexpr const char* kSharedInitializersFileName =
@@ -81,8 +73,6 @@ static_assert(modelFileNameEndsWith(kModelFileNames[LLM_SharedInitializers],
 static_assert(modelFileNameEndsWith(kModelFileNames[LLM_Metadata], kMetadataModelSuffix),
               "LLM metadata descriptor must match *_Metadata.onnx");
 
-inline constexpr ModelId kSharedInitializersModelId = LLM_SharedInitializers;
-inline constexpr ModelId kMetadataModelId = LLM_Metadata;
 inline constexpr int kSessionModelCount =
         kModelCount - countModelsWithSuffix(kSharedInitializersModelSuffix) -
         countModelsWithSuffix(kMetadataModelSuffix);
@@ -99,43 +89,27 @@ inline ModelRuntime& getModel(ModelId id) { return gModelRuntimes[id]; }
 enum MergedStrategy {
     MSTRAT_GREEDY         = 0,
     MSTRAT_PENALTY_GREEDY = 1,
-    MSTRAT_BEAM           = 2,
-    MSTRAT_PENALTY_BEAM   = 3,
-    MSTRAT_SAMPLING       = 4,
+    MSTRAT_SAMPLING       = 2,
 };
+static_assert(MSTRAT_GREEDY == 0 && MSTRAT_PENALTY_GREEDY == 1 && MSTRAT_SAMPLING == 2,
+              "Merged strategies must match their graph-slot offsets");
 
-// Prefill has no separate penalty-beam graph; the beam-first graph seeds both beam variants.
 inline ModelId mergedPrefillModel(MergedStrategy strat) {
-    int off;
-    switch (strat) {
-        case MSTRAT_PENALTY_GREEDY:                    off = 1; break;
-        case MSTRAT_BEAM: case MSTRAT_PENALTY_BEAM:    off = 2; break;
-        case MSTRAT_SAMPLING:                          off = 3; break;
-        default:                                       off = 0; break;   // greedy
-    }
-    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL + off);
+    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL + static_cast<int>(strat));
 }
 
 inline ModelId mergedDecodeModel(MergedStrategy strat) {
-    int off;
-    switch (strat) {
-        case MSTRAT_PENALTY_GREEDY:  off = 5; break;
-        case MSTRAT_BEAM:            off = 6; break;
-        case MSTRAT_PENALTY_BEAM:    off = 7; break;
-        case MSTRAT_SAMPLING:        off = 8; break;
-        default:                     off = 4; break;   // greedy
-    }
-    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL + off);
+    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL + 3 + static_cast<int>(strat));
 }
 
-// True for the nine available merged strategy graphs, only a bounded selected subset of which is resident.
+// True for the six available merged strategy graphs, only a bounded selected subset of which is resident.
 constexpr bool modelIsMergedGraph(int id) {
     return id >= LLM_FIRST_MERGED_MODEL &&
            id < LLM_FIRST_MERGED_MODEL + LLM_MERGED_MODEL_COUNT;
 }
 
 // KV-cache management + RoPE-shift utility graphs. They run once per decoded token alongside the merged
-// decode graph (append/slice/split/concat KV, gather beams, shift the rotary window), so they are tiny
+// decode graph (append/slice/split/concat KV and shift the rotary window), so they are tiny
 // and latency-bound. Like the merged decode graphs they belong on the small Top-N big-core decode thread
 // pool, not the wide prefill pool that drives the heavy prefill GEMMs. Enumerated explicitly so the
 // classification does not depend on the model-table ordering.
@@ -144,8 +118,6 @@ constexpr bool modelIsKvControlGraph(int id) {
         case LLM_KV_Slice:
         case LLM_KV_Split2:
         case LLM_KV_Concat:
-        case LLM_KV_Concat_FirstBeam:
-        case LLM_GatherFirstBeam:
         case LLM_RopeShift:
             return true;
         default:
@@ -160,16 +132,8 @@ inline bool mergedModelReady(ModelId id) {
 
 // Runtime geometry is filled from ONNX metadata during model load.
 inline int num_layers                  = kDefaultNumLayers;
-inline int num_full_attention_layers   = kDefaultNumLayers;      // layers with a windowed KV cache
-inline int num_linear_attention_layers = 0;                      // hybrid (Qwen3.5) linear-attention layers
 inline int num_keys_values             = kDefaultNumLayers * 2;  // windowed full-attention KV tensors
-inline int num_linear_states           = 0;                      // passthrough conv/recurrent state tensors
-inline int num_main_states             = kDefaultNumLayers * 2;  // = num_keys_values + num_linear_states
 inline int g_kv_blocks                 = 2;                      // KV tensors per full-attention layer (2/4/6)
-inline int g_linear_blocks             = 0;                      // state tensors per linear layer (conv+recurrent)
-
-// True for hybrid (linear + full attention) models; false for pure transformers (Qwen3).
-inline bool hasLinearState() { return num_linear_states > 0; }
 
 // KV_Slice / Split2 / Concat / RopeShift act on the full-attention KV block only.
 inline int kvSliceStartIdx       = num_keys_values;
@@ -183,21 +147,14 @@ inline std::atomic<int> g_memory_green_target_percent{DEFAULT_MEMORY_GREEN_TARGE
 inline std::atomic<int> g_memory_red_zone_percent{DEFAULT_MEMORY_RED_ZONE_PERCENT};
 
 inline int   decodeMode    = DECODE_MODE_GREEDY;
-inline bool  useBeamSearch = false;
-inline bool  useSampling   = false;
 inline int   topK          = DEFAULT_TOP_K;
-inline int   beamSize      = DEFAULT_BEAM_SIZE;
 inline float repeatPenalty = DEFAULT_REPEAT_PENALTY;
 inline int   penaltyRange  = DEFAULT_PENALTY_RANGE;
 inline float temperature   = DEFAULT_TEMPERATURE;
 inline float topP          = DEFAULT_TOP_P;
-inline bool  g_organize_memory = DEFAULT_ORGANIZE_MEMORY;
 
 // Tokenization and prompt state.
 inline Tokenizer* tokenizer = nullptr;
-inline std::string      g_system_prompt_text;
-inline std::vector<int> g_system_prompt_ids;
-inline int64_t          g_system_block_len = 0;
 inline int64_t          ids_len = 0;
 inline std::vector<int> g_stop_token_ids;
 
@@ -207,12 +164,6 @@ inline std::array<OrtValue*, max_keys_values> saved_kv = {};
 inline int64_t saved_kv_len  = 0;
 inline int64_t saved_kv_base = 0;
 
-// Hybrid (Qwen3.5) linear-attention passthrough states. Empty for pure-transformer models. These are
-// fixed-shape conv/recurrent summaries threaded output->input each step; they are never windowed, so any
-// token-drop on saved_kv routes through a full re-prefill to keep the linear state consistent.
-inline std::array<OrtValue*, max_linear_states> linear_state_init   = {};   // fixed-shape zero init
-inline std::array<OrtValue*, max_linear_states> saved_linear_states = {};   // cross-turn persisted final states
-inline bool saved_linear_valid = false;   // saved_linear_states corresponds to saved_kv's current window
 inline std::atomic<int64_t> g_memory_used_tokens{0};
 // 0 normal, 1 severe thermal pressure, 2 critical thermal/memory pressure. This is transient and
 // never overwrites the user's persisted decode strategy or memory profile.
@@ -268,7 +219,7 @@ Java_com_example_myapplication_MainActivity_Trim_1Runtime(
     JNIEnv* env, jclass clazz);
 
 JNIEXPORT jstring JNICALL
-Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass clazz, jstring jquery, jboolean clear, jboolean use_think, jint turn_id);
+Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass clazz, jstring jquery, jboolean clear, jint turn_id);
 
 JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Rollback_1LLM(JNIEnv* env, jclass clazz, jint turn_id);
@@ -277,7 +228,6 @@ JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass clazz,
                                                            jint decode_mode,
                                                            jint top_k,
-                                                           jint beam_size,
                                                            jfloat repeat_penalty,
                                                            jint penalty_range,
                                                            jfloat temperature,
@@ -288,10 +238,6 @@ Java_com_example_myapplication_MainActivity_Configure_1Memory(JNIEnv* env, jclas
                                                               jint memory_tokens,
                                                               jint prefill_tokens,
                                                               jint decode_tokens);
-
-JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication_MainActivity_Configure_1Organize_1Memory(JNIEnv* env, jclass clazz,
-                                                                       jboolean enable);
 
 JNIEXPORT jintArray JNICALL
 Java_com_example_myapplication_MainActivity_Get_1Memory_1Limits(JNIEnv* env, jclass clazz);
@@ -306,9 +252,6 @@ Java_com_example_myapplication_MainActivity_Get_1Memory_1Thresholds(JNIEnv* env,
 
 JNIEXPORT jintArray JNICALL
 Java_com_example_myapplication_MainActivity_Get_1Memory_1Stats(JNIEnv* env, jclass clazz);
-
-JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication_MainActivity_Set_1System_1Prompt(JNIEnv* env, jclass clazz, jstring system_prompt);
 
 JNIEXPORT void JNICALL
 Java_com_example_myapplication_MainActivity_Stop_1LLM(JNIEnv* env, jclass clazz, jboolean manual);

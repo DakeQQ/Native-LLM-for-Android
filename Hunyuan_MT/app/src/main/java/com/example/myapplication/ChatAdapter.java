@@ -129,7 +129,7 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ViewHolder> {
         holder.streamingThinking = false;
         holder.lastRenderedBottomSecond = Long.MIN_VALUE;
         if (message.type() == ChatMessage.TYPE_LOADING) {
-            // Three staggered bouncing "typing" dots; the row is removed when the beam reply lands.
+            // Three staggered bouncing dots while deferred work waits for the first streamed token.
             startDotBounce(holder.dot1, 0L);
             startDotBounce(holder.dot2, 140L);
             startDotBounce(holder.dot3, 280L);

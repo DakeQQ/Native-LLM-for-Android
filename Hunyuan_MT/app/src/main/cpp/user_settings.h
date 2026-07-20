@@ -13,24 +13,19 @@
 #define LLM_MODEL_TABLE(X) \
     X(LLM_TextPrefillGreedy,         "LLM_TextPrefillGreedy.onnx",         "") \
     X(LLM_TextPrefillPenaltyGreedy,  "LLM_TextPrefillPenaltyGreedy.onnx",  "") \
-    X(LLM_TextPrefillBeam,           "LLM_TextPrefillBeamFirst.onnx",      "") \
     X(LLM_TextPrefillSampling,       "LLM_TextPrefillSampling.onnx",       "") \
     X(LLM_TextDecodeGreedy,          "LLM_DecodeGreedy.onnx",              "") \
     X(LLM_TextDecodePenaltyGreedy,   "LLM_DecodePenaltyGreedy.onnx",       "") \
-    X(LLM_TextDecodeBeam,            "LLM_DecodeBeamNext.onnx",            "") \
-    X(LLM_TextDecodePenaltyBeam,     "LLM_DecodePenaltyBeamNext.onnx",     "") \
     X(LLM_TextDecodeSampling,        "LLM_DecodeSampling.onnx",            "") \
     X(LLM_KV_Slice,                  "LLM_KV_Slice.onnx",                  "") \
     X(LLM_KV_Split2,                 "LLM_KV_Split2.onnx",                 "") \
     X(LLM_KV_Concat,                 "LLM_KV_Concat.onnx",                 "") \
-    X(LLM_KV_Concat_FirstBeam,       "LLM_KV_Concat_FirstBeam.onnx",       "") \
-    X(LLM_GatherFirstBeam,           "LLM_GatherFirstBeam.onnx",           "") \
     X(LLM_RopeShift,                 "LLM_RopeShift.onnx",                 "") \
     X(LLM_SharedInitializers,        "LLM_SharedInitializers.onnx",        "LLM_SharedInitializers.onnx.data") \
     X(LLM_Metadata,                  "LLM_Metadata.onnx",                  "")
 
-// Merged-graph geometry: four prefill slots followed by five decode slots.
-#define LLM_MERGED_MODEL_COUNT 9
+// Merged-graph geometry: three prefill slots followed by three decode slots.
+#define LLM_MERGED_MODEL_COUNT 6
 #define LLM_FIRST_MERGED_MODEL LLM_TextPrefillGreedy
 
 // ORT threading.
@@ -74,12 +69,6 @@ inline int  max_seq_len = 0;       // metadata "max_seq_len": baked rotary-table
 constexpr int kv_blocks_max   = 6;
 constexpr int max_keys_values = max_num_layers * kv_blocks_max;
 
-// Hybrid (Qwen3.5) linear-attention passthrough states: at most 2 (conv + recurrent) per layer.
-// Pure-transformer (Qwen3) models leave num_linear_states = 0 at runtime, so all of this stays unused.
-constexpr int linear_blocks_max = 2;
-constexpr int max_linear_states = max_num_layers * linear_blocks_max;
-constexpr int max_main_states   = max_keys_values + max_linear_states;   // full-attn KV + linear passthrough
-
 // Conversation limits, in RoPE/token positions. Runtime max/default values derive from max_seq_len.
 inline int DEFAULT_MEMORY_TOKENS     = 0;   // max_seq_len * 3 / 8
 inline int DEFAULT_PREFILL_TOKENS    = 0;   // DEFAULT_MEMORY_TOKENS / 8
@@ -101,19 +90,17 @@ constexpr int MIN_MEMORY_BAND_PERCENT = 15;
 constexpr int MAX_MEMORY_BAND_PERCENT = 95;
 constexpr int MIN_MEMORY_BAND_GAP     = 1;
 
-// Decode defaults and UI-safe runtime bounds. Greedy/beam use the exporter's direct 0..1 logit
+// Decode defaults and UI-safe runtime bounds. Greedy uses the exporter's direct 0..1 logit
 // multiplier; sampling uses the standard >=1 repetition penalty from the Python inference path.
 constexpr int   DECODE_MODE_GREEDY       = 0;
-constexpr int   DECODE_MODE_BEAM         = 1;
-constexpr int   DECODE_MODE_SAMPLING     = 2;
+constexpr int   DECODE_MODE_SAMPLING     = 1;
+static_assert(DECODE_MODE_GREEDY == 0 && DECODE_MODE_SAMPLING == 1,
+              "Decode mode protocol must contain only Greedy and Sampling");
 constexpr int   DEFAULT_TOP_K           = 3;
-constexpr int   DEFAULT_BEAM_SIZE       = 3;
 constexpr float DEFAULT_REPEAT_PENALTY  = 1.0f;
 constexpr int   DEFAULT_PENALTY_RANGE   = 20;
 constexpr float DEFAULT_TEMPERATURE     = 0.8f;
 constexpr float DEFAULT_TOP_P           = 0.95f;
-constexpr int   MAX_TOP_K_RUNTIME       = 10;
-constexpr int   MAX_BEAM_SIZE_RUNTIME   = 10;
 constexpr int   MAX_SAMPLING_TOP_K_RUNTIME = 50;
 constexpr int   MAX_PENALTY_RANGE_RUNTIME  = 256;
 constexpr float MIN_TEMPERATURE_RUNTIME    = 0.1f;
@@ -122,14 +109,10 @@ constexpr float MIN_TOP_P_RUNTIME          = 0.05f;
 constexpr float MAX_TOP_P_RUNTIME          = 1.0f;
 constexpr float MAX_SAMPLING_PENALTY       = 2.0f;
 
-// Organize-memory default.
-constexpr bool DEFAULT_ORGANIZE_MEMORY = false;
-
 // Chat IDs are auto-filled from ONNX metadata; buildChatTemplates() fills the arrays.
 inline int chat_endoftext_id      = 0;  // metadata "chat_endoftext_id"      (<|endoftext|>)
 inline int chat_im_start_id       = 0;  // metadata "chat_im_start_id"       (<|im_start|>)
 inline int chat_im_end_id         = 0;  // metadata "chat_im_end_id"         (<|im_end|>)
-inline int chat_system_id         = 0;
 inline int chat_user_id           = 0;
 inline int chat_assistant_id      = 0;
 inline int chat_newline_id        = 0;  // metadata "chat_newline_id"        (\n)
@@ -140,16 +123,8 @@ inline int chat_think_end_id      = 0;  // metadata "chat_think_end_id"      (</
 inline std::vector<int> chat_conversation_prefix_ids;
 inline std::vector<int> chat_user_prefix_ids;
 inline std::vector<int> chat_assistant_prefix_ids;
-inline std::vector<int> chat_think_prefix_ids;
 inline std::vector<int> chat_empty_think_block_ids;
 inline std::vector<int> chat_previous_assistant_close_ids;
-inline std::vector<int> chat_system_prefix_ids;
-inline std::vector<int> chat_system_suffix_ids;
-inline bool chat_system_prompt_supported = true;
-
-// Must match SYSTEM_PROMPT_DEFAULT in MainActivity.java.
-inline const std::string DEFAULT_SYSTEM_PROMPT;
-
 // Streaming flush policy.
 constexpr int     STREAM_BATCH    = 10;
 constexpr int32_t STREAM_FLUSH_MS = 50;
@@ -167,7 +142,7 @@ inline const std::string MANUAL_STOP_NOTICE = "\n\n\u23f9 \u7528\u6237\u624b\u52
 // ORT run/session/provider configs. Runtime-specific overrides stay in loadModels.cpp/ort_helpers.h.
 struct OrtConfigEntry { const char* key; const char* value; };
 
-// CPU EP policy for the 27 merged LLM strategy graphs. These exceptions were isolated under ORT 1.27;
+// CPU EP policy for the six merged LLM strategy graphs. These exceptions were isolated under ORT 1.27;
 // keep the switch explicit so each Android CPU/model combination can be A/B benchmarked on-device.
 // XNNPACK, QNN, and KV/RoPE utility graphs retain their provider defaults.
 constexpr bool kUseCpuMergedOptimizerExceptions = true;

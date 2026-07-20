@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -26,11 +25,10 @@ static ModelRuntime& mMain          = getModel(LLM_TextDecodeGreedy);
 static ModelRuntime& mKVSlice       = getModel(LLM_KV_Slice);
 static ModelRuntime& mKVSplit2      = getModel(LLM_KV_Split2);
 static ModelRuntime& mKVConcat      = getModel(LLM_KV_Concat);
-static ModelRuntime& mKVConcatFirstBeam = getModel(LLM_KV_Concat_FirstBeam);
 static ModelRuntime& mRopeShift     = getModel(LLM_RopeShift);
 
-// Merged graphs share weights, but every live OrtSession still owns a large optimized execution plan.
-// Keep only the canonical greedy pair plus the selected strategy pair resident.
+// Merged graphs share weights, but every live OrtSession still owns an optimized execution plan.
+// Load selected pairs lazily and retain producer sessions while cross-turn OrtValues may use their allocators.
 static std::mutex g_runtime_config_mutex;
 static std::mutex g_model_session_mutex;
 static std::mutex g_benchmark_correctness_mutex;
@@ -50,8 +48,6 @@ static MergedStrategy mergedStrategyForConfig(
     MergedStrategy textStrategy = configuredPenalty ? MSTRAT_PENALTY_GREEDY : MSTRAT_GREEDY;
     if (configuredDecodeMode == DECODE_MODE_SAMPLING) {
         textStrategy = MSTRAT_SAMPLING;
-    } else if (configuredDecodeMode == DECODE_MODE_BEAM) {
-        textStrategy = configuredPenalty ? MSTRAT_PENALTY_BEAM : MSTRAT_BEAM;
     }
 
     return textStrategy;
@@ -119,12 +115,11 @@ inline static std::vector<int64_t> emptyKVDims(const std::vector<int64_t>& model
 }
 
 inline static bool validateMainIO(const ModelRuntime& m) {
-    // The merged primary leads its I/O with the full state block; the KV tensors precede the linear
-    // states. Validate the block is present and each full-attention KV input has a dynamic sequence axis.
-    if (m.inputNames.size() < static_cast<size_t>(num_main_states) ||
-        m.outputNames.size() < static_cast<size_t>(num_main_states)) {
+    // Validate the KV block is present and each full-attention KV input has a dynamic sequence axis.
+    if (m.inputNames.size() < static_cast<size_t>(num_keys_values) ||
+        m.outputNames.size() < static_cast<size_t>(num_keys_values)) {
         LOGE("ORT: merged graph state block too small: inputs=%zu outputs=%zu (need >= %d)",
-             m.inputNames.size(), m.outputNames.size(), num_main_states);
+             m.inputNames.size(), m.outputNames.size(), num_keys_values);
         return false;
     }
     if (m.inputDims.empty() || m.inputDims[0].size() <= 4) {
@@ -185,15 +180,12 @@ static bool loadModel(ModelId id, JNIEnv* env, jobject assetManager, int epType,
 }
 
 // Runtime config is read from exporter-stamped ONNX metadata. Missing required keys fail load.
-static void buildChatTemplates(bool hunyuanTemplate, int bosId, int systemEndId) {
+static void buildChatTemplates(bool hunyuanTemplate, int bosId) {
     chat_conversation_prefix_ids.clear();
     chat_user_prefix_ids.clear();
     chat_assistant_prefix_ids.clear();
     chat_empty_think_block_ids.clear();
-    chat_think_prefix_ids.clear();
     chat_previous_assistant_close_ids.clear();
-    chat_system_prefix_ids.clear();
-    chat_system_suffix_ids.clear();
 
     if (hunyuanTemplate) {
         chat_conversation_prefix_ids = {bosId};
@@ -202,22 +194,13 @@ static void buildChatTemplates(bool hunyuanTemplate, int bosId, int systemEndId)
         if (!g_stop_token_ids.empty()) {
             chat_previous_assistant_close_ids = {g_stop_token_ids.front()};
         }
-        chat_system_prompt_supported = systemEndId >= 0;
-        if (chat_system_prompt_supported) {
-            chat_system_prefix_ids = {bosId};
-            chat_system_suffix_ids = {systemEndId};
-        }
         return;
     }
 
     chat_user_prefix_ids              = { chat_im_start_id, chat_user_id, chat_newline_id };
     chat_assistant_prefix_ids         = { chat_im_end_id, chat_newline_id, chat_im_start_id, chat_assistant_id, chat_newline_id };
     chat_empty_think_block_ids        = { chat_think_start_id, chat_double_newline_id, chat_think_end_id, chat_double_newline_id };
-    chat_think_prefix_ids             = { chat_think_start_id, chat_newline_id };
     chat_previous_assistant_close_ids = { chat_im_end_id, chat_newline_id };
-    chat_system_prefix_ids            = { chat_im_start_id, chat_system_id, chat_newline_id };
-    chat_system_suffix_ids            = { chat_im_end_id, chat_newline_id };
-    chat_system_prompt_supported      = true;
 }
 
 static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
@@ -272,18 +255,13 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     static constexpr ModelFileMetadataKey modelFileKeys[] = {
         {LLM_TextPrefillGreedy,         "model_file_name_text_prefill_greedy"},
         {LLM_TextPrefillPenaltyGreedy,  "model_file_name_text_prefill_penalty_greedy"},
-        {LLM_TextPrefillBeam,           "model_file_name_text_prefill_beam"},
         {LLM_TextPrefillSampling,       "model_file_name_text_prefill_sampling"},
         {LLM_TextDecodeGreedy,          "model_file_name_text_decode_greedy"},
         {LLM_TextDecodePenaltyGreedy,   "model_file_name_text_decode_penalty_greedy"},
-        {LLM_TextDecodeBeam,            "model_file_name_text_decode_beam"},
-        {LLM_TextDecodePenaltyBeam,     "model_file_name_text_decode_penalty_beam"},
         {LLM_TextDecodeSampling,        "model_file_name_text_decode_sampling"},
         {LLM_KV_Slice,                  "model_file_name_kv_slice"},
         {LLM_KV_Split2,                 "model_file_name_kv_split2"},
         {LLM_KV_Concat,                 "model_file_name_kv_concat"},
-        {LLM_KV_Concat_FirstBeam,       "model_file_name_kv_concat_first_beam"},
-        {LLM_GatherFirstBeam,           "model_file_name_gather_first_beam"},
         {LLM_RopeShift,                 "model_file_name_rope_shift"},
     };
     for (const ModelFileMetadataKey& entry : modelFileKeys) {
@@ -314,7 +292,6 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     const int meta_endoftext   = optInt("chat_endoftext_id", -1);
     const int meta_im_start    = optInt("chat_im_start_id", -1);
     const int meta_im_end      = optInt("chat_im_end_id", -1);
-    const int meta_system      = optInt("chat_system_id", -1);
     const int meta_user        = reqInt("chat_user_id");
     const int meta_assistant   = reqInt("chat_assistant_id");
     const int meta_newline     = optInt("chat_newline_id", -1);
@@ -322,9 +299,8 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     const int meta_think_start = optInt("chat_think_start_id", -1);
     const int meta_think_end   = optInt("chat_think_end_id", -1);
     const int meta_bos         = optInt("chat_bos_id", -1);
-    const int meta_system_end  = optInt("chat_system_end_id", -1);
 
-    const bool qwenTemplate = meta_im_start >= 0 && meta_im_end >= 0 && meta_system >= 0 &&
+    const bool qwenTemplate = meta_im_start >= 0 && meta_im_end >= 0 &&
             meta_user >= 0 && meta_assistant >= 0 && meta_newline >= 0 &&
             meta_dbl_newline >= 0 && meta_think_start >= 0 && meta_think_end >= 0;
     const bool hunyuanTemplate = !qwenTemplate && meta_bos >= 0 &&
@@ -345,9 +321,8 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
         LOGE("model metadata: num_layers=%d out of range (1..%d)", meta_layers, max_num_layers);
         return false;
     }
-    if (meta_full_layers <= 0 || meta_linear_layers < 0 ||
-        meta_full_layers + meta_linear_layers != meta_layers) {
-        LOGE("model metadata: attention-layer split invalid (layers=%d full=%d linear=%d)",
+    if (meta_full_layers != meta_layers || meta_linear_layers != 0) {
+        LOGE("model metadata: Hunyuan requires full-attention-only layers (layers=%d full=%d linear=%d)",
              meta_layers, meta_full_layers, meta_linear_layers);
         return false;
     }
@@ -366,12 +341,8 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     }
 
     num_layers                  = meta_layers;
-    num_full_attention_layers   = meta_full_layers;
-    num_linear_attention_layers = meta_linear_layers;
     g_kv_blocks                 = meta_kv_blocks;
     num_keys_values             = meta_kv_tensors;
-    // num_linear_states / num_main_states / g_linear_blocks are derived from the Main graph in
-    // configureKVLayout, which is the authoritative source for the exact state-tensor count.
 
     max_seq_len = meta_max_seq_len;
 
@@ -388,7 +359,6 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     chat_endoftext_id      = meta_endoftext;
     chat_im_start_id       = meta_im_start;
     chat_im_end_id         = meta_im_end;
-    chat_system_id         = meta_system;
     chat_user_id           = meta_user;
     chat_assistant_id      = meta_assistant;
     chat_newline_id        = meta_newline;
@@ -426,7 +396,7 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     appendStopToken(meta_endoftext);
     appendStopToken(meta_im_end);
 
-    buildChatTemplates(hunyuanTemplate, meta_bos, meta_system_end);
+    buildChatTemplates(hunyuanTemplate, meta_bos);
 
     LOGI("model metadata applied: layers=%d kv_blocks=%d kv_tensors=%d max_seq_len=%d "
          "template=%s (mem=%d prefill=%d decode=%d)",
@@ -494,9 +464,8 @@ static bool preloadRuntimeMetadata(JNIEnv* env, jobject assetManager, bool lowMe
     return applied;
 }
 
-// The merged graphs lead ALL I/O with the state block (in_* inputs / out_*|beam_out_* outputs): the
-// full-attention KV tensors then the hybrid linear-attention conv/recurrent states. Everything after is
-// the token input, phase counters, per-strategy scalars, and the token/kv_seq/save_id outputs.
+// The merged graphs lead all I/O with the full-attention KV state block. Everything after is the token
+// input, phase counters, per-strategy scalars, and the token/kv_seq/save_id outputs.
 static bool configureKVLayout() {
     ModelRuntime& m = mMain;   // merged primary (text greedy decode) defines the shared state layout
     if (m.api == nullptr || m.session == nullptr) {
@@ -508,7 +477,7 @@ static bool configureKVLayout() {
              num_layers, g_kv_blocks, num_keys_values);
         return false;
     }
-    // Count the contiguous leading state tensors (in_* inputs, out_*/beam_out_* outputs).
+    // Count the contiguous leading state tensors (in_* inputs and out_* outputs).
     int statesByInputs = 0;
     for (const char* name : m.inputNames) {
         if (name != nullptr && std::strncmp(name, "in_", 3) == 0) { ++statesByInputs; }
@@ -516,94 +485,27 @@ static bool configureKVLayout() {
     }
     int statesByOutputs = 0;
     for (const char* name : m.outputNames) {
-        if (name != nullptr && (std::strncmp(name, "out_", 4) == 0 ||
-                                std::strncmp(name, "beam_out_", 9) == 0)) { ++statesByOutputs; }
+        if (name != nullptr && std::strncmp(name, "out_", 4) == 0) { ++statesByOutputs; }
         else { break; }
     }
-    if (statesByInputs != statesByOutputs || statesByInputs < num_keys_values) {
-        LOGE("configureKVLayout: merged state block inconsistent (in=%d out=%d, full-attn KV=%d)",
+    if (statesByInputs != statesByOutputs || statesByInputs != num_keys_values) {
+        LOGE("configureKVLayout: merged state block inconsistent (in=%d out=%d expected KV=%d)",
              statesByInputs, statesByOutputs, num_keys_values);
         return false;
     }
-    num_main_states   = statesByInputs;
-    num_linear_states = num_main_states - num_keys_values;
-    if (num_linear_states < 0 || num_main_states > max_main_states) {
-        LOGE("configureKVLayout: linear-state count invalid (main=%d full=%d linear=%d, ceiling=%d)",
-             num_main_states, num_keys_values, num_linear_states, max_main_states);
-        return false;
-    }
-    if (num_linear_attention_layers > 0) {
-        g_linear_blocks = num_linear_states / num_linear_attention_layers;
-        if (g_linear_blocks <= 0 || g_linear_blocks * num_linear_attention_layers != num_linear_states) {
-            LOGE("configureKVLayout: linear states=%d not divisible by linear layers=%d",
-                 num_linear_states, num_linear_attention_layers);
-            return false;
-        }
-    } else if (num_linear_states != 0) {
-        LOGE("configureKVLayout: metadata declares 0 linear layers but the graph carries %d extra states",
-             num_linear_states);
-        return false;
-    } else {
-        g_linear_blocks = 0;
-    }
-
     kvSliceStartIdx = num_keys_values;   // KV-management graphs act on the full-attention block only
     kvSliceEndIdx   = num_keys_values + 1;
 
     const char* modeName = (g_kv_blocks == 2) ? "F16/F32 (key,value)"
                          : (g_kv_blocks == 4) ? "symmetric quant (key,value,k_scale,v_scale)"
                                               : "asymmetric quant (key,value,k_scale,k_bias,v_scale,v_bias)";
-    LOGI("configureKVLayout: %d layers (%d full + %d linear) x %d KV blocks -> %d KV + %d linear = %d "
-         "merged states [%s]", num_layers, num_full_attention_layers, num_linear_attention_layers,
-         g_kv_blocks, num_keys_values, num_linear_states, num_main_states, modeName);
+        LOGI("configureKVLayout: %d full-attention layers x %d KV blocks -> %d merged states [%s]",
+                num_layers, g_kv_blocks, num_keys_values, modeName);
     return true;
 }
 
 // Empty KV-cache initialization.
 static float gEmptyKVData = 0.0f;
-
-// Fixed-shape zero backing for hybrid linear-attention init states (persists for the tensors' lifetime).
-static std::array<std::vector<uint8_t>, max_linear_states> gLinearInitBacking;
-
-// Build fresh-conversation linear-attention states: full-shape zero conv/recurrent summaries.
-// No-op for pure-transformer models (num_linear_states == 0).
-static bool initLinearStates() {
-    ModelRuntime& m = mMain;   // merged primary: state block dims/types define the linear init shapes
-    if (m.api == nullptr || m.session == nullptr) {
-        return false;
-    }
-    const OrtApi* api = m.api;
-    for (int i = 0; i < num_linear_states; ++i) {
-        const int idx = num_keys_values + i;   // linear states follow the full-attention KV prefix
-        if (linear_state_init[i] != nullptr) {
-            api->ReleaseValue(linear_state_init[i]);
-            linear_state_init[i] = nullptr;
-        }
-        std::vector<int64_t> dims = m.inputDims[idx];
-        int64_t elems = 1;
-        for (int64_t& d : dims) {
-            if (d <= 0) { d = 1; }   // dynamic batch axis -> 1 at conversation start
-            elems *= d;
-        }
-        const size_t elementSize = tensorElementSize(m.inputTypes[idx]);
-        if (elementSize == 0) {
-            LOGE("initLinearStates: unsupported input type %d at state %d",
-                 static_cast<int>(m.inputTypes[idx]), idx);
-            return false;
-        }
-        const size_t bytes = static_cast<size_t>(elems) * elementSize;
-        gLinearInitBacking[i].assign(bytes, 0);
-        if (!createTensorWithData(api, m.memoryInfo, gLinearInitBacking[i].data(), bytes,
-                                  dims, m.inputTypes[idx], &linear_state_init[i],
-                                  "CreateTensorWithDataAsOrtValue(linear_init)")) {
-            for (OrtValue*& s : linear_state_init) {
-                if (s != nullptr) { api->ReleaseValue(s); s = nullptr; }
-            }
-            return false;
-        }
-    }
-    return true;
-}
 
 static bool initKVCache() {
     ModelRuntime& m = mMain;   // merged primary: state block dims/types define the empty-KV init shapes
@@ -628,7 +530,7 @@ static bool initKVCache() {
             return false;
         }
     }
-    return initLinearStates();
+    return true;
 }
 
 // Peak bytes reserved in each CPU arena. CPU decode uses a dedicated OrtEnv/thread pool, so its arena
@@ -638,13 +540,12 @@ static int64_t g_reserved_decode_arena_bytes = 0;
 
 // Pre-grow each CPU arena so cache-heavy graphs do not grow it mid-turn. Reserve the largest loaded
 // cache I/O working set plus one persistent batch-1 saved KV on the decode side. The per-Env high-water
-// marks make this idempotent. seqCap is the worst-case sequence length; beamBatch is the decode batch.
-static void reserveSharedArena(int64_t seqCap, int64_t beamBatch) {
+// marks make this idempotent. seqCap is the worst-case sequence length.
+static void reserveSharedArena(int64_t seqCap) {
     if (!kPrewarmSharedArena || kPrewarmArenaPercent <= 0) {
         return;
     }
     const int64_t capTokens = std::max<int64_t>(1, seqCap);
-    const int64_t beamB     = std::max<int64_t>(1, beamBatch);
 
     // Bytes of key/value cache I/O. Keys (and key scale/bias) store sequence on the last axis; values
     // store it on the penultimate axis. Output shape inference often leaves otherwise-static head dims
@@ -701,16 +602,11 @@ static void reserveSharedArena(int64_t seqCap, int64_t beamBatch) {
             if (runtime.session == nullptr || runtime.env != anchor.env) {
                 continue;
             }
-            const int mergedSlot = modelIsMergedGraph(runtime.id)
-                    ? runtime.id - LLM_FIRST_MERGED_MODEL
-                    : -1;
-            const bool beamGraph = mergedSlot == 2 || mergedSlot == 6 || mergedSlot == 7;
-            const int64_t batch = beamGraph ? beamB : 1;
             const int64_t work = cacheIoBytes(
                     runtime.inputNames, runtime.inputDims, runtime.inputTypes,
-                    runtime.inputDims, batch) +
+                    runtime.inputDims, 1) +
                     cacheIoBytes(runtime.outputNames, runtime.outputDims, runtime.outputTypes,
-                                 runtime.inputDims, batch);
+                         runtime.inputDims, 1);
             peakBytes = std::max(peakBytes, work);
         }
         if (includePersistentState) {
@@ -735,10 +631,10 @@ static void reserveSharedArena(int64_t seqCap, int64_t beamBatch) {
             logOrtStatus(anchor.api, anchor.api->AllocatorFree(arena, block),
                          "AllocatorFree(arena prewarm)");
             reservedBytes = target;
-            LOGI("%s arena pre-warmed: +%lld MB (total %lld MB; seq<=%lld beam<=%lld %d%%)",
+              LOGI("%s arena pre-warmed: +%lld MB (total %lld MB; seq<=%lld %d%%)",
                  label, static_cast<long long>(delta >> 20),
                  static_cast<long long>(target >> 20), static_cast<long long>(capTokens),
-                 static_cast<long long>(beamB), kPrewarmArenaPercent);
+                  kPrewarmArenaPercent);
         }
         anchor.api->ReleaseAllocator(arena);
     };
@@ -884,18 +780,11 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv* env, jclass 
 
     constexpr int firstStandaloneModel = LLM_KV_Slice;
     for (int id = firstStandaloneModel; id < kModelCount; ++id) {
-        const bool transformerOnlyHelper = id == LLM_KV_Slice || id == LLM_KV_Split2 ||
-                id == LLM_KV_Concat || id == LLM_KV_Concat_FirstBeam || id == LLM_RopeShift;
-        if ((num_linear_attention_layers > 0 && transformerOnlyHelper) ||
-            id == LLM_GatherFirstBeam) {
-            LOGI("Load_Models_A: deferring unused helper %d (%s)",
-                 id, gModelFileNames[id].c_str());
+        if (modelIsBundleDescriptor(static_cast<ModelId>(id))) {
             continue;
         }
         if (!loadModel(static_cast<ModelId>(id), env, asset_manager, ep_type, lowMem)) {
-            const bool requiredPrefillHelper = num_linear_attention_layers == 0 &&
-                    (id == LLM_KV_Split2 || id == LLM_KV_Concat ||
-                     id == LLM_KV_Concat_FirstBeam);
+            const bool requiredPrefillHelper = id == LLM_KV_Split2 || id == LLM_KV_Concat;
             if (requiredPrefillHelper) {
                 LOGE("Load_Models_A: required graph %d (%s) failed to load",
                      id, gModelFileNames[id].c_str());
@@ -907,7 +796,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv* env, jclass 
         }
     }
 
-    ModelRuntime& main = mMain;   // merged primary (text greedy decode): canonical KV/linear state layout
+    ModelRuntime& main = mMain;   // merged primary (text greedy decode): canonical KV state layout
     if (!configureKVLayout()) {
         return JNI_FALSE;
     }
@@ -919,7 +808,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv* env, jclass 
         return JNI_FALSE;
     }
 
-    reserveSharedArena(g_memory_tokens, useBeamSearch ? beamSize : 1);
+    reserveSharedArena(g_memory_tokens);
     mallopt(M_PURGE, 0);
 
     g_model_sessions_initialized = true;
@@ -929,7 +818,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv* env, jclass 
     }
 
     LOGI("Load_Models_A: %d/%d sessions resident (EP=%d, lowMem=%d, strategy=%d)",
-         loadedSessions, kModelCount, ep_type, lowMem ? 1 : 0,
+            loadedSessions, kSessionModelCount, ep_type, lowMem ? 1 : 0,
          static_cast<int>(g_loaded_merged_strategy));
     return JNI_TRUE;
 }
@@ -945,31 +834,6 @@ static inline void release_saved_kv() {
             kv = nullptr;
         }
     }
-}
-
-// Hybrid linear-attention passthrough state helpers (no-ops for pure-transformer models).
-static inline void release_saved_linear() {
-    if (mMain.api == nullptr) {
-        return;
-    }
-    for (OrtValue*& s : saved_linear_states) {
-        if (s != nullptr) {
-            mMain.api->ReleaseValue(s);
-            s = nullptr;
-        }
-    }
-    saved_linear_valid = false;
-}
-
-// Take ownership of a freshly-produced linear-state vector (from prefill/append) as the persisted state.
-static inline void store_saved_linear(std::vector<OrtValue*>& produced) {
-    release_saved_linear();
-    for (int i = 0; i < num_linear_states && i < static_cast<int>(produced.size()); ++i) {
-        saved_linear_states[i] = produced[i];
-        produced[i] = nullptr;
-    }
-    produced.clear();
-    saved_linear_valid = (num_linear_states > 0);
 }
 
 static inline void publishMemoryUsage() {
@@ -991,36 +855,6 @@ static inline void shrinkAllocatorIfSupported(const OrtApi* api, OrtAllocator* a
         return;
     }
     logOrtStatus(api, allocator->Shrink(allocator), op);
-}
-
-static void shrinkModelAllocators(ModelRuntime& m) {
-    if (m.api == nullptr || m.session == nullptr) {
-        return;
-    }
-    OrtAllocator* sessionAllocator = nullptr;
-    if (m.memoryInfo != nullptr &&
-        logOrtStatus(m.api, m.api->CreateAllocator(m.session, m.memoryInfo, &sessionAllocator),
-                     "CreateAllocator(runtime trim)")) {
-        shrinkAllocatorIfSupported(m.api, sessionAllocator, "AllocatorShrink(runtime trim)");
-        m.api->ReleaseAllocator(sessionAllocator);
-    }
-    if (m.ioAllocator != nullptr && m.ioAllocator != m.allocator) {
-        shrinkAllocatorIfSupported(m.api, m.ioAllocator, "AllocatorShrink(io trim)");
-    }
-    if (m.env == gSharedEnv) {
-        g_reserved_prefill_arena_bytes = 0;
-    }
-    if (m.env == gDecodeEnv) {
-        g_reserved_decode_arena_bytes = 0;
-    }
-}
-
-static void shrinkPrimaryArenas() {
-    ModelRuntime& prefill = getModel(LLM_TextPrefillGreedy);
-    shrinkModelAllocators(prefill);
-    if (mMain.env != prefill.env) {
-        shrinkModelAllocators(mMain);
-    }
 }
 
 static void shrinkAllModelAllocators() {
@@ -1264,11 +1098,6 @@ static bool runKVConcat(std::vector<OrtValue*>& prefix, std::vector<OrtValue*>& 
     return runKVConcatGraph(mKVConcat, prefix, suffix, out);
 }
 
-static bool runKVConcatFirstBeam(std::vector<OrtValue*>& prefix, std::vector<OrtValue*>& suffix,
-                                 std::vector<OrtValue*>& out) {
-    return runKVConcatGraph(mKVConcatFirstBeam, prefix, suffix, out);
-}
-
 // Not fail-open: if this shrink fails, the caller must reset before prefill.
 static bool shrinkSavedKVForRotaryBudget(int64_t targetLen) {
     if (targetLen >= saved_kv_len) {
@@ -1342,7 +1171,7 @@ static bool ropeShiftKeys(OrtValue** kv, int count, int64_t shift) {
     if (mRopeShift.session == nullptr || shift <= 0) {
         return false;
     }
-    const int L = num_full_attention_layers;
+    const int L = num_layers;
     if (L <= 0 || count < L * g_kv_blocks) {
         return false;
     }
@@ -1468,7 +1297,6 @@ inline static void clear_history(const char* reason = "unspecified") {
          retainedHistorySize());
     clearAllModelBindingRefs();
     release_saved_kv();
-    release_saved_linear();
     ids_len       = 0;
     saved_kv_len  = 0;
     saved_kv_base = 0;
@@ -1483,16 +1311,10 @@ inline static void clear_history(const char* reason = "unspecified") {
 }
 
 // Synchronization.
-static std::mutex g_system_prompt_mutex;
 static std::mutex g_tokenizer_mutex;
 static std::mutex g_clean_commit_mutex;
 static std::condition_variable g_clean_commit_cv;
 static bool g_clean_commit_running = false;
-// Whether the in-flight clean commit surfaces the "整理记忆 Consolidating" UI. Only Organize-Memory ON
-// commits are user-visible; OFF-mode internal rebuilds (text-beam KV re-prefill, red-zone trim) run
-// silently so the box never appears while the toggle is off. Bookkeeping (g_clean_commit_running) still
-// tracks every commit so waitForCleanCommit() serialization is unaffected either way.
-static bool g_clean_commit_status_visible = false;
 
 class SerialMaintenanceWorker {
 public:
@@ -1637,31 +1459,23 @@ static void waitForCleanCommit() {
     g_clean_commit_cv.wait(lock, [] { return !g_clean_commit_running; });
 }
 
-static void beginCleanCommit(bool showStatus) {
+static void beginCleanCommit() {
     {
         std::unique_lock<std::mutex> lock(g_clean_commit_mutex);
         g_clean_commit_cv.wait(lock, [] { return !g_clean_commit_running; });
         g_clean_commit_running = true;
-        g_clean_commit_status_visible = showStatus;
     }
-    if (showStatus) {
-        pushPostProcessingState(true);
-    }
+    pushPostProcessingState(true);
 }
 
 static void finishCleanCommit() {
     clearAllModelBindingRefs();
-    bool wasVisible;
     {
         std::lock_guard<std::mutex> lock(g_clean_commit_mutex);
         g_clean_commit_running = false;
-        wasVisible = g_clean_commit_status_visible;
-        g_clean_commit_status_visible = false;
     }
     g_clean_commit_cv.notify_all();
-    if (wasVisible) {
-        pushPostProcessingState(false);
-    }
+    pushPostProcessingState(false);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1699,41 +1513,17 @@ Java_com_example_myapplication_MainActivity_Trim_1Runtime(
     return JNI_TRUE;
 }
 
-// Slot system prompt.
-inline static bool is_blank_system_prompt(const std::string& text) {
-    return std::all_of(text.begin(), text.end(), [](unsigned char ch) {
-        return std::isspace(ch) != 0;
-    });
-}
-
-inline static void rebuild_system_prompt_ids_locked() {
-    g_system_prompt_ids.clear();
-    g_system_block_len = 0;
-    if (!chat_system_prompt_supported || tokenizer == nullptr || g_system_prompt_text.empty()) {
-        return;
-    }
-    {
-        std::lock_guard<std::mutex> tokenizerLock(g_tokenizer_mutex);
-        g_system_prompt_ids = tokenizer->encode(g_system_prompt_text);
-    }
-    g_system_block_len = static_cast<int64_t>(chat_system_prefix_ids.size()) +
-                         static_cast<int64_t>(g_system_prompt_ids.size()) +
-                         static_cast<int64_t>(chat_system_suffix_ids.size());
-}
-
-// Shared one-shot prefill returning KV/linear state only, via the merged text greedy prefill graph. Used
+// Shared one-shot prefill returning KV state only, via the merged text greedy prefill graph. Used
 // to reconstruct cross-turn KV from token ids; the graph's token/kv_seq outputs are produced but ignored.
 static bool runPrefillToKV(const int* idsData, int64_t tokenCount,
-                           OrtValue* const* kvInputs, OrtValue* const* linearInputs,
+                           OrtValue* const* kvInputs,
                            int64_t historyLen, int64_t cacheLen,
-                           std::vector<OrtValue*>& outKV, std::vector<OrtValue*>& outLinear,
-                           const char* inputOpName) {
+                           std::vector<OrtValue*>& outKV, const char* inputOpName) {
     outKV.clear();
-    outLinear.clear();
     const OrtApi* api = mMain.api;
     ModelRuntime& g = getModel(mergedPrefillModel(MSTRAT_GREEDY));
-    if (api == nullptr || g.session == nullptr || idsData == nullptr || tokenCount <= 0 || kvInputs == nullptr ||
-        (num_linear_states > 0 && linearInputs == nullptr) || !ensureBinding(g)) {
+    if (api == nullptr || g.session == nullptr || idsData == nullptr || tokenCount <= 0 ||
+        kvInputs == nullptr || !ensureBinding(g)) {
         return false;
     }
     const int tokenIdx      = findInputIdxAny(g, {"embed_input_ids", "input_ids"});
@@ -1769,24 +1559,21 @@ static bool runPrefillToKV(const int* idsData, int64_t tokenCount,
         resetBinding(g);
         bool bound = true;
         for (int i = 0; i < num_keys_values; ++i)   { bound = bindIn(g, i, kvInputs[i]) && bound; }
-        for (int i = 0; i < num_linear_states; ++i) { bound = bindIn(g, num_keys_values + i, linearInputs[i]) && bound; }
         bound = bindIn(g, tokenIdx, idsBuffer.value) && bound;
         bound = bindIn(g, idsLenIdx, idsLenBuffer.value) && bound;
         bound = bindIn(g, historyLenIdx, historyLenBuffer.value) && bound;
         if (cacheLenIdx >= 0) { bound = bindIn(g, cacheLenIdx, cacheLenBuffer.value) && bound; }
-        // Bind every output to device: the state block leads (KV then linear); the trailing token/kv_seq
-        // outputs are produced but discarded (this helper only reconstructs KV state from ids).
+        // Bind every output to device; the trailing token/kv_seq outputs are produced but discarded.
         for (int i = 0; i < static_cast<int>(g.outputNames.size()); ++i) { bound = bindOutDevice(g, i) && bound; }
         std::vector<OrtValue*> allOut;
         const bool runOk = bound && runBinding(g) && fetchOutputsInto(g, allOut) &&
-                           allOut.size() >= static_cast<size_t>(num_main_states);
+                           allOut.size() >= static_cast<size_t>(num_keys_values);
         if (!runOk) {
             releaseValues(api, allOut);
             break;
         }
         outKV.assign(allOut.begin(), allOut.begin() + num_keys_values);
-        outLinear.assign(allOut.begin() + num_keys_values, allOut.begin() + num_main_states);
-        for (size_t i = static_cast<size_t>(num_main_states); i < allOut.size(); ++i) {
+        for (size_t i = static_cast<size_t>(num_keys_values); i < allOut.size(); ++i) {
             releaseOne(api, allOut[i]);   // token / kv_seq tail: ignored
         }
         ok = true;
@@ -1797,7 +1584,6 @@ static bool runPrefillToKV(const int* idsData, int64_t tokenCount,
     releaseBuffer(api, cacheLenBuffer);
     if (!ok) {
         releaseValues(api, outKV);
-        releaseValues(api, outLinear);
     }
     return ok;
 }
@@ -1805,7 +1591,6 @@ static bool runPrefillToKV(const int* idsData, int64_t tokenCount,
 // Rebuild from ids; never excise KV in-place because survivors still attended dropped tokens.
 static bool rebuildSavedKVFromHistoryRetaining(int retainTarget) {
     release_saved_kv();
-    release_saved_linear();
     saved_kv_len = 0;
     saved_kv_base = 0;
     publishMemoryUsage();
@@ -1821,16 +1606,15 @@ static bool rebuildSavedKVFromHistoryRetaining(int retainTarget) {
     if (api == nullptr || mMain.session == nullptr) {
         return false;
     }
-    std::vector<OrtValue*> kept, keptLinear;
+    std::vector<OrtValue*> kept;
     if (!runPrefillToKV(retainedHistoryData() + startIdx, N, input_tensors_kv_init.data(),
-                        linear_state_init.data(), 0, 0, kept, keptLinear, "recompute input_ids")) {
+                        0, 0, kept, "recompute input_ids")) {
         g_history_ids.clear();
         g_history_begin = 0;
         g_history_base = 0;
         return false;
     }
     for (int i=0;i<num_keys_values;++i) saved_kv[i]=kept[i];
-    store_saved_linear(keptLinear);   // rebuilt from zero over the retained window -> consistent linear state
     saved_kv_len = N;
     saved_kv_base = 0;
     publishMemoryUsage();
@@ -1842,82 +1626,9 @@ static bool rebuildSavedKVFromHistory(int memoryTokens) {
     return rebuildSavedKVFromHistoryRetaining(retainTarget);
 }
 
-// Incremental clean-cache update; falls back to a full text rebuild on failure.
-static bool appendCleanTurnKV(const std::vector<int>& ids, int memoryTokens) {
-    if (ids.empty()) {
-        return true;
-    }
-    const OrtApi* api = mMain.api;
-    const int64_t N = static_cast<int64_t>(ids.size());
-    const int64_t prevLen = saved_kv_len;
-    const int64_t prevBase = saved_kv_base;
-        appendHistoryIds(ids);
-    const int64_t projectedLen = prevLen + N;
-    const int intendedRetain = static_cast<int>(
-            memoryUsedInRedZone(memoryTokens, projectedLen)
-                ? memoryGreenTargetUsed(memoryTokens)
-                : projectedLen);
-    if (api == nullptr || prevLen == 0 || saved_kv[0] == nullptr ||
-        (hasLinearState() && !saved_linear_valid) ||                      // linear state stale: rebuild
-        prevBase + prevLen + N + 2 > max_seq_len ||                       // table would overflow: rebuild
-        mMain.session == nullptr) {
-        return rebuildSavedKVFromHistoryRetaining(intendedRetain);
-    }
-    std::vector<OrtValue*> kept, keptLinear;
-    if (!runPrefillToKV(ids.data(), N, saved_kv.data(), saved_linear_states.data(),
-                        prevBase + prevLen, prevLen, kept, keptLinear, "append input_ids")) {
-        return rebuildSavedKVFromHistoryRetaining(intendedRetain);
-    }
-    release_saved_kv();
-    for (int i=0;i<num_keys_values;++i) saved_kv[i]=kept[i];
-    store_saved_linear(keptLinear);   // continues the recurrence from the persisted linear state
-    saved_kv_len = prevLen + N;
-    saved_kv_base = prevBase;
-    if (memoryUsedInRedZone(memoryTokens, saved_kv_len)) {
-        return rebuildSavedKVFromHistoryRetaining(intendedRetain);
-    }
-    publishMemoryUsage();
-    return true;
-}
-
-constexpr int kInlineCleanCommitMaxTokens = 256;
-
-static void runCleanCommit(const std::vector<int>& ids, bool kvStateValid, int memoryTokens) {
-    if (g_clean_commit_cancel.load(std::memory_order_relaxed)) {
-        return;
-    }
-    if (kvStateValid) {
-        if (!appendCleanTurnKV(ids, memoryTokens)) {
-            LOGE("Clean-cache recompute failed; resetting conversation history");
-            clear_history("clean_commit_recompute_failed");
-        }
-    } else {
-        clear_history("clean_commit_invalid_kv_state");
-    }
-}
-
-static void commitCleanTurn(std::vector<int>&& dialogueIds, bool kvStateValid, int memoryTokens,
-                            bool showStatus) {
-    if (dialogueIds.size() <= static_cast<size_t>(kInlineCleanCommitMaxTokens)) {
-        beginCleanCommit(showStatus);
-        runCleanCommit(dialogueIds, kvStateValid, memoryTokens);
-        finishCleanCommit();
-        return;
-    }
-    beginCleanCommit(showStatus);
-    g_maintenance_worker.submit(
-            [ids = std::move(dialogueIds), kvStateValid, memoryTokens]() mutable {
-        runCleanCommit(ids, kvStateValid, memoryTokens);
-        finishCleanCommit();
-    });
-}
-
-// OFF red-zone cap rebuild; green-zone OFF saves KV directly. This path runs ONLY when the retained KV
-// crossed the red-zone trigger, i.e. a forced memory organization -- so it surfaces the "整理记忆" box even
-// though the Organize Memory toggle is off, matching the ON path (the box tracks whether organization runs,
-// not whether the toggle is set).
+// Red-zone cap rebuild. Green-zone turns save KV directly; crossing red re-prefills to the green target.
 static void commitOffCap(int cap) {
-    beginCleanCommit(true);
+    beginCleanCommit();
     g_maintenance_worker.submit([cap]() {
         if (!g_clean_commit_cancel.load(std::memory_order_relaxed)) {
             if (rebuildSavedKVFromHistoryRetaining(cap)) {
@@ -1932,8 +1643,8 @@ static void commitOffCap(int cap) {
     });
 }
 
-// OFF mode: transfer decode KV directly; red-zone trimming is a background re-prefill, not a slice.
-static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV, std::vector<OrtValue*>& decodeLinear,
+// Transfer decode KV directly; red-zone trimming is a background re-prefill, not a slice.
+static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV,
                                int64_t decodeBase,
                                const std::vector<int>& promptIds, const std::vector<int>& replyIds,
                                int memoryTokens, int* pendingCap) {
@@ -1955,7 +1666,6 @@ static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV, std::vector<Ort
         releaseOne(api, decodeKV[i]);
     }
     decodeKV.clear();
-    store_saved_linear(decodeLinear);   // decode linear is consistent (no in-turn slide for hybrid)
     saved_kv_len  = physLen;
     saved_kv_base = decodeBase;
     appendHistoryIds(promptIds);
@@ -2056,11 +1766,8 @@ Java_com_example_myapplication_MainActivity_Get_1Last_1Benchmark_1Correctness(JN
 
 // Decode strategy.
 struct DecodeStrategy {
-    bool beam = false;
     bool sampling = false;
-    int  decodeBatch = 1;
     int  topK = 1;
-    int  beamSize = 1;
     float repeatPenalty = DEFAULT_REPEAT_PENALTY;
     int  penaltyRange = DEFAULT_PENALTY_RANGE;
     float temperature = DEFAULT_TEMPERATURE;
@@ -2069,43 +1776,16 @@ struct DecodeStrategy {
 
 static DecodeStrategy resolveDecodeStrategy() {
     DecodeStrategy s;
-    int cfgDecodeMode = DECODE_MODE_GREEDY;
-    bool cfgUseBeam = false;
-    bool cfgUseSampling = false;
-    int cfgTopK = 1;
-    int cfgBeamSize = 1;
-    float cfgRepeatPenalty = DEFAULT_REPEAT_PENALTY;
-    int cfgPenaltyRange = DEFAULT_PENALTY_RANGE;
-    float cfgTemperature = DEFAULT_TEMPERATURE;
-    float cfgTopP = DEFAULT_TOP_P;
-    {
-        std::lock_guard<std::mutex> lock(g_runtime_config_mutex);
-        cfgDecodeMode = clampInt(decodeMode, DECODE_MODE_GREEDY, DECODE_MODE_SAMPLING);
-        cfgUseBeam = useBeamSearch;
-        cfgUseSampling = useSampling;
-        cfgTopK = clampInt(topK, 1, cfgUseSampling
-                ? MAX_SAMPLING_TOP_K_RUNTIME : MAX_TOP_K_RUNTIME);
-        cfgBeamSize = clampInt(beamSize, 1, MAX_BEAM_SIZE_RUNTIME);
-        cfgRepeatPenalty = cfgUseSampling
-                ? std::max(1.0f, std::min(repeatPenalty, MAX_SAMPLING_PENALTY))
-                : std::max(0.0f, std::min(repeatPenalty, 1.0f));
-        cfgPenaltyRange = clampInt(penaltyRange, 1, MAX_PENALTY_RANGE_RUNTIME);
-        cfgTemperature = std::max(MIN_TEMPERATURE_RUNTIME,
-                std::min(temperature, MAX_TEMPERATURE_RUNTIME));
-        cfgTopP = std::max(MIN_TOP_P_RUNTIME, std::min(topP, MAX_TOP_P_RUNTIME));
-        if (cfgUseBeam && cfgTopK < cfgBeamSize) {
-            cfgTopK = cfgBeamSize;
-        }
-    }
-    s.beam = cfgDecodeMode == DECODE_MODE_BEAM && cfgUseBeam && cfgTopK >= 2 && cfgBeamSize >= 2;
-    s.sampling = cfgDecodeMode == DECODE_MODE_SAMPLING && cfgUseSampling;
-    s.decodeBatch = s.beam ? cfgBeamSize : 1;
-    s.topK = cfgTopK;
-    s.beamSize = cfgBeamSize;
-    s.repeatPenalty = cfgRepeatPenalty;
-    s.penaltyRange = cfgPenaltyRange;
-    s.temperature = cfgTemperature;
-    s.topP = cfgTopP;
+    std::lock_guard<std::mutex> lock(g_runtime_config_mutex);
+    s.sampling = decodeMode == DECODE_MODE_SAMPLING;
+    s.topK = clampInt(topK, 1, MAX_SAMPLING_TOP_K_RUNTIME);
+    s.repeatPenalty = s.sampling
+        ? std::max(1.0f, std::min(repeatPenalty, MAX_SAMPLING_PENALTY))
+        : std::max(0.0f, std::min(repeatPenalty, 1.0f));
+    s.penaltyRange = clampInt(penaltyRange, 1, MAX_PENALTY_RANGE_RUNTIME);
+    s.temperature = std::max(MIN_TEMPERATURE_RUNTIME,
+        std::min(temperature, MAX_TEMPERATURE_RUNTIME));
+    s.topP = std::max(MIN_TOP_P_RUNTIME, std::min(topP, MAX_TOP_P_RUNTIME));
     return s;
 }
 
@@ -2114,18 +1794,18 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass clazz,
                                                            jint decode_mode,
                                                            jint top_k,
-                                                           jint beam_size,
                                                            jfloat repeat_penalty,
                                                            jint penalty_range,
                                                            jfloat sampling_temperature,
                                                            jfloat top_p) {
     (void)clazz;
-    const int cfgDecodeMode = clampInt(decode_mode, DECODE_MODE_GREEDY, DECODE_MODE_SAMPLING);
-    const bool cfgUseBeam = cfgDecodeMode == DECODE_MODE_BEAM;
+    if (decode_mode != DECODE_MODE_GREEDY && decode_mode != DECODE_MODE_SAMPLING) {
+        LOGE("LLM decode config rejected invalid mode=%d", static_cast<int>(decode_mode));
+        return JNI_FALSE;
+    }
+    const int cfgDecodeMode = static_cast<int>(decode_mode);
     const bool cfgUseSampling = cfgDecodeMode == DECODE_MODE_SAMPLING;
-    int cfgTopK = clampInt(top_k, 1, cfgUseSampling
-            ? MAX_SAMPLING_TOP_K_RUNTIME : MAX_TOP_K_RUNTIME);
-    const int cfgBeamSize = clampInt(beam_size, cfgUseBeam ? 2 : 1, MAX_BEAM_SIZE_RUNTIME);
+    const int cfgTopK = clampInt(top_k, 1, MAX_SAMPLING_TOP_K_RUNTIME);
     const float cfgRepeatPenalty = cfgUseSampling
             ? std::max(1.0f, std::min(repeat_penalty, MAX_SAMPLING_PENALTY))
             : std::max(0.0f, std::min(repeat_penalty, 1.0f));
@@ -2134,11 +1814,8 @@ Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass c
             std::min(sampling_temperature, MAX_TEMPERATURE_RUNTIME));
     const float cfgTopP = std::max(MIN_TOP_P_RUNTIME, std::min(top_p, MAX_TOP_P_RUNTIME));
     const bool cfgUsePenalty = !cfgUseSampling && cfgRepeatPenalty < DEFAULT_REPEAT_PENALTY;
-    if (cfgUseBeam && cfgTopK < cfgBeamSize) {
-        cfgTopK = cfgBeamSize;
-    }
 
-        const MergedStrategy requestedStrategy =
+    const MergedStrategy requestedStrategy =
             mergedStrategyForConfig(cfgDecodeMode, cfgUsePenalty);
     bool needsSessionSwap = false;
     {
@@ -2176,43 +1853,23 @@ Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass c
     {
         std::lock_guard<std::mutex> configLock(g_runtime_config_mutex);
         decodeMode = cfgDecodeMode;
-        useBeamSearch = cfgUseBeam;
-        useSampling = cfgUseSampling;
         topK = cfgTopK;
-        beamSize = cfgBeamSize;
         repeatPenalty = cfgRepeatPenalty;
         penaltyRange = cfgPenaltyRange;
         temperature = cfgTemperature;
         topP = cfgTopP;
         g_config_merged_strategy = requestedStrategy;
     }
-    LOGI("LLM decode config mode=%d beam=%d sampling=%d penalty=%d topK=%d beamSize=%d "
+    LOGI("LLM decode config mode=%d sampling=%d penalty=%d topK=%d "
          "repeatPenalty=%.3f penaltyRange=%d temperature=%.3f topP=%.3f",
          cfgDecodeMode,
-         cfgUseBeam ? 1 : 0,
          cfgUseSampling ? 1 : 0,
          cfgUsePenalty ? 1 : 0,
          cfgTopK,
-         cfgBeamSize,
          cfgRepeatPenalty,
          cfgPenaltyRange,
          cfgTemperature,
          cfgTopP);
-    return JNI_TRUE;
-}
-
-// Organize-memory toggle takes effect on the next turn.
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication_MainActivity_Configure_1Organize_1Memory(JNIEnv* env, jclass clazz,
-                                                                       jboolean enable) {
-    (void)env;
-    (void)clazz;
-    const bool organize = (enable == JNI_TRUE);
-    {
-        std::lock_guard<std::mutex> lock(g_runtime_config_mutex);
-        g_organize_memory = organize;
-    }
-    LOGI("LLM organize-memory config: %d", organize ? 1 : 0);
     return JNI_TRUE;
 }
 
@@ -2291,8 +1948,7 @@ Java_com_example_myapplication_MainActivity_Supports_1Prefill_1Lookback(
         JNIEnv* env, jclass clazz) {
     (void)env;
     (void)clazz;
-    const bool supported = num_linear_attention_layers == 0 &&
-            mKVSplit2.session != nullptr && mKVConcat.session != nullptr;
+    const bool supported = mKVSplit2.session != nullptr && mKVConcat.session != nullptr;
     return supported ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -2374,46 +2030,9 @@ Java_com_example_myapplication_MainActivity_Pre_1Process(JNIEnv* /*env*/, jobjec
         return JNI_FALSE;
     }
     {
-        std::lock_guard<std::mutex> lock(g_system_prompt_mutex);
-        if (g_system_prompt_text.empty()) {
-            g_system_prompt_text = DEFAULT_SYSTEM_PROMPT;
-        }
-        rebuild_system_prompt_ids_locked();
-    }
-    {
         std::lock_guard<std::mutex> tokenizerLock(g_tokenizer_mutex);
         g_manual_stop_notice_ids = tokenizer->encode(MANUAL_STOP_NOTICE);
     }
-    return JNI_TRUE;
-}
-
-// JNI: slot system prompt.
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication_MainActivity_Set_1System_1Prompt(JNIEnv* env, jclass /*clazz*/,
-                                                                jstring system_prompt) {
-    if (tokenizer == nullptr) {
-        return JNI_FALSE;   // tokenizer not ready (Pre_Process must run first)
-    }
-    std::string newPrompt;
-    if (system_prompt == nullptr) {
-        newPrompt.clear();
-    } else if (!jStringToUtf8(env, system_prompt, newPrompt)) {
-        return JNI_FALSE;
-    }
-    if (is_blank_system_prompt(newPrompt)) {
-        newPrompt.clear();
-    }
-    size_t bodyTokens = 0;
-    int64_t blockLen = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_system_prompt_mutex);
-        g_system_prompt_text = std::move(newPrompt);
-        rebuild_system_prompt_ids_locked();
-        bodyTokens = g_system_prompt_ids.size();
-        blockLen = g_system_block_len;
-    }
-    LOGI("Slot system prompt set: %zu body tokens, block len %lld",
-         bodyTokens, static_cast<long long>(blockLen));
     return JNI_TRUE;
 }
 
@@ -2435,7 +2054,7 @@ static jstring runCancelled(JNIEnv* env) {
 // JNI: full generation.
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz*/, jstring jquery,
-                                                     jboolean clear, jboolean use_think, jint turn_id) {
+                                                     jboolean clear, jint turn_id) {
     if (g_busy.exchange(true, std::memory_order_acq_rel)) {
         return runError(env, "BUSY");
     }
@@ -2473,11 +2092,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         clear_history("java_clear_flag");
     }
     const MemoryProfile memory = snapshotMemoryProfile();
-    bool organizeMemory;
-    {
-        std::lock_guard<std::mutex> lock(g_runtime_config_mutex);
-        organizeMemory = g_organize_memory;
-    }
     if (saved_kv_len > memory.memoryTokens) {
         if (!rebuildSavedKVFromHistory(memory.memoryTokens)) {
             clear_history("memory_cap_rebuild_failed");
@@ -2496,38 +2110,17 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     if (queryIds.size() > static_cast<size_t>(max_seq_len)) {
         return runError(env, "INPUT_TOO_LONG");
     }
-    // In OFF mode the system block becomes part of retained KV once. Organize-memory strips it from
-    // each clean rebuild, so ON injects it on every live turn.
-    std::vector<int> activeSystemBlock;
-    int64_t activeSystemBlockLen = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_system_prompt_mutex);
-        if (g_system_block_len > 0 && !g_system_prompt_ids.empty()) {
-            activeSystemBlockLen = g_system_block_len;
-            activeSystemBlock.reserve(static_cast<size_t>(activeSystemBlockLen));
-            activeSystemBlock.insert(activeSystemBlock.end(), chat_system_prefix_ids.begin(), chat_system_prefix_ids.end());
-            activeSystemBlock.insert(activeSystemBlock.end(), g_system_prompt_ids.begin(), g_system_prompt_ids.end());
-            activeSystemBlock.insert(activeSystemBlock.end(), chat_system_suffix_ids.begin(), chat_system_suffix_ids.end());
-        }
-    }
-    const bool injectSystem = activeSystemBlockLen > 0 &&
-            (organizeMemory || saved_kv_len == 0);
-        const bool injectConversationPrefix = !injectSystem && saved_kv_len == 0 &&
+    const bool injectConversationPrefix = saved_kv_len == 0 &&
             !chat_conversation_prefix_ids.empty();
 
     // Build the live prompt once in final order.
-    const size_t thinkSuffixLen = use_think != JNI_TRUE
-            ? chat_empty_think_block_ids.size()
-            : chat_think_prefix_ids.size();
-        const size_t commonPromptSize = (injectSystem ? activeSystemBlock.size() : 0) +
+    const size_t thinkSuffixLen = chat_empty_think_block_ids.size();
+    const size_t commonPromptSize =
             (injectConversationPrefix ? chat_conversation_prefix_ids.size() : 0) +
             chat_user_prefix_ids.size() + queryIds.size() + chat_assistant_prefix_ids.size() +
             thinkSuffixLen;
     std::vector<int> get_ids;
     get_ids.reserve(commonPromptSize);
-    if (injectSystem) {
-        get_ids.insert(get_ids.end(), activeSystemBlock.begin(), activeSystemBlock.end());
-    }
     if (injectConversationPrefix) {
         get_ids.insert(get_ids.end(), chat_conversation_prefix_ids.begin(),
                        chat_conversation_prefix_ids.end());
@@ -2535,48 +2128,26 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     get_ids.insert(get_ids.end(), chat_user_prefix_ids.begin(), chat_user_prefix_ids.end());
     get_ids.insert(get_ids.end(), queryIds.begin(), queryIds.end());
     get_ids.insert(get_ids.end(), chat_assistant_prefix_ids.begin(), chat_assistant_prefix_ids.end());
-    if (use_think != JNI_TRUE) {
-        get_ids.insert(get_ids.end(), chat_empty_think_block_ids.begin(), chat_empty_think_block_ids.end());
-    } else {
-        get_ids.insert(get_ids.end(), chat_think_prefix_ids.begin(), chat_think_prefix_ids.end());
-    }
+    get_ids.insert(get_ids.end(), chat_empty_think_block_ids.begin(), chat_empty_think_block_ids.end());
 
     const DecodeStrategy strat = resolveDecodeStrategy();
-    const bool useBeam = strat.beam;
     const bool useSampling = strat.sampling;
-    // OFF greedy/sampling directly save live KV; Organize Memory and beam rebuild from token ids.
-    const bool rebuildCleanStateFromIds = organizeMemory || useBeam;
-    std::vector<int> dialogueBaseIds;
-    if (rebuildCleanStateFromIds) {
-        const int64_t dialogueSkip = (injectSystem && organizeMemory) ? activeSystemBlockLen : 0;
-        dialogueBaseIds.assign(get_ids.begin() + dialogueSkip, get_ids.end());
-    }
-    const int  decodeBatch = useBeam ? strat.decodeBatch : 1;
-    // Top up the shared-arena reservation for this turn's actual decode batch (beam expands the cache).
-    reserveSharedArena(memory.memoryTokens, decodeBatch);
+    reserveSharedArena(memory.memoryTokens);
     const int  topK = strat.topK;
-    const int  beamSize = strat.beamSize;
     const float repeatPenalty = strat.repeatPenalty;
     const int  penaltyRange = strat.penaltyRange;
     const float samplingTemperature = strat.temperature;
     const float samplingTopP = strat.topP;
 
-    // Retained KV is batch-1; beam expands only after prefill.
     int64_t history_pos = saved_kv_base + saved_kv_len;
     constexpr int64_t decodeBudgetMargin = 2;
     const int prev_close_len = static_cast<int>(chat_previous_assistant_close_ids.size());
     const int sep_len = (saved_kv_len > 0) ? prev_close_len : 0;
     const auto core_len = static_cast<int64_t>(get_ids.size());
     const int64_t prompt_span = static_cast<int64_t>(sep_len) + core_len;
-    // Streaming (pure-text, non-beam) relies on hard RoPE recycle: it slides the window mid-decode, so it
-    // reserves only the fixed recycle headroom here. Beam / hybrid (linear-attention) can't slide, but
-    // their decode is SEPARATELY capped to the remaining rotary budget at decode time (decodeBudget =
-    // min(rotaryDecodeBudget, decodeTokens)); reserving the FULL configured decode up front would force
-    // clearing history that otherwise fits — a small history under a max-length decode setting cleared
-    // the whole conversation every turn. Cap their reserve to the room left AFTER the retained history so
-    // the guard below only trims when history + prompt alone overflow the table; the decode then adapts.
-    const bool recyclerDrivesDecode = !useBeam && !hasLinearState() &&
-            mKVSlice.session != nullptr && mRopeShift.session != nullptr;
+    // Hard RoPE recycle slides the full-attention window mid-decode, so reserve only fixed headroom when
+    // its helper graphs are available. Otherwise reserve the configured decode budget that still fits.
+    const bool recyclerDrivesDecode = mKVSlice.session != nullptr && mRopeShift.session != nullptr;
     const int64_t rotaryBudgetRoom = static_cast<int64_t>(max_seq_len) - prompt_span - decodeBudgetMargin;
     const int64_t decode_reserve = std::max<int64_t>(0,
             recyclerDrivesDecode
@@ -2587,21 +2158,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     // Reclaim absolute RoPE positions before prefill when needed.
     if (history_pos + turn_room > max_seq_len) {
         const int64_t targetLen = static_cast<int64_t>(max_seq_len) - turn_room;
-        if (hasLinearState()) {
-            // Hybrid: can't slice/rope-shift the linear recurrent state; rebuild the retained window
-            // from ids so the full-attention KV and the linear state stay consistent.
-            if (targetLen > 0 && rebuildSavedKVFromHistoryRetaining(static_cast<int>(targetLen))) {
+        if (targetLen > 0 && saved_kv_len + turn_room > max_seq_len) {
+            if (shrinkSavedKVForRotaryBudget(targetLen)) {
                 history_pos = saved_kv_base + saved_kv_len;
             }
-        } else {
-            if (targetLen > 0 && saved_kv_len + turn_room > max_seq_len) {
-                if (shrinkSavedKVForRotaryBudget(targetLen)) {
-                    history_pos = saved_kv_base + saved_kv_len;
-                }
-            }
-            if (saved_kv_len + turn_room <= max_seq_len && renumberSavedKV()) {
-                history_pos = saved_kv_base + saved_kv_len;
-            }
+        }
+        if (saved_kv_len + turn_room <= max_seq_len && renumberSavedKV()) {
+            history_pos = saved_kv_base + saved_kv_len;
         }
         if (history_pos + turn_room > max_seq_len) {
             clear_history("rotary_budget_overflow");
@@ -2645,8 +2208,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     record_turn_checkpoint(turn_id, logicalHistoryEnd(), saved_kv_len);
 
     // ================================ MERGED GENERATION ================================
-    // The merged export runs ONE prefill graph (Rotary+embed+Main+head fused) producing the KV/linear
-    // state block AND the first token, then a decode graph per token. Selection is by strategy.
+    // The merged export runs one prefill graph (Rotary+embed+Main+head fused) producing the KV state block
+    // and first token, then a decode graph per token. Selection is by strategy.
     // This path reuses the turn setup above and the KV-block
     // persistence (saveDecodeKVDirect / commitCleanTurn).
     {
@@ -2655,8 +2218,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         MergedStrategy mstrat = directPenalty ? MSTRAT_PENALTY_GREEDY : MSTRAT_GREEDY;
         if (useSampling) {
             mstrat = MSTRAT_SAMPLING;
-        } else if (useBeam) {
-            mstrat = directPenalty ? MSTRAT_PENALTY_BEAM : MSTRAT_BEAM;
         }
         ModelId prefillId = mergedPrefillModel(mstrat);
         ModelId decodeId  = mergedDecodeModel(mstrat);
@@ -2688,9 +2249,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         const int pIdsLenIn = findInputIdx(pg, "prefill_ids_len");
         const int pHistoryLenIn = findInputIdx(pg, "prefill_history_len");
         const int pCacheLenIn = findInputIdx(pg, "prefill_cache_len");
-        if (pTokenIn < num_main_states || dTokenIn < num_main_states || dKvSeqIn < num_main_states ||
-            pIdsLenIn < num_main_states || pHistoryLenIn < num_main_states ||
-            pCacheLenIn < num_main_states ||
+        if (pTokenIn < num_keys_values || dTokenIn < num_keys_values || dKvSeqIn < num_keys_values ||
+            pIdsLenIn < num_keys_values || pHistoryLenIn < num_keys_values ||
+            pCacheLenIn < num_keys_values ||
             !isIntegerTensorType(pg.inputTypes[pTokenIn]) ||
             !isIntegerTensorType(dg.inputTypes[dTokenIn]) ||
             !isIntegerTensorType(dg.inputTypes[dKvSeqIn]) ||
@@ -2703,21 +2264,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
              dg.fileName.c_str(), dTokenIn, dKvSeqIn);
             return runError(env, "MODEL_CONTRACT");
         }
-        const bool isBeam    = (mstrat == MSTRAT_BEAM || mstrat == MSTRAT_PENALTY_BEAM);
         const bool isSampling = (mstrat == MSTRAT_SAMPLING);
-        const bool isPenalty = (mstrat == MSTRAT_PENALTY_GREEDY || mstrat == MSTRAT_PENALTY_BEAM);
-        const bool requiresSaveId = isPenalty || isBeam || isSampling;
-        const int  genBatch  = isBeam ? std::max(1, beamSize) : 1;
-        // Inverse of the outer-scope persistence route: OFF greedy/sampling direct-save.
-        const bool offDirectSave = !rebuildCleanStateFromIds;
-        // Hybrid recurrent state cannot be windowed. FirstBeam uses a dedicated concat helper that
-        // gathers one identical suffix row, restores the batch-1 prefix, then expands to all beams.
-        const bool prefillConcatReady = isBeam
-                ? mKVConcatFirstBeam.session != nullptr
-                : mKVConcat.session != nullptr;
+        const bool isPenalty = (mstrat == MSTRAT_PENALTY_GREEDY);
+        const bool requiresSaveId = isPenalty || isSampling;
+        const bool prefillConcatReady = mKVConcat.session != nullptr;
         const bool prefillDecoupleEligible =
-            !hasLinearState() &&
-            reusedHistory && saved_kv[0] != nullptr && pCacheLenIn >= num_main_states &&
+            reusedHistory && saved_kv[0] != nullptr && pCacheLenIn >= num_keys_values &&
             mKVSplit2.session != nullptr && prefillConcatReady;
         const bool prefillZeroWindow = prefillDecoupleEligible && memory.prefillTokens == 0;
         const bool prefillRecentWindow = prefillDecoupleEligible && memory.prefillTokens > 0 &&
@@ -2730,9 +2282,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         const int penaltyValueIn = findInputIdx(dg, "penalty_penalty_value");
         const int penaltyRangeIn = findInputIdx(dg, "penalty_penalty_range");
-        const int beamSizeIn = findInputIdx(dg, "beam_beam_size");
-        const int beamTopKIn = findInputIdx(dg, "beam_topK");
-        const int beamPreviousProbIn = findInputIdx(dg, "beam_previous_prob");
         const int samplingTemperatureIn = findInputIdx(dg, "sampling_temperature");
         const int samplingTopKIn = findInputIdx(dg, "sampling_top_k");
         const int samplingTopPIn = findInputIdx(dg, "sampling_top_p");
@@ -2749,7 +2298,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         auto collectSaveIdInputs = [](const ModelRuntime& graph) {
             std::vector<int> indices;
             for (const char* name : {"penalty_save_id_in", "penalty_greedy_save_id_in",
-                                     "beam_save_id_in", "sampling_previous_ids"}) {
+                                     "sampling_previous_ids"}) {
                 const int index = findInputIdx(graph, name);
                 if (index >= 0) {
                     indices.push_back(index);
@@ -2779,22 +2328,15 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         }
         bool strategyContractValid = true;
         switch (mstrat) {
+            case MSTRAT_GREEDY:
+                break;
             case MSTRAT_PENALTY_GREEDY:
                 strategyContractValid = hasInput(pg, "penalty_greedy_save_id_in") &&
                         hasInput(dg, "penalty_save_id_in") && hasInput(dg, "penalty_greedy_save_id_in");
                 break;
-            case MSTRAT_BEAM:
-                strategyContractValid = hasInput(pg, "beam_save_id_in") && hasInput(dg, "beam_save_id_in");
-                break;
-            case MSTRAT_PENALTY_BEAM:
-                strategyContractValid = hasInput(pg, "beam_save_id_in") &&
-                        hasInput(dg, "penalty_save_id_in") && hasInput(dg, "beam_save_id_in");
-                break;
             case MSTRAT_SAMPLING:
                 strategyContractValid = hasInput(pg, "sampling_previous_ids") &&
                         hasInput(dg, "sampling_previous_ids");
-                break;
-            default:
                 break;
         }
         if (!strategyContractValid ||
@@ -2806,13 +2348,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                             !isIntegerTensorType(dg.inputTypes[penaltyRangeIn]) ||
                             !inputTypeMatches(pg, "penalty_penalty_value", dg.inputTypes[penaltyValueIn]) ||
                             !inputTypeMatches(pg, "penalty_penalty_range", dg.inputTypes[penaltyRangeIn]))) ||
-            (isBeam &&
-             (beamSizeIn < 0 || beamTopKIn < 0 || beamPreviousProbIn < 0 ||
-                            !isIntegerTensorType(dg.inputTypes[beamSizeIn]) ||
-                            !isIntegerTensorType(dg.inputTypes[beamTopKIn]) ||
-                            !isFloatingTensorType(dg.inputTypes[beamPreviousProbIn]) ||
-                            !inputTypeMatches(pg, "beam_beam_size", dg.inputTypes[beamSizeIn]) ||
-                            !inputTypeMatches(pg, "beam_topK", dg.inputTypes[beamTopKIn]))) ||
             (isSampling &&
              (samplingTemperatureIn < 0 || samplingTopKIn < 0 || samplingTopPIn < 0 ||
                             samplingPenaltyIn < 0 ||
@@ -2844,7 +2379,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         // ---- reusable metadata-typed input buffers ----
         OrtBuffer idsBuf, idsLenBuf, historyLenBuf, cacheLenBuf;
-        OrtBuffer penaltyValBuf, penaltyRangeBuf, beamSizeBuf, beamTopKBuf;
+        OrtBuffer penaltyValBuf, penaltyRangeBuf;
         OrtBuffer samplingTemperatureBuf, samplingTopKBuf, samplingTopPBuf, samplingPenaltyBuf;
         OrtBuffer emptySaveIdBuf;
         std::vector<OrtValue*> prefillPrefixKV;
@@ -2861,15 +2396,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             penaltyRangeBuf = makeBuffer(dg, {1}, rangeType);
             inputBuffersOk = writeScalarFloat(penaltyValBuf, valueType, repeatPenalty) &&
                              writeScalarInt64(penaltyRangeBuf, rangeType, penaltyRange) &&
-                             inputBuffersOk;
-        }
-        if (isBeam) {
-            const ONNXTensorElementDataType sizeType = dg.inputTypes[beamSizeIn];
-            const ONNXTensorElementDataType topKType = dg.inputTypes[beamTopKIn];
-            beamSizeBuf = makeBuffer(dg, {1}, sizeType);
-            beamTopKBuf = makeBuffer(dg, {1}, topKType);
-            inputBuffersOk = writeScalarInt64(beamSizeBuf, sizeType, beamSize) &&
-                             writeScalarInt64(beamTopKBuf, topKType, std::max(topK, beamSize)) &&
                              inputBuffersOk;
         }
         if (isSampling) {
@@ -2889,7 +2415,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                              inputBuffersOk;
         }
         if (requiresSaveId) {
-            emptySaveIdBuf = makeBuffer(pg, {static_cast<int64_t>(genBatch), 0}, saveIdType);
+            emptySaveIdBuf = makeBuffer(pg, {1, 0}, saveIdType);
             inputBuffersOk = emptySaveIdBuf.value != nullptr && inputBuffersOk;
         }
 
@@ -2907,12 +2433,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                 const int rangeIdx = findInputIdx(g, "penalty_penalty_range");
                 if (valueIdx >= 0) { bound = bindIn(g, valueIdx, penaltyValBuf.value) && bound; }
                 if (rangeIdx >= 0) { bound = bindIn(g, rangeIdx, penaltyRangeBuf.value) && bound; }
-            }
-            if (isBeam) {
-                const int sizeIdx = findInputIdx(g, "beam_beam_size");
-                const int topKIdx = findInputIdx(g, "beam_topK");
-                if (sizeIdx >= 0) { bound = bindIn(g, sizeIdx, beamSizeBuf.value) && bound; }
-                if (topKIdx >= 0) { bound = bindIn(g, topKIdx, beamTopKBuf.value) && bound; }
             }
             if (isSampling) {
                 const int temperatureIdx = findInputIdx(g, "sampling_temperature");
@@ -2959,8 +2479,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             releaseBuffer(mApi, cacheLenBuf);
             releaseBuffer(mApi, penaltyValBuf);
             releaseBuffer(mApi, penaltyRangeBuf);
-            releaseBuffer(mApi, beamSizeBuf);
-            releaseBuffer(mApi, beamTopKBuf);
             releaseBuffer(mApi, samplingTemperatureBuf);
             releaseBuffer(mApi, samplingTopKBuf);
             releaseBuffer(mApi, samplingTopPBuf);
@@ -2997,10 +2515,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                     : ((reusedHistory && saved_kv[i] != nullptr) ? saved_kv[i] : input_tensors_kv_init[i]);
             prefillBound = bindIn(pg, i, kvIn) && prefillBound;
         }
-        for (int i = 0; i < num_linear_states; ++i) {
-            OrtValue* linIn = (reusedHistory && saved_linear_valid) ? saved_linear_states[i] : linear_state_init[i];
-            prefillBound = bindIn(pg, num_keys_values + i, linIn) && prefillBound;
-        }
         prefillBound = bindIn(pg, pTokenIn, idsBuf.value) && prefillBound;
         prefillBound = bindIn(pg, pIdsLenIn, idsLenBuf.value) && prefillBound;
         prefillBound = bindIn(pg, pHistoryLenIn, historyLenBuf.value) && prefillBound;
@@ -3016,7 +2530,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         const int64_t prefill_start_ms = now_ms();
         std::vector<OrtValue*> prefillOut;
         if (!prefillBound || !runBinding(pg) || !fetchOutputsInto(pg, prefillOut) ||
-            prefillOut.size() < static_cast<size_t>(num_main_states)) {
+            prefillOut.size() < static_cast<size_t>(num_keys_values)) {
             releaseValues(mApi, prefillOut);
             releasePrefillSlices();
             releaseInputBuffers();
@@ -3032,28 +2546,26 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         // Resolve prefill output positions by name.
         const int pMaxIdx  = findOutputIdxAny(pg, {"greedy_max_logits_idx", "penalty_greedy_max_logits_idx",
-                               "beam_max_logits_idx", "sampling_sampled_id"});
-        const int pNextTok = isBeam ? findOutputIdx(pg, "beam_top_beam_indices") : pMaxIdx;
+                               "sampling_sampled_id"});
+        const int pNextTok = pMaxIdx;
         const int pKvSeq   = findOutputIdx(pg, "prefill_kv_seq_len");
-        const int pSaveId  = findOutputIdxAny(pg, {"penalty_greedy_save_id_out", "beam_save_id_out",
+        const int pSaveId  = findOutputIdxAny(pg, {"penalty_greedy_save_id_out",
                        "sampling_save_id_out"});
-        const int pBeamPr  = isBeam ? findOutputIdx(pg, "beam_top_beam_prob") : -1;
         const int dMaxIdx  = findOutputIdxAny(dg, {"greedy_max_logits_idx", "penalty_greedy_max_logits_idx",
-                               "beam_max_logits_idx", "sampling_sampled_id"});
-        const int dNextTok = isBeam ? findOutputIdx(dg, "beam_top_beam_indices") : dMaxIdx;
+                               "sampling_sampled_id"});
+        const int dNextTok = dMaxIdx;
         const int dKvSeq   = findOutputIdxAny(dg, {"decode_kv_seq_len_next", "decode_kv_seq_len"});
-        const int dSaveId  = findOutputIdxAny(dg, {"penalty_greedy_save_id_out", "beam_save_id_out",
+        const int dSaveId  = findOutputIdxAny(dg, {"penalty_greedy_save_id_out",
                        "sampling_save_id_out"});
-        const int dBeamPr  = isBeam ? findOutputIdx(dg, "beam_top_beam_prob") : -1;
 
         auto hasPrefillOutput = [&](int idx) {
-            return idx >= num_main_states && idx < static_cast<int>(prefillOut.size());
+            return idx >= num_keys_values && idx < static_cast<int>(prefillOut.size());
         };
         auto hasDecodeOutput = [&](int idx) {
-            return idx >= num_main_states && idx < static_cast<int>(dg.outputNames.size());
+            return idx >= num_keys_values && idx < static_cast<int>(dg.outputNames.size());
         };
         bool stateTypesValid = true;
-        for (int i = 0; i < num_main_states; ++i) {
+        for (int i = 0; i < num_keys_values; ++i) {
             const ONNXTensorElementDataType canonicalType = mMain.inputTypes[i];
             stateTypesValid = pg.inputTypes[i] == canonicalType &&
                               pg.outputTypes[i] == canonicalType &&
@@ -3067,30 +2579,24 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             pg.outputTypes[pNextTok] == dg.inputTypes[dTokenIn] &&
             pg.outputTypes[pKvSeq] == dg.inputTypes[dKvSeqIn] &&
             (!requiresSaveId || (hasPrefillOutput(pSaveId) &&
-             pg.outputTypes[pSaveId] == saveIdType)) &&
-            (!isBeam || (hasPrefillOutput(pBeamPr) &&
-             pg.outputTypes[pBeamPr] == dg.inputTypes[beamPreviousProbIn]));
+             pg.outputTypes[pSaveId] == saveIdType));
         const bool decodeTypesValid = hasDecodeOutput(dMaxIdx) && hasDecodeOutput(dNextTok) &&
             hasDecodeOutput(dKvSeq) &&
             isIntegerTensorType(dg.outputTypes[dMaxIdx]) &&
             dg.outputTypes[dNextTok] == dg.inputTypes[dTokenIn] &&
             dg.outputTypes[dKvSeq] == dg.inputTypes[dKvSeqIn] &&
             (!requiresSaveId || (hasDecodeOutput(dSaveId) &&
-             dg.outputTypes[dSaveId] == saveIdType)) &&
-            (!isBeam || (hasDecodeOutput(dBeamPr) &&
-             dg.outputTypes[dBeamPr] == dg.inputTypes[beamPreviousProbIn]));
+             dg.outputTypes[dSaveId] == saveIdType));
         if (!stateTypesValid || !prefillTypesValid || !decodeTypesValid ||
             !hasPrefillOutput(pMaxIdx) || !hasPrefillOutput(pNextTok) ||
             !hasPrefillOutput(pKvSeq) || (requiresSaveId && !hasPrefillOutput(pSaveId)) ||
-            (isBeam && !hasPrefillOutput(pBeamPr)) ||
             !hasDecodeOutput(dMaxIdx) || !hasDecodeOutput(dNextTok) ||
-            !hasDecodeOutput(dKvSeq) || (requiresSaveId && !hasDecodeOutput(dSaveId)) ||
-            (isBeam && !hasDecodeOutput(dBeamPr))) {
+              !hasDecodeOutput(dKvSeq) || (requiresSaveId && !hasDecodeOutput(dSaveId))) {
             LOGE("Run_LLM(merged): invalid output contract (prefill=%s max=%d next=%d kv=%d save=%d "
-                 "beam_prob=%d outputs=%zu; decode=%s max=%d next=%d kv=%d save=%d beam_prob=%d outputs=%zu; "
-                 "state_count=%d)", pg.fileName.c_str(), pMaxIdx, pNextTok, pKvSeq, pSaveId, pBeamPr,
-                 prefillOut.size(), dg.fileName.c_str(), dMaxIdx, dNextTok, dKvSeq, dSaveId, dBeamPr,
-                 dg.outputNames.size(), num_main_states);
+                  "outputs=%zu; decode=%s max=%d next=%d kv=%d save=%d outputs=%zu; state_count=%d)",
+                  pg.fileName.c_str(), pMaxIdx, pNextTok, pKvSeq, pSaveId,
+                  prefillOut.size(), dg.fileName.c_str(), dMaxIdx, dNextTok, dKvSeq, dSaveId,
+                 dg.outputNames.size(), num_keys_values);
             clearAllModelBindingRefs();
             releaseValues(mApi, prefillOut);
             releasePrefillSlices();
@@ -3099,14 +2605,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         }
 
         // Take ownership of the state block + control tensors; release the rest of the tail.
-        std::vector<OrtValue*> stateVec(prefillOut.begin(), prefillOut.begin() + num_main_states);
-        for (int i = 0; i < num_main_states; ++i) { prefillOut[i] = nullptr; }
+        std::vector<OrtValue*> stateVec(prefillOut.begin(), prefillOut.begin() + num_keys_values);
+        for (int i = 0; i < num_keys_values; ++i) { prefillOut[i] = nullptr; }
         if (prefillDecoupled) {
             std::vector<OrtValue*> suffixKV(stateVec.begin(), stateVec.begin() + num_keys_values);
             std::vector<OrtValue*> fullKV;
-            const bool concatOk = isBeam
-                    ? runKVConcatFirstBeam(prefillPrefixKV, suffixKV, fullKV)
-                    : runKVConcat(prefillPrefixKV, suffixKV, fullKV);
+                const bool concatOk = runKVConcat(prefillPrefixKV, suffixKV, fullKV);
             if (!concatOk ||
                 fullKV.size() < static_cast<size_t>(num_keys_values)) {
                 LOGE("Run_LLM(merged): prefill KV concat failed");
@@ -3134,7 +2638,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         OrtValue* nextToken = takeOut(pNextTok);
         OrtValue* kvSeqTok  = takeOut(pKvSeq);
         OrtValue* saveId    = takeOut(pSaveId);
-        OrtValue* beamProb  = takeOut(pBeamPr);
         int64_t initialKvSeq = -1;
         if (selectedToken < 0 ||
             !readScalarInteger(mApi, kvSeqTok, pg.outputTypes[pKvSeq], initialKvSeq) ||
@@ -3143,7 +2646,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             releaseOne(mApi, nextToken);
             releaseOne(mApi, kvSeqTok);
             releaseOne(mApi, saveId);
-            releaseOne(mApi, beamProb);
             releaseValues(mApi, prefillOut);
             releasePrefillSlices();
             releaseInputBuffers();
@@ -3166,12 +2668,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                   memoryCapacity, static_cast<int>(prefillTokenCount), 0, false);
 
         // ---- generation bookkeeping ----
-        std::vector<int> replyVec;         // answer-only (think excluded), used by ON commit
-        std::vector<int> fullReplyVec;     // OFF: every decoded token (mirrors saved decode KV)
+        std::vector<int> fullReplyVec;     // every decoded token (mirrors saved decode KV)
         int generated = 0, numDecode = 0;
-        // Thinking ON pre-fills "<think>\n" into the prompt (never decoded), so start already inside the
-        // think block: the reasoning body is excluded from the retained answer, exactly as a generated <think>.
-        int replyThinkDepth = (use_think == JNI_TRUE) ? 1 : 0;
         bool kvStateValid = true;
         bool pendingTokenInState = false;  // selected/streamed, but not yet consumed by a decode graph
         int64_t absNext = initialKvSeq;
@@ -3180,41 +2678,20 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         int decodeBudget = memory.decodeTokens;
         const int rotaryRoom = static_cast<int>(std::max<int64_t>(
                 0, static_cast<int64_t>(max_seq_len) - initialKvSeq - decodeMargin));
-        const bool canRecycleDecode = !isBeam && !hasLinearState() &&
-            mKVSlice.session != nullptr && mRopeShift.session != nullptr;
+        const bool canRecycleDecode = mKVSlice.session != nullptr && mRopeShift.session != nullptr;
         if (!canRecycleDecode) { decodeBudget = std::min(decodeBudget, rotaryRoom); }
-        if (rebuildCleanStateFromIds) {
-            replyVec.reserve(static_cast<size_t>(std::max(0, decodeBudget)));
-        }
-        if (!organizeMemory) {
-            fullReplyVec.reserve(static_cast<size_t>(std::max(0, decodeBudget)));
-        }
-
-        auto appendReply = [&](int id) {
-            if (id == chat_think_start_id) { replyThinkDepth += 1; return; }
-            if (id == chat_think_end_id) { if (replyThinkDepth > 0) replyThinkDepth -= 1; return; }
-            if (replyThinkDepth == 0 && rebuildCleanStateFromIds) { replyVec.push_back(id); }
-        };
+        fullReplyVec.reserve(static_cast<size_t>(std::max(0, decodeBudget)));
 
         reset_output_words_decoder();
         stream_buf.clear();
-        if (use_think == JNI_TRUE) {
-            // The <think> token lives in the pre-filled prompt, so the model never streams it. Emit the open
-            // sentinel here so the UI opens the reasoning panel; the model still closes it with </think>.
-            stream_buf.append(kThinkOpenSentinel);
-        }
         tokens_since_flush = 0;
         last_flush_ms = prefill_start_ms;
-        // Commit the prefill's first token (non-beam streams it; beam accumulates in saveId and streams
-        // the winning row at the end).
-        if (!isBeam && selectedToken >= 0 && !is_stop_token(selectedToken) && generated < decodeBudget) {
+        // Commit the prefill's first token.
+        if (selectedToken >= 0 && !is_stop_token(selectedToken) && generated < decodeBudget) {
             generated += 1; numDecode += 1;
-            appendReply(selectedToken);
-            if (!organizeMemory) { fullReplyVec.push_back(selectedToken); }
+            fullReplyVec.push_back(selectedToken);
             stream_token(env, selectedToken);
             pendingTokenInState = true;
-        } else if (isBeam && selectedToken >= 0 && !is_stop_token(selectedToken) && numDecode < decodeBudget) {
-            numDecode += 1;
         }
 
         const auto decode_start_clock = std::chrono::steady_clock::now();
@@ -3241,7 +2718,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         }
         dg.binding = decodeBindings[0];
         int decodeBindingStep = 0;
-        int linearRebindsLeft[2] = {2, 2};
         int controlRebindsLeft[2] = {2, 2};
         std::vector<OrtValue*> stepOut;
         stepOut.reserve(dg.outputNames.size());
@@ -3259,17 +2735,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             for (int i = 0; i < num_keys_values; ++i) {
                 decodeBound = bindIn(dg, i, stateVec[i]) && decodeBound;
             }
-            if (linearRebindsLeft[bindingIndex] > 0) {
-                for (int i = num_keys_values; i < num_main_states; ++i) {
-                    decodeBound = bindIn(dg, i, stateVec[i]) && decodeBound;
-                }
-            }
             if (controlRebindsLeft[bindingIndex] > 0) {
                 decodeBound = bindIn(dg, dTokenIn, nextToken) && decodeBound;
                 decodeBound = bindIn(dg, dKvSeqIn, kvSeqTok) && decodeBound;
-                if (isBeam) {
-                    decodeBound = bindIn(dg, beamPreviousProbIn, beamProb) && decodeBound;
-                }
             }
                 decodeBound = bindDynamicStrategyInput(
                     saveId != nullptr ? saveId : emptySaveIdBuf.value) && decodeBound;
@@ -3286,9 +2754,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                 kvStateValid = false;
                 break;
             }
-            if (linearRebindsLeft[bindingIndex] > 0) {
-                linearRebindsLeft[bindingIndex] -= 1;
-            }
             if (controlRebindsLeft[bindingIndex] > 0) {
                 controlRebindsLeft[bindingIndex] -= 1;
             }
@@ -3296,8 +2761,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             selectedToken = readTokenScalar(stepOut[dMaxIdx], dg.outputTypes[dMaxIdx]);
             // Swap in the new state + control tensors (release the previous ones).
             releaseValues(mApi, stateVec);
-            stateVec.assign(stepOut.begin(), stepOut.begin() + num_main_states);
-            for (int i = 0; i < num_main_states; ++i) { stepOut[i] = nullptr; }
+            stateVec.assign(stepOut.begin(), stepOut.begin() + num_keys_values);
+            for (int i = 0; i < num_keys_values; ++i) { stepOut[i] = nullptr; }
             auto takeStep = [&](int idx) -> OrtValue* {
                 if (idx < 0 || idx >= static_cast<int>(stepOut.size())) { return nullptr; }
                 OrtValue* v = stepOut[idx]; stepOut[idx] = nullptr; return v;
@@ -3305,12 +2770,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             OrtValue* newNext = takeStep(dNextTok);
             OrtValue* newKvSeq = takeStep(dKvSeq);
             OrtValue* newSaveId = takeStep(dSaveId);
-            OrtValue* newBeamPr = takeStep(dBeamPr);
             releaseValues(mApi, stepOut);
             releaseOne(mApi, nextToken); nextToken = newNext;
             releaseOne(mApi, kvSeqTok);  kvSeqTok  = newKvSeq;
             if (newSaveId != nullptr) { releaseOne(mApi, saveId); saveId = newSaveId; }
-            if (newBeamPr != nullptr) { releaseOne(mApi, beamProb); beamProb = newBeamPr; }
 
             // This successful run consumed the previously selected token. The returned counter is the
             // authoritative next absolute position.
@@ -3325,19 +2788,16 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             currentPhysicalLen += 1;
 
             if (is_stop_token(selectedToken)) { break; }
-            if (!isBeam) {
-                generated += 1;
-                appendReply(selectedToken);
-                if (!organizeMemory) { fullReplyVec.push_back(selectedToken); }
-                stream_token(env, selectedToken);
-                const int64_t perf_now_ms = now_ms();
-                if (tokens_since_flush == 0 &&
-                    perf_now_ms - last_decode_perf_ms >= PERF_STATS_INTERVAL_MS) {
-                    pushLiveDecodeStats(generated);
-                    last_decode_perf_ms = perf_now_ms;
-                }
-                pendingTokenInState = true;
+            generated += 1;
+            fullReplyVec.push_back(selectedToken);
+            stream_token(env, selectedToken);
+            const int64_t perf_now_ms = now_ms();
+            if (tokens_since_flush == 0 &&
+                perf_now_ms - last_decode_perf_ms >= PERF_STATS_INTERVAL_MS) {
+                pushLiveDecodeStats(generated);
+                last_decode_perf_ms = perf_now_ms;
             }
+            pendingTokenInState = true;
 
             if (canRecycleDecode && absNext + decodeMargin >= static_cast<int64_t>(max_seq_len)) {
                 const int64_t keepForAppend = memoryGreenTargetUsed(memory.decodeKeepWindow);
@@ -3352,32 +2812,11 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                     LOGE("Run_LLM(merged): in-turn KV recycle failed at abs=%lld len=%lld keep=%lld",
                          static_cast<long long>(absNext), static_cast<long long>(preSlideLen),
                          static_cast<long long>(keepForAppend));
-                    if (offDirectSave) {
-                        kvStateValid = false;
-                    }
+                    kvStateValid = false;
                     break;
                 }
             }
             numDecode += 1;
-            if (isBeam) {
-                const int64_t perf_now_ms = now_ms();
-                if (perf_now_ms - last_decode_perf_ms >= PERF_STATS_INTERVAL_MS) {
-                    pushLiveDecodeStats(numDecode);
-                    last_decode_perf_ms = perf_now_ms;
-                }
-            }
-        }
-
-        // ---- beam finalize: buffer + record row 0; the shared final flush emits one complete reply ----
-        if (isBeam && saveId != nullptr) {
-            std::vector<int> best = extractFirstRowIntegers(mApi, saveId, saveIdType);
-            for (int id : best) {
-                if (is_stop_token(id) || generated >= memory.decodeTokens) { break; }
-                generated += 1;
-                appendReply(id);
-                if (!organizeMemory) { fullReplyVec.push_back(id); }
-                buffer_token(id);
-            }
         }
 
         auto appendExplicitTokensToMergedState = [&](const std::vector<int>& ids) -> bool {
@@ -3404,7 +2843,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
                 resetBinding(dg);
                 bool bound = true;
-                for (int i = 0; i < num_main_states; ++i) {
+                for (int i = 0; i < num_keys_values; ++i) {
                     bound = bindIn(dg, i, stateVec[i]) && bound;
                 }
                 bound = bindIn(dg, dTokenIn, explicitToken.value) && bound;
@@ -3424,8 +2863,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                 }
 
                 releaseValues(mApi, stateVec);
-                stateVec.assign(appendOut.begin(), appendOut.begin() + num_main_states);
-                for (int i = 0; i < num_main_states; ++i) {
+                stateVec.assign(appendOut.begin(), appendOut.begin() + num_keys_values);
+                for (int i = 0; i < num_keys_values; ++i) {
                     appendOut[i] = nullptr;
                 }
                 auto takeAppend = [&](int idx) -> OrtValue* {
@@ -3453,9 +2892,8 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             return true;
         };
 
-        // Detach the final state now so OFF mode can append the last selected token (which has been
-        // streamed but not consumed when decode stops at its budget/cancel boundary) and a manual-stop
-        // notice before persistence. ON/beam rebuild from IDs and do not consume this live state.
+        // Detach the final state so the last selected token (streamed but not yet consumed at a
+        // budget/cancel boundary) and any manual-stop notice can be appended before persistence.
         std::vector<int> manualStopIds;
         if (g_manual_stop.load(std::memory_order_acquire)) {
             {
@@ -3464,13 +2902,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                         ? g_manual_stop_notice_ids
                         : tokenizer->encode(MANUAL_STOP_NOTICE);
             }
-            if (rebuildCleanStateFromIds) {
-                replyVec.insert(replyVec.end(), manualStopIds.begin(), manualStopIds.end());
-            }
             stream_buf.append(MANUAL_STOP_NOTICE);
         }
 
-        if (offDirectSave && kvStateValid && !isBeam) {
+        if (kvStateValid) {
             std::vector<int> stateAppendIds;
             if (pendingTokenInState) {
                 stateAppendIds.push_back(selectedToken);
@@ -3490,8 +2925,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         }
 
         std::vector<OrtValue*> finalKV(stateVec.begin(), stateVec.begin() + num_keys_values);
-        std::vector<OrtValue*> finalLinear(stateVec.begin() + num_keys_values, stateVec.begin() + num_main_states);
-        for (int i = 0; i < num_main_states; ++i) { stateVec[i] = nullptr; }
+        for (int i = 0; i < num_keys_values; ++i) { stateVec[i] = nullptr; }
 
         const auto end_clock = std::chrono::steady_clock::now();
         flush_stream(env);
@@ -3511,49 +2945,20 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         auto cleanupMerged = [&]() {
             releaseValues(mApi, stateVec);
             releaseValues(mApi, finalKV);
-            releaseValues(mApi, finalLinear);
             releaseOne(mApi, nextToken);
             releaseOne(mApi, kvSeqTok);
             releaseOne(mApi, saveId);
-            releaseOne(mApi, beamProb);
             releaseInputBuffers();
             clearAllModelBindingRefs();
         };
 
-        if (offDirectSave) {
-            int pendingCap = -1;
-            const bool saved = kvStateValid &&
-                    saveDecodeKVDirect(finalKV, finalLinear, decodeBase, get_ids, fullReplyVec,
-                                       memory.memoryTokens, &pendingCap);
-            if (!saved) { clear_history("merged_direct_kv_save_failed"); }
-            cleanupMerged();
-            if (saved && pendingCap >= 0) { commitOffCap(pendingCap); }
-            return env->NewStringUTF(stats);
-        }
-
-        // Organize-memory ON / beam: rebuild clean KV and linear state from ids.
-        // The "整理记忆" box tracks whether an organization actually runs, independent of the toggle:
-        // Organize Memory ON rebuilds clean state every turn, and a toggle-off text-beam turn still
-        // forces a red-zone rebuild to the green target once the retained KV crosses the trigger
-        // threshold (routine below-threshold text-beam turns rebuild here silently).
-        std::vector<int> dialogueIds;
-        if (kvStateValid) {
-            dialogueIds.reserve(static_cast<size_t>(prev_close_len) + dialogueBaseIds.size() + replyVec.size());
-            if (reusedHistory) {
-                dialogueIds.insert(dialogueIds.end(), chat_previous_assistant_close_ids.begin(),
-                                   chat_previous_assistant_close_ids.end());
-            }
-            dialogueIds.insert(dialogueIds.end(), dialogueBaseIds.begin(), dialogueBaseIds.end());
-            dialogueIds.insert(dialogueIds.end(), replyVec.begin(), replyVec.end());
-        }
+        int pendingCap = -1;
+        const bool saved = kvStateValid &&
+            saveDecodeKVDirect(finalKV, decodeBase, get_ids, fullReplyVec,
+                                   memory.memoryTokens, &pendingCap);
+        if (!saved) { clear_history("merged_direct_kv_save_failed"); }
         cleanupMerged();
-        // Mirror appendCleanTurnKV's red-zone decision so the box shows when a toggle-off turn is forced
-        // to rebuild to the green target.
-        const bool forcedRedZoneRebuild = kvStateValid &&
-            memoryUsedInRedZone(memory.memoryTokens,
-                                saved_kv_len + static_cast<int64_t>(dialogueIds.size()));
-        commitCleanTurn(std::move(dialogueIds), kvStateValid, memory.memoryTokens,
-            organizeMemory || forcedRedZoneRebuild);
+        if (saved && pendingCap >= 0) { commitOffCap(pendingCap); }
         return env->NewStringUTF(stats);
     }
 }
@@ -3662,8 +3067,7 @@ Java_com_example_myapplication_MainActivity_Rollback_1LLM(JNIEnv* env, jclass cl
         const int64_t retainedLength = historyLen - g_history_base;
         g_history_ids.resize(g_history_begin + static_cast<size_t>(retainedLength));
     }
-    // Fast path when the active window front has not moved since turn start. Only full-attention KV can
-    // be sliced, so hybrid (linear-state) models fall through to the ids rebuild.
+    // Fast path when the active window front has not moved since turn start.
     const int64_t curOffset    = oldFull - saved_kv_len;
     const int64_t targetOffset = historyLen - activeLen;
     if (curOffset == targetOffset && mKVSlice.session != nullptr && saved_kv[0] != nullptr) {
@@ -3671,7 +3075,7 @@ Java_com_example_myapplication_MainActivity_Rollback_1LLM(JNIEnv* env, jclass cl
             return JNI_TRUE;
         }
         std::vector<OrtValue*> cur(saved_kv.begin(), saved_kv.begin() + num_keys_values), sliced;
-        if (!hasLinearState() && runKVSlice(cur, 0, activeLen, sliced)) {
+        if (runKVSlice(cur, 0, activeLen, sliced)) {
             release_saved_kv();
             for (int i = 0; i < num_keys_values; ++i) saved_kv[i] = sliced[i];
             saved_kv_len = activeLen;
