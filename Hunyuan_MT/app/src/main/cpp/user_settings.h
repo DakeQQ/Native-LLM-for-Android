@@ -43,9 +43,9 @@ constexpr int  kDecodeCpuCoreCount   = 2;
 static_assert(kPrefillCpuCoreCount > 0 && kDecodeCpuCoreCount > 0, "CPU core counts must be positive");
 
 // Register one CPU arena on the shared OrtEnv so session.use_env_allocators is effective.
-// -1/0 keep ORT defaults (kNextPowerOfTwo growth, unlimited max memory); false restores per-session arenas.
+// Requested-size growth avoids geometric arena expansion as dynamic KV shapes increase token by token.
 constexpr bool        kRegisterSharedEnvAllocator   = true;
-constexpr int         kEnvArenaExtendStrategy       = -1;   // -1 ORT default (=kNextPowerOfTwo); 1 = kSameAsRequested
+constexpr int         kEnvArenaExtendStrategy       = 1;    // kSameAsRequested; every fully-free region is shrinkable
 constexpr int         kEnvArenaInitialChunkBytes    = -1;   // -1 = ORT default
 constexpr int         kEnvArenaMaxDeadBytesPerChunk = -1;   // -1 = ORT default
 constexpr std::size_t kEnvArenaMaxMemBytes          = 0;    // 0 = unlimited

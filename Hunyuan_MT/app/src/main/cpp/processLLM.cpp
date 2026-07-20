@@ -857,6 +857,79 @@ static inline void shrinkAllocatorIfSupported(const OrtApi* api, OrtAllocator* a
     logOrtStatus(api, allocator->Shrink(allocator), op);
 }
 
+struct ArenaStatsSnapshot {
+    int64_t inUse = -1;
+    int64_t totalAllocated = -1;
+    int64_t extensions = -1;
+    int64_t shrinkages = -1;
+};
+
+static ArenaStatsSnapshot readArenaStats(const OrtApi* api, OrtAllocator* allocator) {
+    ArenaStatsSnapshot snapshot;
+    if (api == nullptr || allocator == nullptr || allocator->GetStats == nullptr) {
+        return snapshot;
+    }
+    OrtKeyValuePairs* stats = nullptr;
+    OrtStatus* status = api->AllocatorGetStats(allocator, &stats);
+    if (status != nullptr) {
+        api->ReleaseStatus(status);
+        return snapshot;
+    }
+    auto readValue = [&](const char* key) {
+        const char* value = stats != nullptr ? api->GetKeyValue(stats, key) : nullptr;
+        return value != nullptr ? std::strtoll(value, nullptr, 10) : int64_t{-1};
+    };
+    snapshot.inUse = readValue("InUse");
+    snapshot.totalAllocated = readValue("TotalAllocated");
+    snapshot.extensions = readValue("NumArenaExtensions");
+    snapshot.shrinkages = readValue("NumArenaShrinkages");
+    if (stats != nullptr) {
+        api->ReleaseKeyValuePairs(stats);
+    }
+    return snapshot;
+}
+
+static void shrinkModelAllocators(ModelRuntime& m) {
+    if (m.api == nullptr || m.session == nullptr) {
+        return;
+    }
+    OrtAllocator* sessionAllocator = nullptr;
+    if (m.memoryInfo != nullptr &&
+        logOrtStatus(m.api, m.api->CreateAllocator(m.session, m.memoryInfo, &sessionAllocator),
+                     "CreateAllocator(runtime trim)")) {
+        const ArenaStatsSnapshot before = readArenaStats(m.api, sessionAllocator);
+        shrinkAllocatorIfSupported(m.api, sessionAllocator, "AllocatorShrink(runtime trim)");
+        const ArenaStatsSnapshot after = readArenaStats(m.api, sessionAllocator);
+        LOGI("ORT arena reclaim: phase=%s in_use_mb=%lld total_before_mb=%lld total_after_mb=%lld "
+             "regions_before=%lld regions_after=%lld shrinkages=%lld",
+             m.env == gDecodeEnv ? "decode" : "prefill",
+             static_cast<long long>(after.inUse >> 20),
+             static_cast<long long>(before.totalAllocated >> 20),
+             static_cast<long long>(after.totalAllocated >> 20),
+             static_cast<long long>(before.extensions),
+             static_cast<long long>(after.extensions),
+             static_cast<long long>(after.shrinkages));
+        m.api->ReleaseAllocator(sessionAllocator);
+    }
+    if (m.ioAllocator != nullptr && m.ioAllocator != m.allocator) {
+        shrinkAllocatorIfSupported(m.api, m.ioAllocator, "AllocatorShrink(io trim)");
+    }
+    if (m.env == gSharedEnv) {
+        g_reserved_prefill_arena_bytes = 0;
+    }
+    if (m.env == gDecodeEnv) {
+        g_reserved_decode_arena_bytes = 0;
+    }
+}
+
+static void shrinkPrimaryArenas() {
+    ModelRuntime& prefill = getModel(LLM_TextPrefillGreedy);
+    shrinkModelAllocators(prefill);
+    if (mMain.env != prefill.env) {
+        shrinkModelAllocators(mMain);
+    }
+}
+
 static void shrinkAllModelAllocators() {
     std::vector<OrtEnv*> shrunkEnvs;
     std::vector<OrtAllocator*> shrunkIoAllocators;
@@ -887,6 +960,45 @@ static void shrinkAllModelAllocators() {
             shrunkIoAllocators.push_back(m.ioAllocator);
         }
     }
+}
+
+// Requires g_model_session_mutex. The current strategy pair remains the owner of any directly saved
+// cross-turn state; the canonical text-greedy pair remains available for clean-cache rebuilds.
+static int releaseInactiveMergedStrategySessionsLocked() {
+    constexpr int mergedEnd = LLM_FIRST_MERGED_MODEL + LLM_MERGED_MODEL_COUNT;
+    auto keepSession = [](ModelId id) {
+        return id == LLM_TextPrefillGreedy || id == LLM_TextDecodeGreedy ||
+               id == mergedPrefillModel(g_loaded_merged_strategy) ||
+               id == mergedDecodeModel(g_loaded_merged_strategy);
+    };
+
+    int released = 0;
+    for (int id = LLM_FIRST_MERGED_MODEL; id < mergedEnd; ++id) {
+        const ModelId modelId = static_cast<ModelId>(id);
+        ModelRuntime& runtime = getModel(modelId);
+        if (runtime.session != nullptr && !keepSession(modelId)) {
+            releaseModelRuntime(runtime);
+            ++released;
+        }
+    }
+    return released;
+}
+
+static void reclaimRuntimeAfterTurn(const char* reason) {
+    const long rssBeforeKb = processRssKb();
+    int releasedSessions = 0;
+    {
+        std::lock_guard<std::mutex> modelLock(g_model_session_mutex);
+        clearAllModelBindingRefs();
+        releasedSessions = releaseInactiveMergedStrategySessionsLocked();
+        shrinkPrimaryArenas();
+    }
+    mallopt(M_PURGE, 0);
+    const long rssAfterKb = processRssKb();
+    LOGI("Runtime reclaim: reason=%s released_sessions=%d rss_before_kb=%ld rss_after_kb=%ld "
+         "reclaimed_kb=%ld",
+         reason != nullptr ? reason : "turn", releasedSessions, rssBeforeKb, rssAfterKb,
+         rssBeforeKb >= 0 && rssAfterKb >= 0 ? std::max(0L, rssBeforeKb - rssAfterKb) : -1L);
 }
 
 static bool ensureMergedStrategySessions(JNIEnv* env, MergedStrategy strategy) {
@@ -1469,7 +1581,7 @@ static void beginCleanCommit() {
 }
 
 static void finishCleanCommit() {
-    clearAllModelBindingRefs();
+    reclaimRuntimeAfterTurn("clean_commit");
     {
         std::lock_guard<std::mutex> lock(g_clean_commit_mutex);
         g_clean_commit_running = false;
@@ -2958,7 +3070,11 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                                    memory.memoryTokens, &pendingCap);
         if (!saved) { clear_history("merged_direct_kv_save_failed"); }
         cleanupMerged();
-        if (saved && pendingCap >= 0) { commitOffCap(pendingCap); }
+        if (saved && pendingCap >= 0) {
+            commitOffCap(pendingCap);
+        } else {
+            reclaimRuntimeAfterTurn("direct_save");
+        }
         return env->NewStringUTF(stats);
     }
 }

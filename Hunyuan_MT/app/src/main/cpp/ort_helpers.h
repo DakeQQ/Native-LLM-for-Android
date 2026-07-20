@@ -2239,6 +2239,9 @@ inline bool ortLoadModelSession(ModelRuntime& m, const char* onnxName, const cha
         for (const OrtConfigEntry& e : kOrtRunConfigs) {
             addRunConfig(e.key, e.value);
         }
+        if (epType == EP_CPU && attachShared) {
+            addRunConfig("memory.enable_memory_arena_shrinkage", "cpu:0");
+        }
         if (epType == EP_QNN) {
             for (const OrtConfigEntry& e : kQnnRunConfigs) {
                 addRunConfig(e.key, e.value);
