@@ -1,8 +1,8 @@
 """Build Qwen v3 merged ONNX graphs backed by one shared initializer bundle.
 
 The production layout keeps one prefill and one decode graph per strategy
-(greedy, penalty-greedy, beam, penalty-beam, sampling), while KV management stays in small
-standalone graphs. Large Main initializers are written once to
+(greedy, penalty-greedy, sampling), while KV management stays in small standalone
+graphs. Large Main initializers are written once to
 LLM_SharedInitializers.onnx(.data); small shape constants stay embedded.
 """
 
@@ -29,18 +29,14 @@ SHELL_PREFIXES = (
     "greedy_",
     "penalty_greedy_",
     "penalty_",
-    "beam_",
     "sampling_",
 )
 
 PREFILL_GREEDY_MODEL_NAME         = "LLM_TextPrefillGreedy.onnx"
 PREFILL_PENALTY_GREEDY_MODEL_NAME = "LLM_TextPrefillPenaltyGreedy.onnx"
-PREFILL_BEAM_MODEL_NAME           = "LLM_TextPrefillBeamFirst.onnx"
 PREFILL_SAMPLING_MODEL_NAME       = "LLM_TextPrefillSampling.onnx"
 DECODE_GREEDY_MODEL_NAME          = "LLM_DecodeGreedy.onnx"
 DECODE_PENALTY_GREEDY_MODEL_NAME  = "LLM_DecodePenaltyGreedy.onnx"
-DECODE_BEAM_MODEL_NAME            = "LLM_DecodeBeamNext.onnx"
-DECODE_PENALTY_BEAM_MODEL_NAME    = "LLM_DecodePenaltyBeamNext.onnx"
 DECODE_SAMPLING_MODEL_NAME        = "LLM_DecodeSampling.onnx"
 SHARED_MODEL_NAME                 = "LLM_SharedInitializers.onnx"
 SHARED_DATA_NAME                  = SHARED_MODEL_NAME + ".data"
@@ -53,8 +49,6 @@ MERGED_CONSTITUENT_GRAPHS = (
     "LLM_TopKTopPSampling.onnx",
     "LLM_PenaltyGreedy.onnx",
     "LLM_Penalty.onnx",
-    "LLM_FirstBeam.onnx",
-    "LLM_SecondBeam.onnx",
     "LLM_Argmax.onnx",
 )
 
@@ -401,17 +395,6 @@ def _merge_penalty_greedy_prefill(source_folder, main, kind, model_file_names=No
                      ])
 
 
-def _beam_kv_io_map(main, logits_name="logits"):
-    io = [(name, "beam_in_" + name[len("out_"):]) for name in _main_kv_output_names(main)]
-    io.append((logits_name, "beam_logits"))
-    return io
-
-
-def _beam_outputs(main, kv_seq_len):
-    kv = ["beam_out_" + name[len("out_"):] for name in _main_kv_output_names(main)]
-    return kv + ["beam_save_id_out", "beam_top_beam_prob", "beam_top_beam_indices", "beam_max_logits_idx", kv_seq_len]
-
-
 def merge_prefill_greedy(
     source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None
 ) -> onnx.ModelProto:
@@ -450,18 +433,6 @@ def merge_decode_penalty_greedy(
                      ])
 
 
-def merge_prefill_beam_first(
-    source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None
-) -> onnx.ModelProto:
-    merged, kv_seq_len, rotary = _merge_rotary_into_main(source_folder, main, "prefill", model_file_names)
-    beam = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "first_beam", "LLM_FirstBeam.onnx")),
-        "beam_",
-    )
-    merged = merge_models_no_check(merged, beam, io_map=_beam_kv_io_map(main))
-    return _finalize(merged, main, rotary, _beam_outputs(main, kv_seq_len))
-
-
 def merge_prefill_sampling(
     source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None
 ) -> onnx.ModelProto:
@@ -472,35 +443,6 @@ def merge_decode_sampling(
     source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None
 ) -> onnx.ModelProto:
     return _merge_sampling(source_folder, main, "decode", model_file_names)
-
-
-def merge_decode_beam_next(
-    source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None
-) -> onnx.ModelProto:
-    merged, kv_seq_len, rotary = _merge_rotary_into_main(source_folder, main, "decode", model_file_names)
-    beam = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "second_beam", "LLM_SecondBeam.onnx")),
-        "beam_",
-    )
-    merged = merge_models_no_check(merged, beam, io_map=_beam_kv_io_map(main))
-    return _finalize(merged, main, rotary, _beam_outputs(main, kv_seq_len))
-
-
-def merge_decode_penalty_beam_next(
-    source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None
-) -> onnx.ModelProto:
-    merged, kv_seq_len, rotary = _merge_rotary_into_main(source_folder, main, "decode", model_file_names)
-    penalty = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "penalty", "LLM_Penalty.onnx")),
-        "penalty_",
-    )
-    beam = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "second_beam", "LLM_SecondBeam.onnx")),
-        "beam_",
-    )
-    merged = merge_models_no_check(merged, penalty, io_map=[("logits", "penalty_logits_in")])
-    merged = merge_models_no_check(merged, beam, io_map=_beam_kv_io_map(main, "penalty_logits_out"))
-    return _finalize(merged, main, rotary, _beam_outputs(main, kv_seq_len))
 
 
 # --------------------------------------------------------------------------- #
@@ -530,26 +472,18 @@ def make_merged_build_plan(model_file_names: dict[str, str] | None = None):
     greedy = _model_file_name(model_file_names, "greedy", "LLM_Greedy.onnx")
     sampling = _model_file_name(model_file_names, "sampling", "LLM_TopKTopPSampling.onnx")
     penalty_greedy = _model_file_name(model_file_names, "penalty_greedy", "LLM_PenaltyGreedy.onnx")
-    first_beam = _model_file_name(model_file_names, "first_beam", "LLM_FirstBeam.onnx")
-    second_beam = _model_file_name(model_file_names, "second_beam", "LLM_SecondBeam.onnx")
     penalty = _model_file_name(model_file_names, "penalty", "LLM_Penalty.onnx")
     return [
         (_model_file_name(model_file_names, "prefill_greedy", PREFILL_GREEDY_MODEL_NAME),
          _recipe_with_names(merge_prefill_greedy, model_file_names), [rotary_prefill, greedy]),
         (_model_file_name(model_file_names, "prefill_penalty_greedy", PREFILL_PENALTY_GREEDY_MODEL_NAME),
          _recipe_with_names(merge_prefill_penalty_greedy, model_file_names), [rotary_prefill, penalty_greedy]),
-        (_model_file_name(model_file_names, "prefill_beam", PREFILL_BEAM_MODEL_NAME),
-         _recipe_with_names(merge_prefill_beam_first, model_file_names), [rotary_prefill, first_beam]),
         (_model_file_name(model_file_names, "prefill_sampling", PREFILL_SAMPLING_MODEL_NAME),
          _recipe_with_names(merge_prefill_sampling, model_file_names), [rotary_prefill, sampling]),
         (_model_file_name(model_file_names, "decode_greedy", DECODE_GREEDY_MODEL_NAME),
          _recipe_with_names(merge_decode_greedy, model_file_names), [rotary_decode, greedy]),
         (_model_file_name(model_file_names, "decode_penalty_greedy", DECODE_PENALTY_GREEDY_MODEL_NAME),
          _recipe_with_names(merge_decode_penalty_greedy, model_file_names), [rotary_decode, penalty, penalty_greedy]),
-        (_model_file_name(model_file_names, "decode_beam", DECODE_BEAM_MODEL_NAME),
-         _recipe_with_names(merge_decode_beam_next, model_file_names), [rotary_decode, second_beam]),
-        (_model_file_name(model_file_names, "decode_penalty_beam", DECODE_PENALTY_BEAM_MODEL_NAME),
-         _recipe_with_names(merge_decode_penalty_beam_next, model_file_names), [rotary_decode, penalty, second_beam]),
         (_model_file_name(model_file_names, "decode_sampling", DECODE_SAMPLING_MODEL_NAME),
          _recipe_with_names(merge_decode_sampling, model_file_names), [rotary_decode, sampling]),
     ]
@@ -725,16 +659,17 @@ def build_shared_merged_bundle(
 
     Produces, inside out_folder (default = source_folder):
         LLM_TextPrefillGreedy.onnx / LLM_TextPrefillPenaltyGreedy.onnx /
-        LLM_TextPrefillBeamFirst.onnx / LLM_TextPrefillSampling.onnx
+        LLM_TextPrefillSampling.onnx
         LLM_DecodeGreedy.onnx / LLM_DecodePenaltyGreedy.onnx /
-        LLM_DecodeBeamNext.onnx / LLM_DecodePenaltyBeamNext.onnx / LLM_DecodeSampling.onnx
+        LLM_DecodeSampling.onnx
         LLM_SharedInitializers.onnx + LLM_SharedInitializers.onnx.data
     A strategy graph is skipped only if its split decode head is absent. Every merged graph references
     the single LLM_SharedInitializers.onnx.data blob; no LLM_*.onnx.data / .npz / manifest are produced.
 
     Merged-only: when out_folder == source_folder the absorbed split constituents
-    (Main / RotaryPrefill / RotaryDecode / Greedy / TopKTopPSampling / PenaltyGreedy / Penalty / FirstBeam / SecondBeam) and
+    (Main / RotaryPrefill / RotaryDecode / Greedy / TopKTopPSampling / PenaltyGreedy / Penalty) and
     their weight files are deleted, so the large weights exist once and only the merged modules remain.
+
     """
     source_folder = Path(source_folder)
     out_folder = Path(out_folder) if out_folder is not None else source_folder

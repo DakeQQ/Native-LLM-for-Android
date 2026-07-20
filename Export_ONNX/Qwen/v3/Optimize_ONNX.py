@@ -2,13 +2,16 @@
 
 import os
 import gc
+import sys
 from pathlib import Path
+from fractions import Fraction
 from functools import lru_cache
 from dataclasses import dataclass
 
 import numpy as np
 import onnx
 import onnx.version_converter
+from onnx.external_data_helper import load_external_data_for_model
 from onnx import TensorProto, helper, numpy_helper
 from onnxslim import slim
 from transformers import AutoConfig
@@ -19,11 +22,14 @@ from onnxruntime.quantization import (
     quantize_dynamic,
 )
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 import Shared_Merged
 
 
 # User config
-_SCRIPT_DIR                    = Path(__file__).resolve().parent
 ORIGINAL_FOLDER_PATH           = str(_SCRIPT_DIR / "Qwen_ONNX")         # Folder holding the exported *.onnx modules.
 QUANTED_FOLDER_PATH            = str(_SCRIPT_DIR / "Qwen_Optimized")    # Destination folder for the results.
 DOWNLOAD_PATH                  = str(Path.home() / "Downloads" / "Qwen3-0.6B")  # Model dir (attention fusion); "NONE" to skip.
@@ -50,7 +56,9 @@ OPTIMIZER_ONLY_ONNXRUNTIME     = False                               # True = on
 OPTIMIZER_FUSION_OPTIONS       = None                                # Optional dict of FusionOptions overrides, e.g. {"enable_gelu": False}.
 SHAPE_INFER                    = True                                # Run shape inference before the optimizer (needed for some fusions).
 
-SLIM_SKIP_FUSION_PATTERNS      = None                                # Fusion patterns to skip, or None.
+# EliminationReshape is unsafe when consecutive reshapes use zero-copy dimensions
+# across a rank change: it applies the second shape directly to the first input.
+SLIM_SKIP_FUSION_PATTERNS      = ["EliminationReshape"]              # Additional fusion patterns to skip, or None.
 SLIM_SKIP_OPTIMIZATIONS        = None                                # Optimizations to skip, or None.
 SLIM_SIZE_THRESHOLD            = None                                # Max constant size (bytes) to fold; None = fold all.
 
@@ -103,15 +111,13 @@ _MERGED_MODEL_NAMES = tuple(Path(name).stem for name, _, _ in Shared_Merged.MERG
 MODEL_PLANS: dict[str, Plan] = {
     "LLM_Metadata":      Plan(method="F32", optimize=False),
     # Quantize Main once, then transplant that Main block into the other merged shells.
-    _PRIMARY_MERGED_MODEL: Plan(method="Q4", external=True, optimize=False),
+    _PRIMARY_MERGED_MODEL: Plan(method="Q4", external=True, optimize=True),
     "LLM_KV_Slice":      Plan(method="F32"),
     "LLM_KV_Split2":     Plan(method="F32"),
     "LLM_KV_Concat":     Plan(method="F32"),
-    "LLM_KV_Concat_FirstBeam": Plan(method="F32"),
-    "LLM_GatherFirstBeam": Plan(method="F32"),
     "LLM_RopeShift":     Plan(method="F32"),
 }
-REQUIRED_STANDALONE_MODELS = {"LLM_GatherFirstBeam"}
+REQUIRED_STANDALONE_MODELS = set()
 
 
 _WEIGHT_ONLY_BITS = {"Q2": 2, "Q4": 4, "Q8": 8}     # method -> weight-only bit width
@@ -322,6 +328,160 @@ def _retarget_external_location(model_path: str, new_location: str) -> None:
     gc.collect()
 
 
+def _multiply_shape_terms(left, right):
+    coefficient = left[0] * right[0]
+    powers = dict(left[1])
+    for symbol, exponent in right[1].items():
+        powers[symbol] = powers.get(symbol, 0) + exponent
+        if powers[symbol] == 0:
+            del powers[symbol]
+    return coefficient, powers
+
+
+def _resolve_reshape_shape(shape: tuple[int, ...], input_terms: list):
+    result, inferred_index = [], None
+    known_product = (Fraction(1), {})
+    for index, dimension in enumerate(shape):
+        if dimension == -1:
+            if inferred_index is not None:
+                return None
+            inferred_index = index
+            result.append(None)
+            continue
+        if dimension == 0:
+            if index >= len(input_terms):
+                return None
+            term = input_terms[index]
+        elif dimension > 0:
+            term = (Fraction(dimension), {})
+        else:
+            return None
+        result.append(term)
+        known_product = _multiply_shape_terms(known_product, term)
+
+    if inferred_index is not None:
+        inverse = (1 / known_product[0], {
+            symbol: -exponent for symbol, exponent in known_product[1].items()
+        })
+        result[inferred_index] = _multiply_shape_terms((Fraction(1), {"size": 1}), inverse)
+    return result
+
+
+def _compose_reshape_shapes(first_shape: tuple[int, ...], second_shape: tuple[int, ...]):
+    input_terms = [
+        (Fraction(1), {f"dim_{index}": 1})
+        for index in range(max(len(first_shape), len(second_shape)))
+    ]
+    middle_terms = _resolve_reshape_shape(first_shape, input_terms)
+    final_terms = _resolve_reshape_shape(second_shape, middle_terms) if middle_terms is not None else None
+    if final_terms is None:
+        return None
+
+    composed, unresolved = [], []
+    for index, (coefficient, powers) in enumerate(final_terms):
+        if not powers and coefficient.denominator == 1 and coefficient > 0:
+            composed.append(coefficient.numerator)
+        elif coefficient == 1 and powers == {f"dim_{index}": 1}:
+            composed.append(0)
+        else:
+            unresolved.append(index)
+            composed.append(None)
+    if len(unresolved) > 1:
+        return None
+    if unresolved:
+        composed[unresolved[0]] = -1
+
+    candidate = tuple(composed)
+    return candidate if _resolve_reshape_shape(candidate, input_terms) == final_terms else None
+
+
+def _constant_int_values(name: str, producer: dict, init_map: dict) -> tuple[int, ...] | None:
+    tensor = init_map.get(name)
+    if tensor is None:
+        node = producer.get(name)
+        if node is None or node.op_type != "Constant":
+            return None
+        tensor = next((attr.t for attr in node.attribute if attr.name == "value"), None)
+    if tensor is None:
+        return None
+    try:
+        values = numpy_helper.to_array(tensor)
+    except Exception:
+        return None
+    if values.dtype.kind not in "iu":
+        return None
+    return tuple(int(value) for value in values.reshape(-1))
+
+
+def fuse_consecutive_reshapes(model_path: str) -> int:
+    """Fuse constant-shape Reshape pairs only when their composed semantics are provable."""
+    model = onnx.load(model_path, load_external_data=False)
+    graph = model.graph
+    graph_outputs = {value.name for value in graph.output}
+    make_name = _make_name_factory(graph, "reshape_fusion_")
+    removed_values, fused = set(), 0
+
+    while True:
+        producer = {output: node for node in graph.node for output in node.output}
+        consumers: dict[str, list] = {}
+        for node in graph.node:
+            for name in node.input:
+                consumers.setdefault(name, []).append(node)
+        init_map = _init_map(graph)
+        replacement = None
+
+        for second in graph.node:
+            if second.op_type != "Reshape" or len(second.input) < 2:
+                continue
+            first = producer.get(second.input[0])
+            if first is None or first.op_type != "Reshape" or len(first.input) < 2:
+                continue
+            middle = first.output[0]
+            if middle in graph_outputs or len(consumers.get(middle, [])) != 1:
+                continue
+            if any(
+                next((attr.i for attr in node.attribute if attr.name == "allowzero"), 0)
+                for node in (first, second)
+            ):
+                continue
+            first_shape = _constant_int_values(first.input[1], producer, init_map)
+            second_shape = _constant_int_values(second.input[1], producer, init_map)
+            if first_shape is None or second_shape is None:
+                continue
+            composed_shape = _compose_reshape_shapes(first_shape, second_shape)
+            if composed_shape is None:
+                continue
+            replacement = first, second, composed_shape, second_shape
+            break
+
+        if replacement is None:
+            break
+        first, second, composed_shape, second_shape = replacement
+        second.input[0] = first.input[0]
+        if composed_shape != second_shape:
+            shape_name = make_name(f"shape_{fused}")
+            graph.initializer.append(numpy_helper.from_array(
+                np.asarray(composed_shape, dtype=np.int64), name=shape_name
+            ))
+            second.input[1] = shape_name
+        removed_values.update(first.output)
+        keep = [node for node in graph.node if id(node) != id(first)]
+        graph.ClearField("node")
+        graph.node.extend(keep)
+        fused += 1
+
+    if fused:
+        _dead_code_elimination(graph)
+        _drop_unused_initializers(graph)
+        keep_info = [value for value in graph.value_info if value.name not in removed_values]
+        graph.ClearField("value_info")
+        graph.value_info.extend(keep_info)
+        onnx.save(model, model_path)
+    del model
+    gc.collect()
+    return fused
+
+
 def resave(src_path: str, dst_path: str, external: bool, do_surgery: bool = False) -> None:
     model = onnx.load(src_path)
     if do_surgery:
@@ -344,6 +504,9 @@ def run_onnxslim(model_path: str, external: bool, no_shape_infer: bool = False) 
             save_as_external_data=external,
             verbose=False,
         )
+        fused = fuse_consecutive_reshapes(model_path)
+        if fused:
+            print(f"  Fused {fused} semantics-safe consecutive Reshape pairs.")
 
     data_path = model_path + ".data"
     if not external or not os.path.exists(data_path):
@@ -380,13 +543,18 @@ def build_fusion_options(model_type: str):
 
 
 def optimize_onnx_model(model_path: str, num_heads: int, hidden_size: int,
-                        use_fp16: bool, external: bool, keep_io_types: bool) -> None:
+                        use_fp16: bool, external: bool, keep_io_types: bool,
+                        preserve_fp16_compute: bool) -> None:
     from onnxruntime.transformers.optimizer import optimize_model
 
+    # A CPU-targeted ORT optimization pass rewrites exported F16 compute islands to
+    # F32 and names the boundary nodes InsertedPrecisionFreeCast_*. Level 0 keeps
+    # the Python transformer fusions while bypassing that provider-aware rewrite.
+    ort_opt_level = 0 if preserve_fp16_compute else OPTIMIZER_LEVEL
     model = optimize_model(
         model_path,
         use_gpu=False,
-        opt_level=OPTIMIZER_LEVEL,
+        opt_level=ort_opt_level,
         num_heads=num_heads,
         hidden_size=hidden_size,
         optimization_options=build_fusion_options(OPTIMIZER_MODEL_TYPE),
@@ -407,6 +575,17 @@ def optimize_onnx_model(model_path: str, num_heads: int, hidden_size: int,
         renamed = _deduplicate_node_names(model.model.graph)
         if renamed:
             print(f"  Renamed {renamed} duplicate node names after float16 conversion.")
+    if preserve_fp16_compute:
+        inserted_casts = [
+            node.name
+            for node in model.model.graph.node
+            if node.name.startswith("InsertedPrecisionFreeCast_")
+        ]
+        if inserted_casts:
+            raise RuntimeError(
+                "COMPUTE_IN_F32=0 requires a cast-free F16 compute graph, but ORT "
+                f"inserted {len(inserted_casts)} precision-free Cast node(s)."
+            )
     model.save_model_to_file(model_path, use_external_data_format=external)
     del model
     gc.collect()
@@ -716,11 +895,38 @@ def _replace_graph_node(graph, target, replacement_nodes: list) -> None:
 
 
 def _drop_initializers(graph, names: set[str]) -> None:
-    if not names:
-        return
-    keep = [init for init in graph.initializer if init.name not in names]
-    graph.ClearField("initializer")
-    graph.initializer.extend(keep)
+    if names:
+        keep = [init for init in graph.initializer if init.name not in names]
+        graph.ClearField("initializer")
+        graph.initializer.extend(keep)
+
+
+def _drop_unused_initializers(graph) -> int:
+    used = {name for node in graph.node for name in node.input if name}
+    used.update(value.name for value in graph.output)
+    unused = {init.name for init in graph.initializer if init.name not in used}
+    _drop_initializers(graph, unused)
+    return len(unused)
+
+
+def _validate_graph_references(model: onnx.ModelProto, model_name: str) -> None:
+    graph = model.graph
+    defined = {value.name for value in graph.input}
+    defined.update(init.name for init in graph.initializer)
+    defined.update(output for node in graph.node for output in node.output if output)
+    missing = sorted({
+        name
+        for node in graph.node
+        for name in node.input
+        if name and name not in defined
+    })
+    if missing:
+        sample = ", ".join(repr(name) for name in missing[:8])
+        suffix = " ..." if len(missing) > 8 else ""
+        raise RuntimeError(
+            f"Merged graph {model_name!r} has {len(missing)} undefined node input(s): "
+            f"{sample}{suffix}"
+        )
 
 
 def _find_embed_gather(graph):
@@ -746,6 +952,51 @@ def _find_embed_gather(graph):
         raise RuntimeError("embedding Gather with a 2-D initializer was not found")
     _, node, name, vocab, hidden = max(candidates, key=lambda item: item[0])
     return node, name, vocab, hidden
+
+
+def _restore_prefill_mask_shell_boundary(model: onnx.ModelProto) -> bool:
+    """Restore the float16 prefill-mask edge when ORT folds its boundary Casts."""
+    graph = model.graph
+    canonical_name = "prefill_attention_mask"
+    defined = {value.name for value in graph.input}
+    defined.update(init.name for init in graph.initializer)
+    defined.update(output for node in graph.node for output in node.output if output)
+    if canonical_name in defined:
+        return False
+
+    consumers = _graph_consumers(graph)
+    candidates = []
+    for producer in graph.node:
+        if producer.op_type != "Reshape" or len(producer.output) != 1:
+            continue
+        old_name = producer.output[0]
+        if not old_name.startswith("prefill_/"):
+            continue
+        users = consumers.get(old_name, [])
+        if len(users) != 1 or users[0].op_type != "Cast":
+            continue
+        cast_users = [
+            user
+            for output in users[0].output
+            for user in consumers.get(output, [])
+        ]
+        if cast_users and all(user.op_type == "Add" for user in cast_users):
+            candidates.append((producer, users[0], old_name))
+    if len(candidates) != 1:
+        raise RuntimeError(
+            "Cannot restore prefill attention-mask boundary: expected one "
+            f"Reshape -> Cast -> Add chain, found {len(candidates)}."
+        )
+
+    producer, cast, old_name = candidates[0]
+    producer.output[0] = canonical_name
+    for index, name in enumerate(cast.input):
+        if name == old_name:
+            cast.input[index] = canonical_name
+    for value in graph.value_info:
+        if value.name == old_name:
+            value.name = canonical_name
+    return True
 
 
 def _find_lmhead(graph, vocab: int, hidden: int):
@@ -1019,16 +1270,9 @@ def _share_dynamic_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: i
     return {"lmhead_op": lmhead.op_type, "dropped": embed_init, "shared_weight": bq}
 
 
-def unify_embed_lmhead(model_path: str, method: str, block_size: int = 32, external: bool | None = None,
-                       quiet: bool = False) -> dict | None:
-    """Drop Main's duplicate embedding initializer by reusing the tied lm_head weight.
-
-    The current exporter always emits the share-ready lm_head: the weight is the pristine tied
-    embedding and the final RMSNorm is explicit in the graph.
-    """
-    if external is None:
-        external = os.path.exists(model_path + ".data")
-    model = onnx.load(model_path)
+def unify_embed_lmhead_graph(model: onnx.ModelProto, method: str, block_size: int = 32,
+                             quiet: bool = False) -> dict | None:
+    """Share Main's tied embedding with the lm_head weight in place (no disk I/O)."""
     graph = model.graph
     try:
         gather, embed_init, vocab, hidden = _find_embed_gather(graph)
@@ -1036,8 +1280,6 @@ def unify_embed_lmhead(model_path: str, method: str, block_size: int = 32, exter
     except RuntimeError as exc:
         if not quiet:
             print(f"  share_embed_lmhead: skipped ({exc}).")
-        del model
-        gc.collect()
         return None
 
     method = method.upper()
@@ -1056,7 +1298,17 @@ def unify_embed_lmhead(model_path: str, method: str, block_size: int = 32, exter
 
     _dead_code_elimination(graph)
     _deduplicate_node_names(graph)
-    _save_model(model, model_path, external)
+    return info
+
+
+def unify_embed_lmhead(model_path: str, method: str, block_size: int = 32,
+                       external: bool | None = None, quiet: bool = False) -> dict | None:
+    if external is None:
+        external = os.path.exists(model_path + ".data")
+    model = onnx.load(model_path)
+    info = unify_embed_lmhead_graph(model, method, block_size=block_size, quiet=quiet)
+    if info is not None:
+        _save_model(model, model_path, external)
     del model
     gc.collect()
     return info
@@ -1528,6 +1780,7 @@ def process_model(name: str, rp: ResolvedPlan) -> None:
         return
 
     source_metadata = read_onnx_metadata(src_path)
+    preserve_fp16_compute = source_metadata.get("compute_in_f32", "1").lower() in ("0", "false")
 
     _remove_external_files(dst_path)
 
@@ -1555,21 +1808,23 @@ def process_model(name: str, rp: ResolvedPlan) -> None:
 
     if rp.optimize or use_fp16:
         print("  Optimizing (onnxslim -> transformers optimizer -> onnxslim)...")
+        if preserve_fp16_compute and OPTIMIZER_LEVEL > 0:
+            print("  Preserving COMPUTE_IN_F32=0: skipping ORT's CPU precision rewrite.")
         run_onnxslim(dst_path, external, no_shape_infer=True)
         heads, hidden = fetch_transformer_config(DOWNLOAD_PATH) if "Main" in name else (0, 0)
-        optimize_onnx_model(dst_path, heads, hidden, use_fp16, external, keep_io_types)
+        optimize_onnx_model(
+            dst_path,
+            heads,
+            hidden,
+            use_fp16,
+            external,
+            keep_io_types,
+            preserve_fp16_compute,
+        )
         run_onnxslim(dst_path, external, no_shape_infer=not SHAPE_INFER)
 
     if UPGRADE_OPSET > 0:
         upgrade_opset_version(dst_path, UPGRADE_OPSET, external)
-
-    method_kind = _unify_method_kind(rp)
-    info = unify_embed_lmhead(dst_path, method_kind, block_size=rp.block_size, external=external, quiet=True)
-    if info is not None:
-        print(
-            f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
-            f"embedding now reuses {info['shared_weight']!r} ({info['lmhead_op']})."
-        )
 
     if not external and os.path.exists(dst_path + ".data"):
         os.remove(dst_path + ".data")
@@ -1626,6 +1881,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
     if not primary_path.exists():
         raise FileNotFoundError(primary_path)
 
+    method_kind = _unify_method_kind(primary_plan)
     shared_model_name = model_file_names.get("shared_initializers", Shared_Merged.SHARED_MODEL_NAME)
     shared_data_name = model_file_names.get("shared_initializers_data", shared_model_name + ".data")
 
@@ -1635,6 +1891,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
 
     def _persist(file_name: str, model: onnx.ModelProto) -> None:
         out_path = out_folder / file_name
+        _validate_graph_references(model, file_name)
         Shared_Merged.save_model(model, out_path)
         if source_metadata:
             write_onnx_metadata(str(out_path), source_metadata)
@@ -1642,18 +1899,38 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
 
     print(f"\n{'=' * 60}\nTransplanting quantized Main into merged strategy graphs\n{'=' * 60}")
 
-    # The quantized primary is the shared Main donor for every strategy graph. Seed the shared blob
-    # from it and redirect its own Main to external refs, then reuse it (in memory) as the transplant
-    # donor so each target copies only lightweight references instead of a fresh full Main copy. Its
-    # small non-shared Main initializers were loaded inline, so it stays self-contained once its own
-    # .data sidecar is removed by the persist below.
-    quantized_primary = Shared_Merged.load_model(primary_path)
+    # Keep an un-unified donor for transplantation. Unification runs on each final graph so its
+    # embedding reconstruction nodes cannot leak into the Main block copied across strategies.
+    clean_primary = onnx.load(str(primary_path), load_external_data=False)
+    if _restore_prefill_mask_shell_boundary(clean_primary):
+        print("  Restored optimized donor prefill-mask/Main boundary before transplantation.")
+
+    # Unify structure-only first, dropping the duplicate fp32 embedding before external data is
+    # loaded. This keeps peak memory bounded to the surviving quantized Main weights.
+    primary_model = onnx.load(str(primary_path), load_external_data=False)
+    info = unify_embed_lmhead_graph(primary_model, method_kind, block_size=primary_plan.block_size, quiet=True)
+    if info is not None:
+        print(
+            f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
+            f"embedding now reuses {info['shared_weight']!r} ({info['lmhead_op']})."
+        )
+    _drop_unused_initializers(primary_model.graph)
+    load_external_data_for_model(primary_model, str(primary_path.parent))
     external_by_name = Shared_Merged.extract_and_write_shared(
-        [quantized_primary],
+        [primary_model],
         out_folder / shared_model_name,
-        primary_model=quantized_primary,
+        primary_model=primary_model,
     )
-    _persist(primary_file, quantized_primary)
+
+    # Make the donor self-contained before persisting the primary deletes its private sidecar.
+    if info is not None and info["dropped"] != info["shared_weight"]:
+        _drop_initializers(clean_primary.graph, {info["dropped"]})
+    load_external_data_for_model(clean_primary, str(primary_path.parent))
+    Shared_Merged.redirect_shared_initializers_to_external(clean_primary, external_by_name)
+
+    _persist(primary_file, primary_model)
+    del primary_model
+    gc.collect()
 
     for file_name, _, _ in available:
         if file_name == primary_file:
@@ -1663,8 +1940,10 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
         # every shared initializer at the freshly written blob. Graphs are built and saved one at a
         # time so at most one target is resident, instead of holding every strategy graph at once.
         target = onnx.load(str(source_folder / file_name), load_external_data=False)
-        model = Shared_Merged.transplant_quantized_main(target, quantized_primary)
+        model = Shared_Merged.transplant_quantized_main(target, clean_primary)
         del target
+        unify_embed_lmhead_graph(model, method_kind, block_size=primary_plan.block_size, quiet=True)
+        _drop_unused_initializers(model.graph)
         Shared_Merged.redirect_shared_initializers_to_external(model, external_by_name)
         _persist(file_name, model)
         del model

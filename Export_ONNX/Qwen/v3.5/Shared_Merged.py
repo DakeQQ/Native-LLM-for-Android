@@ -10,10 +10,7 @@ and merges the language-side path for every runtime scenario:
 * video prefill: Embed -> ConcatVideo -> RotaryVideoPrefill -> Main -> decode head
 * text/image/video decode: Embed -> modality RotaryDecode -> Main -> decode head
 
-Each scenario is emitted for greedy, penalty-greedy, beam, penalty-beam, and
-top-k/top-p sampling. Beam and penalty-beam share the same first-step prefill
-graph, matching the Qwen v3 reference behavior; the penalty branch appears on
-decode where prior generated IDs exist.
+Each scenario is emitted for greedy, penalty-greedy, and top-k/top-p sampling.
 """
 
 from __future__ import annotations
@@ -46,7 +43,6 @@ SHELL_PREFIXES = (
     "greedy_",
     "penalty_greedy_",
     "penalty_",
-    "beam_",
     "sampling_",
 )
 
@@ -67,14 +63,12 @@ MERGED_CONSTITUENT_GRAPHS = (
     "LLM_Greedy.onnx",
     "LLM_TopKTopPSampling.onnx",
     "LLM_PenaltyGreedy.onnx",
-    "LLM_FirstBeam.onnx",
-    "LLM_SecondBeam.onnx",
     "LLM_Penalty.onnx",
     "LLM_Argmax.onnx",
 )
 
 MODALITIES = ("text", "image", "video")
-STRATEGIES = ("greedy", "penalty_greedy", "beam", "penalty_beam", "sampling")
+STRATEGIES = ("greedy", "penalty_greedy", "sampling")
 
 
 def default_model_file_names() -> dict[str, str]:
@@ -96,11 +90,8 @@ def default_model_file_names() -> dict[str, str]:
         "greedy": "LLM_Greedy.onnx",
         "sampling": "LLM_TopKTopPSampling.onnx",
         "penalty_greedy": "LLM_PenaltyGreedy.onnx",
-        "first_beam": "LLM_FirstBeam.onnx",
-        "second_beam": "LLM_SecondBeam.onnx",
         "penalty": "LLM_Penalty.onnx",
         "argmax": "LLM_Argmax.onnx",
-        "gather_first_beam": "LLM_GatherFirstBeam.onnx",
         "shared_initializers": SHARED_MODEL_NAME,
     }
     names["shared_initializers_data"] = names["shared_initializers"] + ".data"
@@ -108,12 +99,9 @@ def default_model_file_names() -> dict[str, str]:
         title = modality.capitalize()
         names[f"{modality}_prefill_greedy"] = f"LLM_{title}PrefillGreedy.onnx"
         names[f"{modality}_prefill_penalty_greedy"] = f"LLM_{title}PrefillPenaltyGreedy.onnx"
-        names[f"{modality}_prefill_beam"] = f"LLM_{title}PrefillBeamFirst.onnx"
         names[f"{modality}_prefill_sampling"] = f"LLM_{title}PrefillSampling.onnx"
         names[f"{modality}_decode_greedy"] = f"LLM_{title}DecodeGreedy.onnx"
         names[f"{modality}_decode_penalty_greedy"] = f"LLM_{title}DecodePenaltyGreedy.onnx"
-        names[f"{modality}_decode_beam"] = f"LLM_{title}DecodeBeamNext.onnx"
-        names[f"{modality}_decode_penalty_beam"] = f"LLM_{title}DecodePenaltyBeamNext.onnx"
         names[f"{modality}_decode_sampling"] = f"LLM_{title}DecodeSampling.onnx"
     return names
 
@@ -530,31 +518,6 @@ def _merge_penalty_greedy(source_folder: Path, main: onnx.ModelProto, modality: 
     )
 
 
-def _beam_io_map(main: onnx.ModelProto, logits_name: str = "logits") -> list[tuple[str, str]]:
-    io_map = [(name, "beam_in_" + name[len("out_"):]) for name in _state_output_names(main)]
-    io_map.append((logits_name, "beam_logits"))
-    return io_map
-
-
-def _beam_outputs(main: onnx.ModelProto, kv_seq: str) -> list[str]:
-    state_outputs = ["beam_out_" + name[len("out_"):] for name in _state_output_names(main)]
-    return state_outputs + ["beam_save_id_out", "beam_top_beam_prob", "beam_top_beam_indices", "beam_max_logits_idx", kv_seq]
-
-
-def _merge_beam(source_folder: Path, main: onnx.ModelProto, modality: str, phase: str, penalty: bool, model_file_names: dict[str, str] | None, embed: onnx.ModelProto | None = None):
-    base, kv_seq, meta = (_base_prefill if phase == "prefill" else _base_decode)(source_folder, main, modality, model_file_names, embed)
-    beam_key = "first_beam" if phase == "prefill" else "second_beam"
-    beam = prefixed(load_model(source_folder / _model_file_name(model_file_names, beam_key)), "beam_")
-    logits_name = "logits"
-    if phase == "decode" and penalty:
-        penalty_model = prefixed(load_model(source_folder / _model_file_name(model_file_names, "penalty")), "penalty_")
-        base = merge_models_no_check(base, penalty_model, [("logits", "penalty_logits_in")])
-        logits_name = "penalty_logits_out"
-        meta.append(penalty_model)
-    merged = merge_models_no_check(base, beam, _beam_io_map(main, logits_name))
-    return _finalize(merged, _beam_outputs(main, kv_seq), main, *meta, beam)
-
-
 def _recipe(modality: str, phase: str, strategy: str):
     def build(source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None, embed: onnx.ModelProto | None = None):
         if strategy == "greedy":
@@ -563,10 +526,6 @@ def _recipe(modality: str, phase: str, strategy: str):
             return _merge_penalty_greedy(source_folder, main, modality, phase, model_file_names, embed)
         if strategy == "sampling":
             return _merge_sampling(source_folder, main, modality, phase, model_file_names, embed)
-        if strategy == "beam":
-            return _merge_beam(source_folder, main, modality, phase, False, model_file_names, embed)
-        if strategy == "penalty_beam":
-            return _merge_beam(source_folder, main, modality, phase, True, model_file_names, embed)
         raise ValueError(f"Unknown strategy {strategy!r}")
 
     build.__name__ = f"merge_{modality}_{phase}_{strategy}"
@@ -586,12 +545,6 @@ def _deps_for(modality: str, phase: str, strategy: str, model_file_names: dict[s
             deps.append(_model_file_name(model_file_names, "penalty"))
     elif strategy == "sampling":
         deps.append(_model_file_name(model_file_names, "sampling"))
-    elif strategy == "beam":
-        deps.append(_model_file_name(model_file_names, "first_beam" if phase == "prefill" else "second_beam"))
-    elif strategy == "penalty_beam":
-        deps.append(_model_file_name(model_file_names, "first_beam" if phase == "prefill" else "second_beam"))
-        if phase == "decode":
-            deps.append(_model_file_name(model_file_names, "penalty"))
     return deps
 
 
@@ -600,8 +553,6 @@ def make_merged_build_plan(model_file_names: dict[str, str] | None = None):
     for modality in MODALITIES:
         for phase in ("prefill", "decode"):
             for strategy in STRATEGIES:
-                if phase == "prefill" and strategy == "penalty_beam":
-                    continue
                 key = f"{modality}_{phase}_{strategy}"
                 plan.append((_model_file_name(model_file_names, key), _recipe(modality, phase, strategy), _deps_for(modality, phase, strategy, model_file_names)))
     return plan

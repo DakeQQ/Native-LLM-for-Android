@@ -14,6 +14,7 @@ from transformers import AutoModelForCausalLM
 # Settings
 MODEL_PATH                     = str(Path.home() / "Downloads" / "Qwen3-0.6B")  # HF checkpoint folder.
 DO_EXPORT                      = True                                # True rebuilds ONNX; False only runs the existing export.
+USE_BATCH                      = False                               # True = dynamic batch axis; False = fixed batch 1 for CUDA-friendly Reshape nodes.
 OPSET                          = 20                                  # Keep aligned with Android ORT support.
 MAX_SEQ_LEN                    = 4096                                # Export-time rotary/mask limit.
 
@@ -52,23 +53,16 @@ MODEL_FILE_NAMES = {
     "greedy":                 "LLM_Greedy.onnx",
     "sampling":               "LLM_TopKTopPSampling.onnx",
     "penalty_greedy":         "LLM_PenaltyGreedy.onnx",
-    "first_beam":             "LLM_FirstBeam.onnx",
-    "second_beam":            "LLM_SecondBeam.onnx",
     "penalty":                "LLM_Penalty.onnx",
     "kv_slice":               "LLM_KV_Slice.onnx",
     "kv_split2":              "LLM_KV_Split2.onnx",
     "kv_concat":              "LLM_KV_Concat.onnx",
-    "kv_concat_first_beam":   "LLM_KV_Concat_FirstBeam.onnx",
-    "gather_first_beam":      "LLM_GatherFirstBeam.onnx",
     "rope_shift":             "LLM_RopeShift.onnx",
     "prefill_greedy":         "LLM_TextPrefillGreedy.onnx",
     "prefill_penalty_greedy": "LLM_TextPrefillPenaltyGreedy.onnx",
-    "prefill_beam":           "LLM_TextPrefillBeamFirst.onnx",
     "prefill_sampling":       "LLM_TextPrefillSampling.onnx",
     "decode_greedy":          "LLM_DecodeGreedy.onnx",
     "decode_penalty_greedy":  "LLM_DecodePenaltyGreedy.onnx",
-    "decode_beam":            "LLM_DecodeBeamNext.onnx",
-    "decode_penalty_beam":    "LLM_DecodePenaltyBeamNext.onnx",
     "decode_sampling":        "LLM_DecodeSampling.onnx",
     "shared_initializers":    "LLM_SharedInitializers.onnx",
 }
@@ -76,12 +70,9 @@ MODEL_FILE_NAMES["shared_initializers_data"] = MODEL_FILE_NAMES["shared_initiali
 MERGED_METADATA_KEY_ALIASES = {
     "prefill_greedy": "text_prefill_greedy",
     "prefill_penalty_greedy": "text_prefill_penalty_greedy",
-    "prefill_beam": "text_prefill_beam",
     "prefill_sampling": "text_prefill_sampling",
     "decode_greedy": "text_decode_greedy",
     "decode_penalty_greedy": "text_decode_penalty_greedy",
-    "decode_beam": "text_decode_beam",
-    "decode_penalty_beam": "text_decode_penalty_beam",
     "decode_sampling": "text_decode_sampling",
 }
 MODEL_FILE_NAME_METADATA = {
@@ -101,14 +92,10 @@ onnx_model_Rotary_Text_Decode  = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["rotary_dec
 onnx_model_Greedy              = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["greedy"])
 onnx_model_TopKTopP_Sampling   = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["sampling"])
 onnx_model_Penalty_Greedy      = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["penalty_greedy"])
-onnx_model_First_Beam          = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["first_beam"])
-onnx_model_Second_Beam         = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["second_beam"])
 onnx_model_Penalty             = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["penalty"])
 onnx_model_KV_Slice            = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["kv_slice"])
 onnx_model_KV_Split2           = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["kv_split2"])
 onnx_model_KV_Concat           = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["kv_concat"])
-onnx_model_KV_Concat_FirstBeam = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["kv_concat_first_beam"])
-onnx_model_Gather_FirstBeam    = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["gather_first_beam"])
 onnx_model_Rope_Shift          = str(RAW_ONNX_DIR / MODEL_FILE_NAMES["rope_shift"])
 
 # Shared_Merged.py converts the split export into merged strategy graphs plus one shared weight blob.
@@ -180,80 +167,6 @@ class PENALTY_GREEDY_SEARCH(torch.nn.Module):
         return max_logits_idx, save_id
 
 
-class FIRST_BEAM_SEARCH(torch.nn.Module):
-
-    def __init__(self, total_layers):
-        super().__init__()
-        self.total_layers     = total_layers
-        self.save_keys_values = [None] * self.total_layers
-        self._ones_tuple      = {d: (1,) * d for d in range(8)}
-
-    def forward(self, *all_inputs):
-        logits    = all_inputs[-3]
-        save_id   = all_inputs[-2]
-        beam_size = all_inputs[-1]
-
-        row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_beam_logits, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=True, largest=True)
-        top_beam_prob = top_beam_logits - row_logsumexp
-
-        for i in range(self.total_layers):
-            kv = all_inputs[i]
-            self.save_keys_values[i] = kv.repeat(beam_size, *self._ones_tuple[kv.dim() - 1])
-
-        top_beam_indices = top_beam_indices.transpose(0, 1).int()
-        save_id          = torch.cat([save_id, top_beam_indices], dim=-1)
-        max_logits_idx   = top_beam_indices[[0]]
-
-        return (
-            *self.save_keys_values,
-            save_id,
-            top_beam_prob.transpose(0, 1),
-            top_beam_indices,
-            max_logits_idx
-        )
-
-
-class SECOND_BEAM_SEARCH(torch.nn.Module):
-
-    def __init__(self, total_layers):
-        super().__init__()
-        self.total_layers     = total_layers
-        self.save_keys_values = [None] * self.total_layers
-
-    def forward(self, *all_inputs):
-        logits        = all_inputs[-5]
-        save_id       = all_inputs[-4]
-        previous_prob = all_inputs[-3]
-        beam_size     = all_inputs[-2]
-        top_k         = all_inputs[-1]
-
-        row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_k_logits, top_k_indices = torch.topk(logits, k=top_k, dim=-1, largest=True, sorted=True)
-        top_k_prob    = top_k_logits - row_logsumexp
-        current_prob  = (top_k_prob + previous_prob).view(-1)
-
-        top_beam_prob, flat_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=True)
-        beam_index       = flat_beam_indices // top_k
-        top_beam_indices = top_k_indices.view(-1)[flat_beam_indices]
-
-        for i in range(self.total_layers):
-            self.save_keys_values[i] = torch.index_select(all_inputs[i], dim=0, index=beam_index)
-
-        gathered_save_id = torch.index_select(save_id, dim=0, index=beam_index)
-        top_beam_indices = top_beam_indices.unsqueeze(-1).int()
-        max_logits_idx   = top_beam_indices[[0]]
-        save_id          = torch.cat([gathered_save_id, top_beam_indices], dim=-1)
-
-        return (
-            *self.save_keys_values,
-            save_id,
-            top_beam_prob.unsqueeze(-1),
-            top_beam_indices,
-            max_logits_idx
-        )
-
-
 class APPLY_PENALTY(torch.nn.Module):
 
     def __init__(self):
@@ -273,21 +186,6 @@ class GREEDY_SEARCH(torch.nn.Module):
 
     def forward(self, logits):
         return torch.argmax(logits, dim=-1, keepdim=True).int()
-
-
-class GATHER_FIRST_BEAM(torch.nn.Module):
-
-    def __init__(self):
-        super().__init__()
-        self.register_buffer(
-            "first_beam_row", torch.tensor([0], dtype=torch.int64), persistent=False
-        )
-
-    def forward(self, *states):
-        return tuple(
-            torch.index_select(state, dim=0, index=self.first_beam_row)
-            for state in states
-        )
 
 
 class TOPK_TOPP_SAMPLING(torch.nn.Module):
@@ -538,10 +436,8 @@ class KV_SPLIT2(torch.nn.Module):
 
 class KV_CONCAT(torch.nn.Module):
 
-    def __init__(self, num_layers, head_dim=0, first_beam=False):
+    def __init__(self, num_layers, head_dim=0):
         super().__init__()
-        self.first_beam = first_beam
-        self.register_buffer("first_beam_row", torch.tensor([0], dtype=torch.int64), persistent=False)
         self.kv_quantized  = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA", "ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_rotary_q4  = KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA")
         self.kv_q8_grouped = KV_QUANT_DTYPE in ("Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA") and (USE_HADAMARD or USE_SHUFFLE) and KV_QUANT_GROUP_SIZE < head_dim
@@ -563,12 +459,7 @@ class KV_CONCAT(torch.nn.Module):
                 self.save_v_bias  = [None] * num_layers
 
     def _concat(self, prefix, suffix, dim):
-        if not self.first_beam:
-            return torch.cat([prefix, suffix], dim=dim)
-
-        suffix_top1 = torch.index_select(suffix, dim=0, index=self.first_beam_row)
-        full_top1 = torch.cat([prefix, suffix_top1], dim=dim)
-        return full_top1.expand(suffix.shape[0], *([-1] * (full_top1.dim() - 1)))
+        return torch.cat([prefix, suffix], dim=dim)
 
     def forward(self, *all_inputs):
         n = len(all_inputs) // 2
@@ -616,7 +507,15 @@ def onnx_static_reshape(x, shape):
 
 
 def onnx_reshape_batch(x, shape):
-    return onnx_static_reshape(x, (0,) + tuple(shape))
+    batch_dim = 0 if USE_BATCH else 1
+    return onnx_static_reshape(x, (batch_dim,) + tuple(shape))
+
+
+def add_batch_dynamic_axes(dynamic_axes, *tensor_names, axis_name='batch'):
+    if USE_BATCH:
+        for tensor_name in tensor_names:
+            dynamic_axes.setdefault(tensor_name, {})[0] = axis_name
+    return dynamic_axes
 
 
 class ROPE_SHIFT(torch.nn.Module):
@@ -1851,11 +1750,9 @@ RUNTIME_STANDALONE_MODEL_KEYS = (
     "kv_slice",
     "kv_split2",
     "kv_concat",
-    "kv_concat_first_beam",
-    "gather_first_beam",
     "rope_shift",
 )
-REQUIRED_RUNTIME_STANDALONE_MODEL_KEYS = {"gather_first_beam"}
+REQUIRED_RUNTIME_STANDALONE_MODEL_KEYS = set()
 
 
 def copy_runtime_standalones(source_folder, target_folder):
@@ -1933,16 +1830,12 @@ if __name__ == "__main__" and DO_EXPORT:
 
         trace_repeat_penalty = 1.0
         trace_penalty_range  = 20
-        trace_top_k          = 3
-        trace_beam_size      = 3
-
-        batch_size  = trace_beam_size
+        batch_size  = 1
         ids_len     = torch.tensor([10], dtype=torch.int64)
         history_len = torch.tensor([0], dtype=torch.int64)
         cache_len   = torch.tensor([0], dtype=torch.int64)
         kv_seq_len  = ids_len + history_len
-        beam_size   = torch.tensor([trace_beam_size], dtype=torch.int64)
-        logits      = torch.ones((trace_beam_size, vocab_size), dtype=torch.float32)
+        logits      = torch.ones((batch_size, vocab_size), dtype=torch.float32)
 
         kv_specs = [('key', 4), ('value', 3)]
         _is_rotary = KV_QUANT_DTYPE in ("ROTARY_Q4", "ROTARY_Q4_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA")
@@ -2063,8 +1956,14 @@ if __name__ == "__main__" and DO_EXPORT:
                     inputs.append(tensor)
                     in_names.append(in_n)
                     out_names.append(out_n)
-                    axes[in_n]  = {0: batch_axis, dim: seq_axis}
-                    axes[out_n] = {0: out_batch_axis, dim: out_seq_axis}
+                    axes[in_n]  = {dim: seq_axis}
+                    axes[out_n] = {dim: out_seq_axis}
+                    add_batch_dynamic_axes(
+                        axes, in_n, axis_name=batch_axis
+                    )
+                    add_batch_dynamic_axes(
+                        axes, out_n, axis_name=out_batch_axis
+                    )
             return inputs, in_names, out_names, axes
 
         # Avoid stale split-era embedding graphs in the merged-only folder.
@@ -2108,14 +2007,17 @@ if __name__ == "__main__" and DO_EXPORT:
         all_inputs   = kv_ins + [input_ids_main, rotary_cos, rotary_sin, attention_mask]
         input_names  = kv_in_names + ['input_ids', 'rotary_cos', 'rotary_sin', 'attention_mask']
         output_names = kv_out_names + ['logits']
-        dynamic_axes = {
-            **kv_axes,
-            'input_ids':      {0: 'batch', 1: 'ids_len'},
-            'logits':         {0: 'batch'},
-            'rotary_cos':     {1: 'ids_len'},
-            'rotary_sin':     {1: 'ids_len'},
-            'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'}
-        }
+        dynamic_axes = add_batch_dynamic_axes(
+            {
+                **kv_axes,
+                'input_ids':      {1: 'ids_len'},
+                'rotary_cos':     {1: 'ids_len'},
+                'rotary_sin':     {1: 'ids_len'},
+                'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'},
+            },
+            'input_ids',
+            'logits',
+        )
 
         model_Main = LLM_MAIN(model, num_heads, num_kv_heads, head_dim, num_layers, hidden_size)
         del model
@@ -2134,7 +2036,7 @@ if __name__ == "__main__" and DO_EXPORT:
         del model_Main, input_ids_main, attention_mask, all_inputs
         gc.collect()
 
-        save_id_in = torch.zeros((trace_beam_size, 10), dtype=torch.int32)
+        save_id_in = torch.zeros((batch_size, 10), dtype=torch.int32)
 
         torch.onnx.export(
             PENALTY_GREEDY_SEARCH(),
@@ -2142,88 +2044,19 @@ if __name__ == "__main__" and DO_EXPORT:
             onnx_model_Penalty_Greedy,
             input_names=['logits', 'save_id_in'],
             output_names=['max_logits_idx', 'save_id_out'],
-            dynamic_axes={
-                'logits':         {0: 'batch'},
-                'save_id_in':     {0: 'batch', 1: 'history_len'},
-                'save_id_out':    {0: 'batch', 1: 'history_len'},
-                'max_logits_idx': {0: 'batch'}
-            },
-            opset_version=OPSET,
-            dynamo=False
-        )
-
-        num_layers_beam = num_layers * len(kv_specs)
-        kv_tensors_Greedy = {k: v[[0]] for k, v in kv_tensors.items()}
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_Greedy)
-        kv_input_only_axes = {k: v for k, v in kv_axes.items() if k not in kv_out_names}
-
-        torch.onnx.export(
-            FIRST_BEAM_SEARCH(num_layers_beam),
-            tuple(kv_ins + [logits[[0]], save_id_in, beam_size]),
-            onnx_model_First_Beam,
-            input_names=kv_in_names + ['logits', 'save_id_in', 'beam_size'],
-            output_names=(
-                ['out_' + n[3:] for n in kv_in_names] + ['save_id_out', 'top_beam_prob', 'top_beam_indices', 'max_logits_idx']
+            dynamic_axes=add_batch_dynamic_axes(
+                {
+                    'save_id_in':  {1: 'history_len'},
+                    'save_id_out': {1: 'history_len'},
+                },
+                'logits',
+                'save_id_in',
+                'save_id_out',
+                'max_logits_idx',
             ),
-            dynamic_axes={
-                **kv_input_only_axes,
-                'logits':           {0: 'batch'},
-                'save_id_in':       {0: 'batch', 1: 'history_len'},
-                'top_beam_prob':    {0: 'batch'},
-                'top_beam_indices': {0: 'batch'},
-                'max_logits_idx':   {0: 'batch'},
-                'save_id_out':      {0: 'batch', 1: 'history_len'}
-            },
             opset_version=OPSET,
             dynamo=False
         )
-
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors)
-        previous_prob = torch.zeros((trace_beam_size, 1), dtype=torch.float32)
-        topK = torch.tensor([trace_top_k], dtype=torch.int32)
-
-        torch.onnx.export(
-            SECOND_BEAM_SEARCH(num_layers_beam),
-            tuple(kv_ins + [logits, save_id_in, previous_prob, beam_size, topK]),
-            onnx_model_Second_Beam,
-            input_names=kv_in_names + ['logits', 'save_id_in', 'previous_prob', 'beam_size', 'topK'],
-            output_names=kv_out_names + ['save_id_out', 'top_beam_prob', 'top_beam_indices', 'max_logits_idx'],
-            dynamic_axes={
-                **kv_axes,
-                'logits':           {0: 'batch'},
-                'save_id_in':       {0: 'batch', 1: 'history_len'},
-                'previous_prob':    {0: 'batch'},
-                'save_id_out':      {0: 'batch', 1: 'history_len'},
-                'top_beam_prob':    {0: 'batch'},
-                'top_beam_indices': {0: 'batch'},
-                'max_logits_idx':   {0: 'batch'}
-            },
-            opset_version=OPSET,
-            dynamo=False
-        )
-        del kv_tensors_Greedy, previous_prob, topK
-
-        gather_dynamic_axes = {}
-        for input_name, output_name in zip(kv_in_names, kv_out_names):
-            gather_dynamic_axes[input_name] = dict(kv_axes[input_name])
-            output_axes = {
-                axis: axis_name
-                for axis, axis_name in kv_axes[output_name].items()
-                if axis != 0
-            }
-            if output_axes:
-                gather_dynamic_axes[output_name] = output_axes
-        torch.onnx.export(
-            GATHER_FIRST_BEAM(),
-            tuple(kv_ins),
-            onnx_model_Gather_FirstBeam,
-            input_names=kv_in_names,
-            output_names=kv_out_names,
-            dynamic_axes=gather_dynamic_axes,
-            opset_version=OPSET,
-            dynamo=False,
-        )
-        del gather_dynamic_axes
 
         penalty_value = torch.tensor([trace_repeat_penalty], dtype=torch.float32)
         penalty_range = torch.tensor([trace_penalty_range],  dtype=torch.int64)
@@ -2234,11 +2067,12 @@ if __name__ == "__main__" and DO_EXPORT:
             onnx_model_Penalty,
             input_names=['logits_in', 'save_id_in', 'penalty_value', 'penalty_range'],
             output_names=['logits_out'],
-            dynamic_axes={
-                'logits_in':  {0: 'batch'},
-                'save_id_in': {0: 'batch', 1: 'history_len'},
-                'logits_out': {0: 'batch'}
-            },
+            dynamic_axes=add_batch_dynamic_axes(
+                {'save_id_in': {1: 'history_len'}},
+                'logits_in',
+                'save_id_in',
+                'logits_out',
+            ),
             opset_version=OPSET,
             dynamo=False
         )
@@ -2250,10 +2084,9 @@ if __name__ == "__main__" and DO_EXPORT:
             onnx_model_Greedy,
             input_names=['logits'],
             output_names=['max_logits_idx'],
-            dynamic_axes={
-                'logits':         {0: 'batch'},
-                'max_logits_idx': {0: 'batch'}
-            },
+            dynamic_axes=add_batch_dynamic_axes(
+                {}, 'logits', 'max_logits_idx'
+            ),
             opset_version=OPSET,
             dynamo=False
         )
@@ -2330,9 +2163,16 @@ if __name__ == "__main__" and DO_EXPORT:
                 cat_a_ins.append(tensor);         cat_a_names.append(a_n)
                 cat_b_ins.append(tensor.clone()); cat_b_names.append(b_n)
                 cat_out_names.append(o_n)
-                cat_axes[a_n] = {0: 'batch_size', dim: 'prefix_len'}
-                cat_axes[b_n] = {0: 'batch_size', dim: 'suffix_len'}
-                cat_axes[o_n] = {0: 'batch_size', dim: 'concat_len'}
+                cat_axes[a_n] = {dim: 'prefix_len'}
+                cat_axes[b_n] = {dim: 'suffix_len'}
+                cat_axes[o_n] = {dim: 'concat_len'}
+                add_batch_dynamic_axes(
+                    cat_axes,
+                    a_n,
+                    b_n,
+                    o_n,
+                    axis_name='batch_size',
+                )
 
         torch.onnx.export(
             KV_CONCAT(num_layers, head_dim),
@@ -2346,41 +2186,6 @@ if __name__ == "__main__" and DO_EXPORT:
         )
         del cat_a_ins, cat_a_names, cat_b_ins, cat_b_names, cat_out_names, cat_axes
 
-        beam_cat_prefix_ins, beam_cat_prefix_names = [], []
-        beam_cat_suffix_ins, beam_cat_suffix_names = [], []
-        beam_cat_out_names, beam_cat_axes = [], {}
-        for name, dim in kv_specs:
-            suffix_tensor = kv_tensors[name]
-            prefix_tensor = suffix_tensor[[0]]
-            for i in range(num_layers):
-                prefix_name = f'in_prefix_{name}_{i}'
-                suffix_name = f'in_beam_{name}_{i}'
-                output_name = f'out_{name}_{i}'
-                beam_cat_prefix_ins.append(prefix_tensor)
-                beam_cat_prefix_names.append(prefix_name)
-                beam_cat_suffix_ins.append(suffix_tensor)
-                beam_cat_suffix_names.append(suffix_name)
-                beam_cat_out_names.append(output_name)
-                beam_cat_axes[prefix_name] = {dim: 'prefix_len'}
-                beam_cat_axes[suffix_name] = {0: 'beam_size', dim: 'suffix_len'}
-                beam_cat_axes[output_name] = {0: 'beam_size', dim: 'concat_len'}
-
-        torch.onnx.export(
-            KV_CONCAT(num_layers, head_dim, first_beam=True),
-            tuple(beam_cat_prefix_ins + beam_cat_suffix_ins),
-            onnx_model_KV_Concat_FirstBeam,
-            input_names=beam_cat_prefix_names + beam_cat_suffix_names,
-            output_names=beam_cat_out_names,
-            dynamic_axes=beam_cat_axes,
-            opset_version=OPSET,
-            dynamo=False,
-        )
-        del (
-            beam_cat_prefix_ins, beam_cat_prefix_names,
-            beam_cat_suffix_ins, beam_cat_suffix_names,
-            beam_cat_out_names, beam_cat_axes,
-        )
-
         def _rope_shift_key_io(specs):
             ins, in_names, out_names, axes = [], [], [], {}
             for name, tensor in specs:
@@ -2390,8 +2195,14 @@ if __name__ == "__main__" and DO_EXPORT:
                     ins.append(tensor)
                     in_names.append(in_n)
                     out_names.append(out_n)
-                    axes[in_n]  = {0: 'batch_size', seq_axis: 'history_len'}
-                    axes[out_n] = {0: 'batch_size', seq_axis: 'history_len'}
+                    axes[in_n]  = {seq_axis: 'history_len'}
+                    axes[out_n] = {seq_axis: 'history_len'}
+                    add_batch_dynamic_axes(
+                        axes,
+                        in_n,
+                        out_n,
+                        axis_name='batch_size',
+                    )
             return ins, in_names, out_names, axes
 
         rope_shift_amount = torch.tensor([5], dtype=torch.int64)
@@ -2500,10 +2311,8 @@ if __name__ == "__main__" and DO_EXPORT:
             onnx_model_Metadata,
             onnx_model_Greedy, onnx_model_Penalty_Greedy,
             onnx_model_TopKTopP_Sampling,
-            onnx_model_First_Beam, onnx_model_Second_Beam,
             onnx_model_Penalty, onnx_model_KV_Slice,
             onnx_model_KV_Split2, onnx_model_KV_Concat,
-            onnx_model_KV_Concat_FirstBeam, onnx_model_Gather_FirstBeam,
             onnx_model_Rope_Shift,
         ]
         _written, _skipped = [], []
