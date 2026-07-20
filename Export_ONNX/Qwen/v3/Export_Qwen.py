@@ -29,11 +29,11 @@ KV_QUANT_GROUP_SIZE            = 128                                 # Quant gro
 COMPUTE_IN_F32                 = False                               # F16 KV only: False=f16 attention, True=upcast KV for f32 math.
 
 # Quantized-KV accuracy/storage knobs. Ignored by F16/F32 KV.
-USE_HADAMARD                   = True                               # Grouped Q4/Q8 only: rotate channels before quantization.
+USE_HADAMARD                   = False                               # Grouped Q4/Q8 only: rotate channels before quantization.
 HADAMARD_RANDOM_SEED           = 9527                                # Deterministic Hadamard sign pattern.
 USE_CLIP                       = False                               # Clip outliers before KV quantization.
 CLIP_SIGMA                     = 3.0                                 # Sigma bound used when USE_CLIP=True.
-USE_SHUFFLE                    = True                               # Grouped Q4/Q8 only: spread channels across groups.
+USE_SHUFFLE                    = False                               # Grouped Q4/Q8 only: spread channels across groups.
 USE_SYM                        = True                                # True=signed absmax/no bias; False=min-max with bias.
 USE_FLOAT16_SCALE_BIAS         = True                                # Store quant scales/biases as f16 instead of f32.
 USE_QDQ_FRIENDLY_ASYM          = False                               # Asym only: enables blocked Q/DQ rewrite, disables residual correction.
