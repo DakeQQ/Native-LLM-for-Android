@@ -24,7 +24,6 @@
 
     <!-- Energy yellow (assistant / accent) -->
     <color name="energyYellow">#FFD60A</color>
-    <color name="energyYellowDeep">#FFA800</color>
     <color name="yellowGlow">#66FFD60A</color>  <!-- avatar aura -->
     <color name="postProcessOrange">#E8751A</color>
     <color name="postProcessOrangeStroke">#C85F0F</color>
@@ -49,11 +48,6 @@
     <color name="glassStroke">#3FA9C7FF</color>      <!-- hairline border -->
     <color name="glassStrokeStrong">#66A9C7FF</color><!-- focused border -->
 
-    <!-- System-prompt editor sheet: nearly opaque in dark mode so chat text under the dialog cannot bleed
-         through during long prompt editing. The rest of the app keeps the lighter glass fills above. -->
-    <color name="systemPromptPanelFill">#F5121E3D</color>
-    <color name="systemPromptPanelFillStrong">#FA0E1832</color>
-
     <!-- User bubble (electric-blue glass, translucent) + always-light text. -->
     <color name="userFillTop">#B34D8BFF</color>
     <color name="userFillBottom">#A61A45C7</color>
@@ -70,10 +64,6 @@
     <color name="thinkBlockFill">#0FA9C7FF</color>
     <color name="thinkBlockStroke">#3D9DB0DA</color>
     <color name="thinkText">#ECF2FF</color>  <!-- brightened for dark mode (was #D7E4FF) -->
-
-    <!-- Think-mode toggle accent washes (checked base ring + pressed wash). -->
-    <color name="thinkToggleCheckedBase">#55FFD60A</color>
-    <color name="thinkTogglePressed">#2EFFD60A</color>
 
     <!-- Slim-slider inactive track: a delicate translucent blue on the panel surface. -->
     <color name="sliderTrackInactive">#33A9C7FF</color>

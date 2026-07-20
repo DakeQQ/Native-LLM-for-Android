@@ -24,8 +24,6 @@
     <string name="default_memory_tokens" translatable="false">2048</string>
     <string name="default_prefill_tokens" translatable="false">256</string>
     <string name="default_decode_tokens" translatable="false">4095</string>
-    <string name="default_beam_size" translatable="false">3</string>
-    <string name="default_top_k" translatable="false">3</string>
     <string name="default_repeat_penalty" translatable="false">0.80</string>
     <string name="default_penalty_range" translatable="false">20</string>
     <string name="default_sampling_temperature" translatable="false">0.80</string>
@@ -42,9 +40,7 @@
     <string name="jump_to_bottom">回到底部 Bottom</string>
     <string name="decode_title">解码策略 Decode Strategy</string>
     <string name="decode_mode_greedy">Greedy</string>
-    <string name="decode_mode_beam">Beam</string>
     <string name="decode_mode_sampler">Sampler</string>
-    <string name="beam_label">束宽 Beam</string>
     <string name="top_k_label">候选 Top-K</string>
     <string name="penalty_label">重复惩罚 Repeat</string>
     <string name="penalty_range_label">惩罚范围 Window</string>
@@ -95,21 +91,6 @@
     <string name="edit_message_title">编辑消息 Edit message</string>
     <string name="edit_message_resend">重新发送 Resend</string>
     <string name="edit_message_cancel">取消 Cancel</string>
-    <!-- Slot system-prompt editor -->
-    <string name="system_prompt_title">系统提示词 System Prompt</string>
-    <string name="system_prompt_subtitle">角色设定 Assistant behavior</string>
-    <string name="system_prompt_scope">下轮 Next</string>
-    <string name="system_prompt_editor_label">提示词内容 Prompt</string>
-    <string name="system_prompt_hint">输入系统提示词（留空则关闭）Enter the system prompt (leave empty to disable)</string>
-    <string name="system_prompt_meta">留空关闭 · 下轮生效 Empty disables · next turn</string>
-    <string name="system_prompt_counter">%1$d / %2$d 字 Chars</string>
-    <string name="system_prompt_clear">清空 Clear</string>
-    <string name="system_prompt_save">保存 Save</string>
-    <string name="system_prompt_reset">恢复默认 Reset</string>
-    <string name="system_prompt_cancel">取消 Cancel</string>
-    <string name="system_prompt_saved">系统提示词已更新 System prompt updated</string>
-    <string name="system_prompt_save_failed">系统提示词应用失败，请重试。 Could not apply system prompt; retry.</string>
-    <string name="system_prompt_applying_action">应用中 Applying…</string>
     <string name="copy_message">复制 Copy</string>
     <string name="copied_to_clipboard">已复制 Copied</string>
     <string name="think_section_active">让我想想 Let me cook</string>

@@ -24,7 +24,6 @@
 
     <!-- Energy amber (assistant / accent) — dark enough to read on light surfaces. -->
     <color name="energyYellow">#B25E00</color>
-    <color name="energyYellowDeep">#8A4600</color>
     <color name="yellowGlow">#4DB25E00</color>  <!-- avatar aura -->
      <color name="postProcessOrange">#E8751A</color>
      <color name="postProcessOrangeStroke">#C85F0F</color>
@@ -49,11 +48,6 @@
     <color name="glassStroke">#33123A7A</color>      <!-- hairline border -->
     <color name="glassStrokeStrong">#59123A7A</color><!-- focused border -->
 
-    <!-- System-prompt editor sheet: light mode already uses opaque glass fills. Kept separate so dark mode
-         can block underlying chat text without changing the main command deck's transparency. -->
-    <color name="systemPromptPanelFill">#FFFFFFFF</color>
-    <color name="systemPromptPanelFillStrong">#F1F4FB</color>
-
     <!-- User bubble (deep royal-blue, opaque) + crisp white text. The blue was deepened from the old
          medium tone so the white words keep strong contrast (~7:1, not the old ~4:1) across the whole
          gradient and stay easily readable in daylight / light mode. -->
@@ -72,10 +66,6 @@
     <color name="thinkBlockFill">#14123A7A</color>
     <color name="thinkBlockStroke">#59123A7A</color>
      <color name="thinkText">#34445E</color>
-
-    <!-- Think-mode toggle accent washes (checked base ring + pressed wash). -->
-    <color name="thinkToggleCheckedBase">#55B25E00</color>
-    <color name="thinkTogglePressed">#2EB25E00</color>
 
     <!-- Slim-slider inactive track: a delicate translucent blue on the panel surface. -->
     <color name="sliderTrackInactive">#33123A7A</color>

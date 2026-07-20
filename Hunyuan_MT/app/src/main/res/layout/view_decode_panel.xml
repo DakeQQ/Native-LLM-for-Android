@@ -126,11 +126,6 @@
                 android:text="@string/decode_mode_greedy" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/decode_mode_beam"
-                style="@style/Widget.App.DecodeModeButton"
-                android:text="@string/decode_mode_beam" />
-
-            <com.google.android.material.button.MaterialButton
                 android:id="@+id/decode_mode_sampler"
                 style="@style/Widget.App.DecodeModeButton"
                 android:text="@string/decode_mode_sampler" />

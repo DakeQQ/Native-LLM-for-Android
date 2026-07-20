@@ -2,7 +2,7 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/use_think"
+    android:id="@+id/main_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_main_gradient"
@@ -97,19 +97,6 @@
                 android:scaleType="centerInside"
                                 android:src="@drawable/ic_refresh"
                                 android:tooltipText="@string/clear" />
-
-              <!-- Slot system-prompt editor. Live turns inject this text; Organize Memory ON strips it
-                  during rebuild, OFF keeps it in cross-turn history. -->
-            <ImageButton
-                android:id="@+id/btn_system_prompt"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="2dp"
-                android:background="@drawable/bg_copy_button"
-                android:contentDescription="@string/system_prompt_title"
-                android:padding="5dp"
-                android:scaleType="centerInside"
-                android:src="@drawable/ic_system_prompt" />
 
                             <!-- Decode-strategy gear: toggles the collapsible controls (Zone 3). -->
             <ImageButton
