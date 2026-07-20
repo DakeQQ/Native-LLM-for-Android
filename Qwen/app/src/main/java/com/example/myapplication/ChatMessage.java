@@ -18,7 +18,7 @@ public final class ChatMessage {
     private static final int MAX_VIDEO_PREVIEW_FRAMES = 12;
     public static final int TYPE_USER = 0;
     public static final int TYPE_SERVER = 1;
-    // "Typing" placeholder shown while beam search decodes silently.
+    // Loading placeholder shown while deferred work waits for the first streamed token.
     public static final int TYPE_LOADING = 2;
     // User-side image bubble carrying a vision snapshot thumbnail.
     public static final int TYPE_USER_IMAGE = 3;

@@ -20,8 +20,7 @@ public class App extends Application {
     static final String KEY_MEMORY_RED_PERCENT = "memory_red_percent";
     static final String KEY_MEMORY_GREEN_PERCENT = "memory_green_percent";
     static final String KEY_DECODE_MODE = "decode_mode";
-    static final String KEY_BEAM_SIZE = "beam_size";
-    static final String KEY_BEAM_TOP_K = "beam_top_k";
+    static final String KEY_DECODE_MODE_VERSION = "decode_mode_version";
     static final String KEY_DIRECT_REPEAT_PENALTY = "direct_repeat_penalty";
     static final String KEY_PENALTY_RANGE = "penalty_range";
     static final String KEY_SAMPLING_TEMPERATURE = "sampling_temperature";

@@ -27,8 +27,6 @@ static ModelRuntime& mMain          = getModel(LLM_TextDecodeGreedy);
 static ModelRuntime& mKVSlice       = getModel(LLM_KV_Slice);
 static ModelRuntime& mKVSplit2      = getModel(LLM_KV_Split2);
 static ModelRuntime& mKVConcat      = getModel(LLM_KV_Concat);
-static ModelRuntime& mKVConcatFirstBeam = getModel(LLM_KV_Concat_FirstBeam);
-static ModelRuntime& mGatherFirstBeam = getModel(LLM_GatherFirstBeam);
 static ModelRuntime& mRopeShift     = getModel(LLM_RopeShift);
 
 // Vision (image/video) sessions. Optionally loaded; null for a text-only export.
@@ -36,8 +34,8 @@ static ModelRuntime& mVision            = getModel(LLM_Vision);
 static ModelRuntime& mImagePreprocess   = getModel(LLM_Image_Preprocess);
 static ModelRuntime& mVideoPreprocess   = getModel(LLM_Video_Preprocess);
 
-// Merged graphs share weights, but every live OrtSession still owns a large optimized execution plan.
-// Keep only the canonical text-greedy pair plus the pair selected for each modality.
+// Merged graphs share weights, but every live OrtSession still owns an optimized execution plan.
+// Load selected pairs lazily and retain producer sessions while cross-turn OrtValues may use their allocators.
 static std::mutex g_runtime_config_mutex;
 static std::mutex g_model_session_mutex;
 static std::mutex g_benchmark_correctness_mutex;
@@ -65,8 +63,6 @@ static std::array<MergedStrategy, 3> mergedStrategiesForConfig(
     MergedStrategy textStrategy = configuredPenalty ? MSTRAT_PENALTY_GREEDY : MSTRAT_GREEDY;
     if (configuredDecodeMode == DECODE_MODE_SAMPLING) {
         textStrategy = MSTRAT_SAMPLING;
-    } else if (configuredDecodeMode == DECODE_MODE_BEAM) {
-        textStrategy = configuredPenalty ? MSTRAT_PENALTY_BEAM : MSTRAT_BEAM;
     }
 
     return {textStrategy, textStrategy, textStrategy};
@@ -312,30 +308,21 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
     static constexpr ModelFileMetadataKey modelFileKeys[] = {
         {LLM_TextPrefillGreedy,         "model_file_name_text_prefill_greedy"},
         {LLM_TextPrefillPenaltyGreedy,  "model_file_name_text_prefill_penalty_greedy"},
-        {LLM_TextPrefillBeam,           "model_file_name_text_prefill_beam"},
         {LLM_TextPrefillSampling,       "model_file_name_text_prefill_sampling"},
         {LLM_TextDecodeGreedy,          "model_file_name_text_decode_greedy"},
         {LLM_TextDecodePenaltyGreedy,   "model_file_name_text_decode_penalty_greedy"},
-        {LLM_TextDecodeBeam,            "model_file_name_text_decode_beam"},
-        {LLM_TextDecodePenaltyBeam,     "model_file_name_text_decode_penalty_beam"},
         {LLM_TextDecodeSampling,        "model_file_name_text_decode_sampling"},
         {LLM_ImagePrefillGreedy,        "model_file_name_image_prefill_greedy"},
         {LLM_ImagePrefillPenaltyGreedy, "model_file_name_image_prefill_penalty_greedy"},
-        {LLM_ImagePrefillBeam,          "model_file_name_image_prefill_beam"},
         {LLM_ImagePrefillSampling,      "model_file_name_image_prefill_sampling"},
         {LLM_ImageDecodeGreedy,         "model_file_name_image_decode_greedy"},
         {LLM_ImageDecodePenaltyGreedy,  "model_file_name_image_decode_penalty_greedy"},
-        {LLM_ImageDecodeBeam,           "model_file_name_image_decode_beam"},
-        {LLM_ImageDecodePenaltyBeam,    "model_file_name_image_decode_penalty_beam"},
         {LLM_ImageDecodeSampling,       "model_file_name_image_decode_sampling"},
         {LLM_VideoPrefillGreedy,        "model_file_name_video_prefill_greedy"},
         {LLM_VideoPrefillPenaltyGreedy, "model_file_name_video_prefill_penalty_greedy"},
-        {LLM_VideoPrefillBeam,          "model_file_name_video_prefill_beam"},
         {LLM_VideoPrefillSampling,      "model_file_name_video_prefill_sampling"},
         {LLM_VideoDecodeGreedy,         "model_file_name_video_decode_greedy"},
         {LLM_VideoDecodePenaltyGreedy,  "model_file_name_video_decode_penalty_greedy"},
-        {LLM_VideoDecodeBeam,           "model_file_name_video_decode_beam"},
-        {LLM_VideoDecodePenaltyBeam,    "model_file_name_video_decode_penalty_beam"},
         {LLM_VideoDecodeSampling,       "model_file_name_video_decode_sampling"},
         {LLM_Vision,                    "model_file_name_vision"},
         {LLM_Image_Preprocess,          "model_file_name_image_preprocess"},
@@ -343,8 +330,6 @@ static bool applyRuntimeModelConfig(const OrtApi* api, OrtSession* session) {
         {LLM_KV_Slice,                  "model_file_name_kv_slice"},
         {LLM_KV_Split2,                 "model_file_name_kv_split2"},
         {LLM_KV_Concat,                 "model_file_name_kv_concat"},
-        {LLM_KV_Concat_FirstBeam,       "model_file_name_kv_concat_first_beam"},
-        {LLM_GatherFirstBeam,           "model_file_name_gather_first_beam"},
         {LLM_RopeShift,                 "model_file_name_rope_shift"},
     };
     for (const ModelFileMetadataKey& entry : modelFileKeys) {
@@ -611,7 +596,7 @@ static bool preloadRuntimeMetadata(JNIEnv* env, jobject assetManager, bool lowMe
     return applied;
 }
 
-// The merged graphs lead ALL I/O with the state block (in_* inputs / out_*|beam_out_* outputs): the
+// The merged graphs lead ALL I/O with the state block (in_* inputs / out_* outputs): the
 // full-attention KV tensors then the hybrid linear-attention conv/recurrent states. Everything after is
 // the token input, phase counters, per-strategy scalars, and the token/kv_seq/save_id outputs.
 static bool configureKVLayout() {
@@ -625,7 +610,7 @@ static bool configureKVLayout() {
              num_layers, g_kv_blocks, num_keys_values);
         return false;
     }
-    // Count the contiguous leading state tensors (in_* inputs, out_*/beam_out_* outputs).
+    // Count the contiguous leading state tensors (in_* inputs and out_* outputs).
     int statesByInputs = 0;
     for (const char* name : m.inputNames) {
         if (name != nullptr && std::strncmp(name, "in_", 3) == 0) { ++statesByInputs; }
@@ -633,8 +618,7 @@ static bool configureKVLayout() {
     }
     int statesByOutputs = 0;
     for (const char* name : m.outputNames) {
-        if (name != nullptr && (std::strncmp(name, "out_", 4) == 0 ||
-                                std::strncmp(name, "beam_out_", 9) == 0)) { ++statesByOutputs; }
+        if (name != nullptr && std::strncmp(name, "out_", 4) == 0) { ++statesByOutputs; }
         else { break; }
     }
     if (statesByInputs != statesByOutputs || statesByInputs < num_keys_values) {
@@ -1102,13 +1086,12 @@ static int64_t g_reserved_decode_arena_bytes = 0;
 
 // Pre-grow each CPU arena so cache-heavy graphs do not grow it mid-turn. Reserve the largest loaded
 // cache I/O working set plus one persistent batch-1 saved KV on the decode side. The per-Env high-water
-// marks make this idempotent. seqCap is the worst-case sequence length; beamBatch is the decode batch.
-static void reserveSharedArena(int64_t seqCap, int64_t beamBatch) {
+// marks make this idempotent. seqCap is the worst-case sequence length.
+static void reserveSharedArena(int64_t seqCap) {
     if (!kPrewarmSharedArena || kPrewarmArenaPercent <= 0) {
         return;
     }
     const int64_t capTokens = std::max<int64_t>(1, seqCap);
-    const int64_t beamB     = std::max<int64_t>(1, beamBatch);
 
     // Bytes of key/value cache I/O. Keys (and key scale/bias) store sequence on the last axis; values
     // store it on the penultimate axis. Output shape inference often leaves otherwise-static head dims
@@ -1165,16 +1148,11 @@ static void reserveSharedArena(int64_t seqCap, int64_t beamBatch) {
             if (runtime.session == nullptr || runtime.env != anchor.env) {
                 continue;
             }
-            const int mergedSlot = modelIsMergedGraph(runtime.id)
-                    ? (runtime.id - LLM_FIRST_MERGED_MODEL) % LLM_MERGED_MODELS_PER_MODALITY
-                    : -1;
-            const bool beamGraph = mergedSlot == 2 || mergedSlot == 6 || mergedSlot == 7;
-            const int64_t batch = beamGraph ? beamB : 1;
             const int64_t work = cacheIoBytes(
                     runtime.inputNames, runtime.inputDims, runtime.inputTypes,
-                    runtime.inputDims, batch) +
+                    runtime.inputDims, 1) +
                     cacheIoBytes(runtime.outputNames, runtime.outputDims, runtime.outputTypes,
-                                 runtime.inputDims, batch);
+                         runtime.inputDims, 1);
             peakBytes = std::max(peakBytes, work);
         }
         if (includePersistentState) {
@@ -1199,10 +1177,10 @@ static void reserveSharedArena(int64_t seqCap, int64_t beamBatch) {
             logOrtStatus(anchor.api, anchor.api->AllocatorFree(arena, block),
                          "AllocatorFree(arena prewarm)");
             reservedBytes = target;
-            LOGI("%s arena pre-warmed: +%lld MB (total %lld MB; seq<=%lld beam<=%lld %d%%)",
+              LOGI("%s arena pre-warmed: +%lld MB (total %lld MB; seq<=%lld %d%%)",
                  label, static_cast<long long>(delta >> 20),
                  static_cast<long long>(target >> 20), static_cast<long long>(capTokens),
-                 static_cast<long long>(beamB), kPrewarmArenaPercent);
+                  kPrewarmArenaPercent);
         }
         anchor.api->ReleaseAllocator(arena);
     };
@@ -1666,20 +1644,20 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv* env, jclass 
 
     constexpr int firstStandaloneModel = LLM_KV_Slice;
     for (int id = firstStandaloneModel; id < kModelCount; ++id) {
+        if (modelIsBundleDescriptor(static_cast<ModelId>(id))) {
+            continue;
+        }
         const bool transformerOnlyHelper = id == LLM_KV_Slice || id == LLM_KV_Split2 ||
-                id == LLM_KV_Concat || id == LLM_KV_Concat_FirstBeam || id == LLM_RopeShift;
-        if ((num_linear_attention_layers > 0 && transformerOnlyHelper) ||
-            id == LLM_GatherFirstBeam) {
+                id == LLM_KV_Concat || id == LLM_RopeShift;
+        if (num_linear_attention_layers > 0 && transformerOnlyHelper) {
             LOGI("Load_Models_A: deferring unused helper %d (%s)",
                  id, gModelFileNames[id].c_str());
             continue;
         }
         if (!loadModel(static_cast<ModelId>(id), env, asset_manager, ep_type, lowMem)) {
             const bool requiredPrefillHelper = num_linear_attention_layers == 0 &&
-                    (id == LLM_KV_Split2 || id == LLM_KV_Concat ||
-                     id == LLM_KV_Concat_FirstBeam);
-            const bool requiredVisionBeamHelper = g_multimodal && id == LLM_GatherFirstBeam;
-            if (requiredPrefillHelper || requiredVisionBeamHelper) {
+                    (id == LLM_KV_Split2 || id == LLM_KV_Concat);
+                if (requiredPrefillHelper) {
                 LOGE("Load_Models_A: required graph %d (%s) failed to load",
                      id, gModelFileNames[id].c_str());
                 return JNI_FALSE;
@@ -1702,7 +1680,7 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv* env, jclass 
         return JNI_FALSE;
     }
 
-    reserveSharedArena(g_memory_tokens, useBeamSearch ? beamSize : 1);
+    reserveSharedArena(g_memory_tokens);
     mallopt(M_PURGE, 0);
 
     g_model_sessions_initialized = true;
@@ -1711,9 +1689,9 @@ Java_com_example_myapplication_MainActivity_Load_1Models_1A(JNIEnv* env, jclass 
         loadedSessions += runtime.session != nullptr ? 1 : 0;
     }
 
-        LOGI("Load_Models_A: %d/%d sessions resident (EP=%d, lowMem=%d, strategy=%d, "
+          LOGI("Load_Models_A: %d/%d sessions resident (EP=%d, lowMem=%d, strategy=%d, "
             "vision_caps=%d vision_ready=%d)",
-         loadedSessions, kModelCount, ep_type, lowMem ? 1 : 0,
+            loadedSessions, kSessionModelCount, ep_type, lowMem ? 1 : 0,
          static_cast<int>(g_loaded_merged_strategies[0]),
             metadataCaps, g_vision_sessions_initialized ? 1 : 0);
     return JNI_TRUE;
@@ -1863,12 +1841,7 @@ static bool ensureMergedStrategySessions(
         const ModelId prefill = mergedPrefillModel(modality, strategies[modality]);
         const ModelId decode = mergedDecodeModel(modality, strategies[modality]);
         if (loadOne(prefill) && loadOne(decode)) {
-            const bool visionBeam = modality > 0 &&
-                    (strategies[modality] == MSTRAT_BEAM ||
-                     strategies[modality] == MSTRAT_PENALTY_BEAM);
-            if (!visionBeam || loadOne(mergedDecodeModel(modality, MSTRAT_GREEDY))) {
-                continue;
-            }
+            continue;
         }
         LOGE("merged strategy load failed: modality=%d strategy=%d", modality,
              static_cast<int>(strategies[modality]));
@@ -1880,7 +1853,7 @@ static bool ensureMergedStrategySessions(
     for (int id = LLM_FIRST_MERGED_MODEL; id < mergedEnd; ++id) {
         mergedResident += getModel(static_cast<ModelId>(id)).session != nullptr ? 1 : 0;
     }
-        LOGI("merged strategy sessions ready: resident=%d/27 strategy=%d/%d/%d",
+        LOGI("merged strategy sessions ready: resident=%d/18 strategy=%d/%d/%d",
          mergedResident,
          static_cast<int>(strategies[0]), static_cast<int>(strategies[1]),
             static_cast<int>(strategies[2]));
@@ -1924,17 +1897,6 @@ static bool initializeVisionSessionsLocked(
         return getModel(id).session != nullptr ||
                loadModel(id, env, g_model_asset_manager, g_model_ep_type, g_model_low_memory);
     };
-    const bool needsGatherFirstBeam =
-            ((visionCaps & 0x1) != 0 &&
-             (strategies[1] == MSTRAT_BEAM || strategies[1] == MSTRAT_PENALTY_BEAM)) ||
-            ((visionCaps & 0x2) != 0 &&
-             (strategies[2] == MSTRAT_BEAM || strategies[2] == MSTRAT_PENALTY_BEAM));
-    if (needsGatherFirstBeam) {
-        if (!loadVisionModel(LLM_GatherFirstBeam)) {
-            LOGE("Vision initialization failed: GatherFirstBeam is required for beam strategy");
-            return false;
-        }
-    }
     if (g_vision_sessions_initialized) {
         return true;
     }
@@ -2145,11 +2107,6 @@ static bool runKVConcatGraph(ModelRuntime& m, std::vector<OrtValue*>& prefix,
 static bool runKVConcat(std::vector<OrtValue*>& prefix, std::vector<OrtValue*>& suffix,
                         std::vector<OrtValue*>& out) {
     return runKVConcatGraph(mKVConcat, prefix, suffix, out);
-}
-
-static bool runKVConcatFirstBeam(std::vector<OrtValue*>& prefix, std::vector<OrtValue*>& suffix,
-                                 std::vector<OrtValue*>& out) {
-    return runKVConcatGraph(mKVConcatFirstBeam, prefix, suffix, out);
 }
 
 static void appendKVSegment(int64_t tokenLen, int64_t mropeSpan, uint8_t modality) {
@@ -2463,7 +2420,7 @@ static std::mutex g_clean_commit_mutex;
 static std::condition_variable g_clean_commit_cv;
 static bool g_clean_commit_running = false;
 // Whether the in-flight clean commit surfaces the "整理记忆 Consolidating" UI. Only Organize-Memory ON
-// commits are user-visible; OFF-mode internal rebuilds (text-beam KV re-prefill, red-zone trim) run
+// commits are user-visible; OFF-mode internal rebuilds and red-zone trims run
 // silently so the box never appears while the toggle is off. Bookkeeping (g_clean_commit_running) still
 // tracks every commit so waitForCleanCommit() serialization is unaffected either way.
 static bool g_clean_commit_status_visible = false;
@@ -2973,123 +2930,6 @@ static void commitOffCap(int cap) {
     });
 }
 
-static bool runGatherFirstBeam(std::vector<OrtValue*>& kvStates,
-                               std::vector<OrtValue*>& linearStates) {
-    const size_t kvCount = kvStates.size();
-    const size_t stateCount = kvCount + linearStates.size();
-    if (mGatherFirstBeam.session == nullptr || !ensureBinding(mGatherFirstBeam) ||
-        stateCount != static_cast<size_t>(num_main_states) ||
-        mGatherFirstBeam.inputNames.size() != stateCount ||
-        mGatherFirstBeam.outputNames.size() != stateCount ||
-        mGatherFirstBeam.outputDims.size() != stateCount) {
-        return false;
-    }
-    for (size_t index = 0; index < stateCount; ++index) {
-        if (mGatherFirstBeam.inputNames[index] == nullptr ||
-            mGatherFirstBeam.outputNames[index] == nullptr ||
-            std::strcmp(mGatherFirstBeam.inputNames[index], mMain.inputNames[index]) != 0 ||
-            std::strcmp(mGatherFirstBeam.outputNames[index], mMain.outputNames[index]) != 0 ||
-            mGatherFirstBeam.inputTypes[index] != mMain.inputTypes[index] ||
-            mGatherFirstBeam.outputTypes[index] != mMain.inputTypes[index] ||
-            mGatherFirstBeam.outputDims[index].empty() ||
-            mGatherFirstBeam.outputDims[index][0] != 1) {
-            return false;
-        }
-    }
-    std::vector<OrtValue*> inputs;
-    inputs.reserve(stateCount);
-    inputs.insert(inputs.end(), kvStates.begin(), kvStates.end());
-    inputs.insert(inputs.end(), linearStates.begin(), linearStates.end());
-    std::vector<OrtValue*> outputs;
-    if (!runBoundGraph(mGatherFirstBeam, inputs, static_cast<int>(stateCount), outputs) ||
-        outputs.size() != stateCount) {
-        releaseValues(mGatherFirstBeam.api, outputs);
-        return false;
-    }
-    releaseValues(mMain.api, kvStates);
-    releaseValues(mMain.api, linearStates);
-    const auto split = outputs.begin() + static_cast<std::ptrdiff_t>(kvCount);
-    kvStates.assign(outputs.begin(), split);
-    linearStates.assign(split, outputs.end());
-    return true;
-}
-
-// Consume explicit tokens after a visual beam has been collapsed to batch 1. The modality-specific
-// greedy decode carries the same image/video rotary tables without re-expanding the state into beams.
-static bool appendIdsWithModalityGreedyDecode(int modality,
-                                              std::vector<OrtValue*>& kvStates,
-                                              std::vector<OrtValue*>& linearStates,
-                                              const std::vector<int>& ids,
-                                              int64_t& absNext) {
-    if (ids.empty()) {
-        return true;
-    }
-    ModelRuntime& graph = getModel(mergedDecodeModel(modality, MSTRAT_GREEDY));
-    const OrtApi* api = mMain.api;
-    const int tokenInput = findInputIdxAny(graph, {"embed_input_ids", "input_ids"});
-    const int kvSeqInput = findInputIdxPrefix(graph, "decode_kv_seq_len");
-    const int kvSeqOutput = findOutputIdxAny(
-            graph, {"decode_kv_seq_len_next", "decode_kv_seq_len"});
-    if (modality <= 0 || api == nullptr || graph.session == nullptr || !ensureBinding(graph) ||
-        kvStates.size() != static_cast<size_t>(num_keys_values) ||
-        linearStates.size() != static_cast<size_t>(num_linear_states) ||
-        tokenInput < num_main_states || kvSeqInput < num_main_states ||
-        kvSeqOutput < num_main_states ||
-        !isIntegerTensorType(graph.inputTypes[tokenInput]) ||
-        !isIntegerTensorType(graph.inputTypes[kvSeqInput]) ||
-        graph.outputTypes[kvSeqOutput] != graph.inputTypes[kvSeqInput]) {
-        return false;
-    }
-
-    for (int id : ids) {
-        OrtBuffer tokenBuffer = makeBuffer(graph, {1, 1}, graph.inputTypes[tokenInput]);
-        OrtBuffer kvSeqBuffer = makeBuffer(graph, {1}, graph.inputTypes[kvSeqInput]);
-        bool ok = writeIntegerValues(tokenBuffer, graph.inputTypes[tokenInput], &id, 1) &&
-                  writeScalarInt64(kvSeqBuffer, graph.inputTypes[kvSeqInput], absNext);
-        if (ok) {
-            resetBinding(graph);
-            for (int index = 0; index < num_keys_values; ++index) {
-                ok = bindIn(graph, index, kvStates[index]) && ok;
-            }
-            for (int index = 0; index < num_linear_states; ++index) {
-                ok = bindIn(graph, num_keys_values + index, linearStates[index]) && ok;
-            }
-            ok = bindIn(graph, tokenInput, tokenBuffer.value) && ok;
-            ok = bindIn(graph, kvSeqInput, kvSeqBuffer.value) && ok;
-            for (int index = 0; index < static_cast<int>(graph.outputNames.size()); ++index) {
-                ok = bindOutDevice(graph, index) && ok;
-            }
-        }
-
-        std::vector<OrtValue*> outputs;
-        ok = ok && runBinding(graph) && fetchOutputsInto(graph, outputs) &&
-             outputs.size() == graph.outputNames.size();
-        releaseBuffer(api, tokenBuffer);
-        releaseBuffer(api, kvSeqBuffer);
-        int64_t nextPosition = -1;
-        if (!ok || !readScalarInteger(api, outputs[kvSeqOutput],
-                                      graph.outputTypes[kvSeqOutput], nextPosition) ||
-            nextPosition <= absNext) {
-            releaseValues(api, outputs);
-            return false;
-        }
-
-        std::vector<OrtValue*> nextKV(outputs.begin(), outputs.begin() + num_keys_values);
-        std::vector<OrtValue*> nextLinear(outputs.begin() + num_keys_values,
-                                          outputs.begin() + num_main_states);
-        for (int index = 0; index < num_main_states; ++index) {
-            outputs[index] = nullptr;
-        }
-        releaseValues(api, outputs);
-        releaseValues(api, kvStates);
-        releaseValues(api, linearStates);
-        kvStates.swap(nextKV);
-        linearStates.swap(nextLinear);
-        absNext = nextPosition;
-    }
-    return true;
-}
-
 // OFF mode: transfer decode KV directly; red-zone trimming is a background re-prefill, not a slice.
 static bool saveDecodeKVDirect(std::vector<OrtValue*>& decodeKV, std::vector<OrtValue*>& decodeLinear,
                                int64_t decodeBase,
@@ -3508,11 +3348,8 @@ Java_com_example_myapplication_MainActivity_Get_1Last_1Benchmark_1Correctness(JN
 
 // Decode strategy.
 struct DecodeStrategy {
-    bool beam = false;
     bool sampling = false;
-    int  decodeBatch = 1;
     int  topK = 1;
-    int  beamSize = 1;
     float repeatPenalty = DEFAULT_REPEAT_PENALTY;
     int  penaltyRange = DEFAULT_PENALTY_RANGE;
     float temperature = DEFAULT_TEMPERATURE;
@@ -3521,43 +3358,16 @@ struct DecodeStrategy {
 
 static DecodeStrategy resolveDecodeStrategy() {
     DecodeStrategy s;
-    int cfgDecodeMode = DECODE_MODE_GREEDY;
-    bool cfgUseBeam = false;
-    bool cfgUseSampling = false;
-    int cfgTopK = 1;
-    int cfgBeamSize = 1;
-    float cfgRepeatPenalty = DEFAULT_REPEAT_PENALTY;
-    int cfgPenaltyRange = DEFAULT_PENALTY_RANGE;
-    float cfgTemperature = DEFAULT_TEMPERATURE;
-    float cfgTopP = DEFAULT_TOP_P;
-    {
-        std::lock_guard<std::mutex> lock(g_runtime_config_mutex);
-        cfgDecodeMode = clampInt(decodeMode, DECODE_MODE_GREEDY, DECODE_MODE_SAMPLING);
-        cfgUseBeam = useBeamSearch;
-        cfgUseSampling = useSampling;
-        cfgTopK = clampInt(topK, 1, cfgUseSampling
-                ? MAX_SAMPLING_TOP_K_RUNTIME : MAX_TOP_K_RUNTIME);
-        cfgBeamSize = clampInt(beamSize, 1, MAX_BEAM_SIZE_RUNTIME);
-        cfgRepeatPenalty = cfgUseSampling
-                ? std::max(1.0f, std::min(repeatPenalty, MAX_SAMPLING_PENALTY))
-                : std::max(0.0f, std::min(repeatPenalty, 1.0f));
-        cfgPenaltyRange = clampInt(penaltyRange, 1, MAX_PENALTY_RANGE_RUNTIME);
-        cfgTemperature = std::max(MIN_TEMPERATURE_RUNTIME,
-                std::min(temperature, MAX_TEMPERATURE_RUNTIME));
-        cfgTopP = std::max(MIN_TOP_P_RUNTIME, std::min(topP, MAX_TOP_P_RUNTIME));
-        if (cfgUseBeam && cfgTopK < cfgBeamSize) {
-            cfgTopK = cfgBeamSize;
-        }
-    }
-    s.beam = cfgDecodeMode == DECODE_MODE_BEAM && cfgUseBeam && cfgTopK >= 2 && cfgBeamSize >= 2;
-    s.sampling = cfgDecodeMode == DECODE_MODE_SAMPLING && cfgUseSampling;
-    s.decodeBatch = s.beam ? cfgBeamSize : 1;
-    s.topK = cfgTopK;
-    s.beamSize = cfgBeamSize;
-    s.repeatPenalty = cfgRepeatPenalty;
-    s.penaltyRange = cfgPenaltyRange;
-    s.temperature = cfgTemperature;
-    s.topP = cfgTopP;
+    std::lock_guard<std::mutex> lock(g_runtime_config_mutex);
+    s.sampling = decodeMode == DECODE_MODE_SAMPLING;
+    s.topK = clampInt(topK, 1, MAX_SAMPLING_TOP_K_RUNTIME);
+    s.repeatPenalty = s.sampling
+        ? std::max(1.0f, std::min(repeatPenalty, MAX_SAMPLING_PENALTY))
+        : std::max(0.0f, std::min(repeatPenalty, 1.0f));
+    s.penaltyRange = clampInt(penaltyRange, 1, MAX_PENALTY_RANGE_RUNTIME);
+    s.temperature = std::max(MIN_TEMPERATURE_RUNTIME,
+        std::min(temperature, MAX_TEMPERATURE_RUNTIME));
+    s.topP = std::max(MIN_TOP_P_RUNTIME, std::min(topP, MAX_TOP_P_RUNTIME));
     return s;
 }
 
@@ -3566,18 +3376,18 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass clazz,
                                                            jint decode_mode,
                                                            jint top_k,
-                                                           jint beam_size,
                                                            jfloat repeat_penalty,
                                                            jint penalty_range,
                                                            jfloat sampling_temperature,
                                                            jfloat top_p) {
     (void)clazz;
-    const int cfgDecodeMode = clampInt(decode_mode, DECODE_MODE_GREEDY, DECODE_MODE_SAMPLING);
-    const bool cfgUseBeam = cfgDecodeMode == DECODE_MODE_BEAM;
+    if (decode_mode != DECODE_MODE_GREEDY && decode_mode != DECODE_MODE_SAMPLING) {
+        LOGE("LLM decode config rejected invalid mode=%d", static_cast<int>(decode_mode));
+        return JNI_FALSE;
+    }
+    const int cfgDecodeMode = static_cast<int>(decode_mode);
     const bool cfgUseSampling = cfgDecodeMode == DECODE_MODE_SAMPLING;
-    int cfgTopK = clampInt(top_k, 1, cfgUseSampling
-            ? MAX_SAMPLING_TOP_K_RUNTIME : MAX_TOP_K_RUNTIME);
-    const int cfgBeamSize = clampInt(beam_size, cfgUseBeam ? 2 : 1, MAX_BEAM_SIZE_RUNTIME);
+    const int cfgTopK = clampInt(top_k, 1, MAX_SAMPLING_TOP_K_RUNTIME);
     const float cfgRepeatPenalty = cfgUseSampling
             ? std::max(1.0f, std::min(repeat_penalty, MAX_SAMPLING_PENALTY))
             : std::max(0.0f, std::min(repeat_penalty, 1.0f));
@@ -3586,9 +3396,6 @@ Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass c
             std::min(sampling_temperature, MAX_TEMPERATURE_RUNTIME));
     const float cfgTopP = std::max(MIN_TOP_P_RUNTIME, std::min(top_p, MAX_TOP_P_RUNTIME));
     const bool cfgUsePenalty = !cfgUseSampling && cfgRepeatPenalty < DEFAULT_REPEAT_PENALTY;
-    if (cfgUseBeam && cfgTopK < cfgBeamSize) {
-        cfgTopK = cfgBeamSize;
-    }
 
     const std::array<MergedStrategy, 3> requestedStrategies =
             mergedStrategiesForConfig(cfgDecodeMode, cfgUsePenalty);
@@ -3636,24 +3443,19 @@ Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass c
     {
         std::lock_guard<std::mutex> configLock(g_runtime_config_mutex);
         decodeMode = cfgDecodeMode;
-        useBeamSearch = cfgUseBeam;
-        useSampling = cfgUseSampling;
         topK = cfgTopK;
-        beamSize = cfgBeamSize;
         repeatPenalty = cfgRepeatPenalty;
         penaltyRange = cfgPenaltyRange;
         temperature = cfgTemperature;
         topP = cfgTopP;
         g_config_merged_strategies = requestedStrategies;
     }
-    LOGI("LLM decode config mode=%d beam=%d sampling=%d penalty=%d topK=%d beamSize=%d "
+    LOGI("LLM decode config mode=%d sampling=%d penalty=%d topK=%d "
          "repeatPenalty=%.3f penaltyRange=%d temperature=%.3f topP=%.3f",
          cfgDecodeMode,
-         cfgUseBeam ? 1 : 0,
          cfgUseSampling ? 1 : 0,
          cfgUsePenalty ? 1 : 0,
          cfgTopK,
-         cfgBeamSize,
          cfgRepeatPenalty,
          cfgPenaltyRange,
          cfgTemperature,
@@ -4072,30 +3874,24 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         }
     }
     const DecodeStrategy strat = resolveDecodeStrategy();
-    const bool useBeam = strat.beam;
     const bool useSampling = strat.sampling;
-    // Persistence route is fixed once the decode strategy is known: OFF greedy/sampling and OFF vision-beam
-    // direct-save the live decode KV (fullReplyVec), while ON and OFF text-beam rebuild clean state from ids
-    // (dialogueBaseIds + replyVec). Build only the token collection the chosen route actually consumes.
-    const bool rebuildCleanStateFromIds = organizeMemory || (useBeam && !isVisionTurn);
+    // OFF mode direct-saves live KV; Organize Memory rebuilds from ids and substitutes a vision note.
+    const bool rebuildCleanStateFromIds = organizeMemory;
     std::vector<int> dialogueBaseIds;
     if (rebuildCleanStateFromIds) {
         const int64_t dialogueSkip = (injectSystem && organizeMemory) ? activeSystemBlockLen : 0;
         const std::vector<int>& dialogueSourceIds = isVisionTurn ? visionHistoryPromptIds : get_ids;
         dialogueBaseIds.assign(dialogueSourceIds.begin() + dialogueSkip, dialogueSourceIds.end());
     }
-    const int  decodeBatch = useBeam ? strat.decodeBatch : 1;
-    // Top up the shared-arena reservation for this turn's actual decode batch (beam expands the cache).
-    reserveSharedArena(memory.memoryTokens, decodeBatch);
+    reserveSharedArena(memory.memoryTokens);
     const int  topK = strat.topK;
-    const int  beamSize = strat.beamSize;
     const float repeatPenalty = strat.repeatPenalty;
     const int  penaltyRange = strat.penaltyRange;
     const float samplingTemperature = strat.temperature;
     const float samplingTopP = strat.topP;
 
-    // Retained KV is batch-1; beam expands only after prefill. mRoPE positions (history_pos) and the
-    // physical KV length diverge once a vision segment is cached, so history_pos tracks the mRoPE
+    // mRoPE positions (history_pos) and the physical KV length diverge once a vision segment is cached,
+    // so history_pos tracks the mRoPE
     // position (fed as history_len to the rotary prefill) while saved_kv_len stays the physical count.
     int64_t history_pos = saved_kv_has_vision ? saved_mrope_pos : (saved_kv_base + saved_kv_len);
     constexpr int64_t decodeBudgetMargin = 2;
@@ -4103,14 +3899,14 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     const int sep_len = (saved_kv_len > 0) ? prev_close_len : 0;
     const auto core_len = static_cast<int64_t>(get_ids.size());
     const int64_t prompt_span = static_cast<int64_t>(sep_len) + core_len;
-    // Streaming (pure-text, non-beam) relies on hard RoPE recycle: it slides the window mid-decode, so it
-    // reserves only the fixed recycle headroom here. Beam / hybrid (linear-attention) can't slide, but
-    // their decode is SEPARATELY capped to the remaining rotary budget at decode time (decodeBudget =
+    // Streaming pure-text decode relies on hard RoPE recycle: it slides the window mid-decode, so it
+    // reserves only the fixed recycle headroom here. Hybrid linear attention cannot slide, but its decode is
+    // separately capped to the remaining rotary budget at decode time (decodeBudget =
     // min(rotaryDecodeBudget, decodeTokens)); reserving the FULL configured decode up front would force
     // clearing history that otherwise fits — a small history under a max-length decode setting cleared
     // the whole conversation every turn. Cap their reserve to the room left AFTER the retained history so
     // the guard below only trims when history + prompt alone overflow the table; the decode then adapts.
-    const bool recyclerDrivesDecode = !useBeam && !hasLinearState() &&
+    const bool recyclerDrivesDecode = !hasLinearState() &&
             mKVSlice.session != nullptr && mRopeShift.session != nullptr;
     const int64_t rotaryBudgetRoom = static_cast<int64_t>(max_seq_len) - prompt_span - decodeBudgetMargin;
     const int64_t decode_reserve = std::max<int64_t>(0,
@@ -4178,12 +3974,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
     }
     ids_len = static_cast<int64_t>(get_ids.size());
             LOGI("FLOW prompt turn=%d modality=%u query_ids=%zu prompt_ids=%lld tail=%s stops=%s "
-                "saved_kv=%lld saved_vision=%d beam=%d sampling=%d repeat_penalty=%.3f clear=%d",
+                "saved_kv=%lld saved_vision=%d sampling=%d repeat_penalty=%.3f clear=%d",
             static_cast<int>(turn_id), static_cast<unsigned>(visionMode), queryIds.size(),
             static_cast<long long>(ids_len), formatTokenIdsTail(get_ids, 24).c_str(),
             formatTokenIdsTail(g_stop_token_ids, g_stop_token_ids.size()).c_str(),
             static_cast<long long>(saved_kv_len), saved_kv_has_vision ? 1 : 0,
-                strat.beam ? 1 : 0, strat.sampling ? 1 : 0, strat.repeatPenalty,
+                strat.sampling ? 1 : 0, strat.repeatPenalty,
                 clear == JNI_TRUE ? 1 : 0);
     // Snapshot the turn-start restore point: history_pos is the mRoPE position fed to this turn's prefill
     // (diverges from saved_kv_len when the retained window holds a vision segment), and saved_kv_has_vision
@@ -4204,8 +4000,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         MergedStrategy mstrat = directPenalty ? MSTRAT_PENALTY_GREEDY : MSTRAT_GREEDY;
         if (useSampling) {
             mstrat = MSTRAT_SAMPLING;
-        } else if (useBeam) {
-            mstrat = directPenalty ? MSTRAT_PENALTY_BEAM : MSTRAT_BEAM;
         }
         ModelId prefillId = mergedPrefillModel(modality, mstrat);
         ModelId decodeId  = mergedDecodeModel(modality, mstrat);
@@ -4222,17 +4016,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             }
             prefillId = mergedPrefillModel(modality, mstrat);
             decodeId = mergedDecodeModel(modality, mstrat);
-        }
-        if (isVisionTurn &&
-            (mstrat == MSTRAT_BEAM || mstrat == MSTRAT_PENALTY_BEAM) &&
-            mGatherFirstBeam.session == nullptr) {
-            std::lock_guard<std::mutex> modelLock(g_model_session_mutex);
-            if (mGatherFirstBeam.session == nullptr &&
-                !loadModel(LLM_GatherFirstBeam, env, g_model_asset_manager,
-                           g_model_ep_type, g_model_low_memory)) {
-                LOGE("Run_LLM(merged): could not load GatherFirstBeam for deferred vision beam");
-                return runError(env, "STRATEGY_UNAVAILABLE");
-            }
         }
         if (!mergedModelReady(prefillId) || !mergedModelReady(decodeId)) {
             LOGE("Run_LLM(merged): selected graph pair is unavailable (modality=%d strategy=%d)",
@@ -4296,18 +4079,12 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
              dg.fileName.c_str(), dTokenIn, dKvSeqIn);
             return runError(env, "MODEL_CONTRACT");
         }
-        const bool isBeam    = (mstrat == MSTRAT_BEAM || mstrat == MSTRAT_PENALTY_BEAM);
         const bool isSampling = (mstrat == MSTRAT_SAMPLING);
-        const bool isPenalty = (mstrat == MSTRAT_PENALTY_GREEDY || mstrat == MSTRAT_PENALTY_BEAM);
-        const bool requiresSaveId = isPenalty || isBeam || isSampling;
-        const int  genBatch  = isBeam ? std::max(1, beamSize) : 1;
-        // Inverse of the outer-scope persistence route: OFF greedy/sampling + OFF vision-beam direct-save.
+        const bool isPenalty = (mstrat == MSTRAT_PENALTY_GREEDY);
+        const bool requiresSaveId = isPenalty || isSampling;
+        // Inverse of the outer-scope persistence route: OFF mode direct-saves live state.
         const bool offDirectSave = !rebuildCleanStateFromIds;
-        // Hybrid recurrent state cannot be windowed. FirstBeam uses a dedicated concat helper that
-        // gathers one identical suffix row, restores the batch-1 prefix, then expands to all beams.
-        const bool prefillConcatReady = isBeam
-                ? mKVConcatFirstBeam.session != nullptr
-                : mKVConcat.session != nullptr;
+        const bool prefillConcatReady = mKVConcat.session != nullptr;
         const bool prefillDecoupleEligible =
             !isVisionTurn && !saved_kv_has_vision && !hasLinearState() &&
             reusedHistory && saved_kv[0] != nullptr && pCacheLenIn >= num_main_states &&
@@ -4323,9 +4100,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         const int penaltyValueIn = findInputIdx(dg, "penalty_penalty_value");
         const int penaltyRangeIn = findInputIdx(dg, "penalty_penalty_range");
-        const int beamSizeIn = findInputIdx(dg, "beam_beam_size");
-        const int beamTopKIn = findInputIdx(dg, "beam_topK");
-        const int beamPreviousProbIn = findInputIdx(dg, "beam_previous_prob");
         const int samplingTemperatureIn = findInputIdx(dg, "sampling_temperature");
         const int samplingTopKIn = findInputIdx(dg, "sampling_top_k");
         const int samplingTopPIn = findInputIdx(dg, "sampling_top_p");
@@ -4342,7 +4116,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         auto collectSaveIdInputs = [](const ModelRuntime& graph) {
             std::vector<int> indices;
             for (const char* name : {"penalty_save_id_in", "penalty_greedy_save_id_in",
-                                     "beam_save_id_in", "sampling_previous_ids"}) {
+                                     "sampling_previous_ids"}) {
                 const int index = findInputIdx(graph, name);
                 if (index >= 0) {
                     indices.push_back(index);
@@ -4372,22 +4146,15 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         }
         bool strategyContractValid = true;
         switch (mstrat) {
+            case MSTRAT_GREEDY:
+                break;
             case MSTRAT_PENALTY_GREEDY:
                 strategyContractValid = hasInput(pg, "penalty_greedy_save_id_in") &&
                         hasInput(dg, "penalty_save_id_in") && hasInput(dg, "penalty_greedy_save_id_in");
                 break;
-            case MSTRAT_BEAM:
-                strategyContractValid = hasInput(pg, "beam_save_id_in") && hasInput(dg, "beam_save_id_in");
-                break;
-            case MSTRAT_PENALTY_BEAM:
-                strategyContractValid = hasInput(pg, "beam_save_id_in") &&
-                        hasInput(dg, "penalty_save_id_in") && hasInput(dg, "beam_save_id_in");
-                break;
             case MSTRAT_SAMPLING:
                 strategyContractValid = hasInput(pg, "sampling_previous_ids") &&
                         hasInput(dg, "sampling_previous_ids");
-                break;
-            default:
                 break;
         }
         if (!strategyContractValid ||
@@ -4399,13 +4166,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                             !isIntegerTensorType(dg.inputTypes[penaltyRangeIn]) ||
                             !inputTypeMatches(pg, "penalty_penalty_value", dg.inputTypes[penaltyValueIn]) ||
                             !inputTypeMatches(pg, "penalty_penalty_range", dg.inputTypes[penaltyRangeIn]))) ||
-            (isBeam &&
-             (beamSizeIn < 0 || beamTopKIn < 0 || beamPreviousProbIn < 0 ||
-                            !isIntegerTensorType(dg.inputTypes[beamSizeIn]) ||
-                            !isIntegerTensorType(dg.inputTypes[beamTopKIn]) ||
-                            !isFloatingTensorType(dg.inputTypes[beamPreviousProbIn]) ||
-                            !inputTypeMatches(pg, "beam_beam_size", dg.inputTypes[beamSizeIn]) ||
-                            !inputTypeMatches(pg, "beam_topK", dg.inputTypes[beamTopKIn]))) ||
             (isSampling &&
              (samplingTemperatureIn < 0 || samplingTopKIn < 0 || samplingTopPIn < 0 ||
                             samplingPenaltyIn < 0 ||
@@ -4462,7 +4222,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         // ---- reusable metadata-typed input buffers ----
         OrtBuffer idsBuf, idsLenBuf, historyLenBuf, cacheLenBuf;
-        OrtBuffer penaltyValBuf, penaltyRangeBuf, beamSizeBuf, beamTopKBuf;
+        OrtBuffer penaltyValBuf, penaltyRangeBuf;
         OrtBuffer samplingTemperatureBuf, samplingTopKBuf, samplingTopPBuf, samplingPenaltyBuf;
         OrtBuffer emptySaveIdBuf;
         std::vector<OrtValue*> prefillPrefixKV;
@@ -4479,15 +4239,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             penaltyRangeBuf = makeBuffer(dg, {1}, rangeType);
             inputBuffersOk = writeScalarFloat(penaltyValBuf, valueType, repeatPenalty) &&
                              writeScalarInt64(penaltyRangeBuf, rangeType, penaltyRange) &&
-                             inputBuffersOk;
-        }
-        if (isBeam) {
-            const ONNXTensorElementDataType sizeType = dg.inputTypes[beamSizeIn];
-            const ONNXTensorElementDataType topKType = dg.inputTypes[beamTopKIn];
-            beamSizeBuf = makeBuffer(dg, {1}, sizeType);
-            beamTopKBuf = makeBuffer(dg, {1}, topKType);
-            inputBuffersOk = writeScalarInt64(beamSizeBuf, sizeType, beamSize) &&
-                             writeScalarInt64(beamTopKBuf, topKType, std::max(topK, beamSize)) &&
                              inputBuffersOk;
         }
         if (isSampling) {
@@ -4507,7 +4258,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                              inputBuffersOk;
         }
         if (requiresSaveId) {
-            emptySaveIdBuf = makeBuffer(pg, {static_cast<int64_t>(genBatch), 0}, saveIdType);
+            emptySaveIdBuf = makeBuffer(pg, {1, 0}, saveIdType);
             inputBuffersOk = emptySaveIdBuf.value != nullptr && inputBuffersOk;
         }
 
@@ -4525,12 +4276,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                 const int rangeIdx = findInputIdx(g, "penalty_penalty_range");
                 if (valueIdx >= 0) { bound = bindIn(g, valueIdx, penaltyValBuf.value) && bound; }
                 if (rangeIdx >= 0) { bound = bindIn(g, rangeIdx, penaltyRangeBuf.value) && bound; }
-            }
-            if (isBeam) {
-                const int sizeIdx = findInputIdx(g, "beam_beam_size");
-                const int topKIdx = findInputIdx(g, "beam_topK");
-                if (sizeIdx >= 0) { bound = bindIn(g, sizeIdx, beamSizeBuf.value) && bound; }
-                if (topKIdx >= 0) { bound = bindIn(g, topKIdx, beamTopKBuf.value) && bound; }
             }
             if (isSampling) {
                 const int temperatureIdx = findInputIdx(g, "sampling_temperature");
@@ -4577,8 +4322,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             releaseBuffer(mApi, cacheLenBuf);
             releaseBuffer(mApi, penaltyValBuf);
             releaseBuffer(mApi, penaltyRangeBuf);
-            releaseBuffer(mApi, beamSizeBuf);
-            releaseBuffer(mApi, beamTopKBuf);
             releaseBuffer(mApi, samplingTemperatureBuf);
             releaseBuffer(mApi, samplingTopKBuf);
             releaseBuffer(mApi, samplingTopPBuf);
@@ -4663,19 +4406,17 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         // Resolve prefill output positions by name.
         const int pMaxIdx  = findOutputIdxAny(pg, {"greedy_max_logits_idx", "penalty_greedy_max_logits_idx",
-                               "beam_max_logits_idx", "sampling_sampled_id"});
-        const int pNextTok = isBeam ? findOutputIdx(pg, "beam_top_beam_indices") : pMaxIdx;
+                               "sampling_sampled_id"});
+        const int pNextTok = pMaxIdx;
         const int pKvSeq   = findOutputIdx(pg, "prefill_kv_seq_len");
-        const int pSaveId  = findOutputIdxAny(pg, {"penalty_greedy_save_id_out", "beam_save_id_out",
+        const int pSaveId  = findOutputIdxAny(pg, {"penalty_greedy_save_id_out",
                        "sampling_save_id_out"});
-        const int pBeamPr  = isBeam ? findOutputIdx(pg, "beam_top_beam_prob") : -1;
         const int dMaxIdx  = findOutputIdxAny(dg, {"greedy_max_logits_idx", "penalty_greedy_max_logits_idx",
-                               "beam_max_logits_idx", "sampling_sampled_id"});
-        const int dNextTok = isBeam ? findOutputIdx(dg, "beam_top_beam_indices") : dMaxIdx;
+                               "sampling_sampled_id"});
+        const int dNextTok = dMaxIdx;
         const int dKvSeq   = findOutputIdxAny(dg, {"decode_kv_seq_len_next", "decode_kv_seq_len"});
-        const int dSaveId  = findOutputIdxAny(dg, {"penalty_greedy_save_id_out", "beam_save_id_out",
+        const int dSaveId  = findOutputIdxAny(dg, {"penalty_greedy_save_id_out",
                        "sampling_save_id_out"});
-        const int dBeamPr  = isBeam ? findOutputIdx(dg, "beam_top_beam_prob") : -1;
 
         auto hasPrefillOutput = [&](int idx) {
             return idx >= num_main_states && idx < static_cast<int>(prefillOut.size());
@@ -4698,29 +4439,23 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             pg.outputTypes[pNextTok] == dg.inputTypes[dTokenIn] &&
             pg.outputTypes[pKvSeq] == dg.inputTypes[dKvSeqIn] &&
             (!requiresSaveId || (hasPrefillOutput(pSaveId) &&
-             pg.outputTypes[pSaveId] == saveIdType)) &&
-            (!isBeam || (hasPrefillOutput(pBeamPr) &&
-             pg.outputTypes[pBeamPr] == dg.inputTypes[beamPreviousProbIn]));
+             pg.outputTypes[pSaveId] == saveIdType));
         const bool decodeTypesValid = hasDecodeOutput(dMaxIdx) && hasDecodeOutput(dNextTok) &&
             hasDecodeOutput(dKvSeq) &&
             isIntegerTensorType(dg.outputTypes[dMaxIdx]) &&
             dg.outputTypes[dNextTok] == dg.inputTypes[dTokenIn] &&
             dg.outputTypes[dKvSeq] == dg.inputTypes[dKvSeqIn] &&
             (!requiresSaveId || (hasDecodeOutput(dSaveId) &&
-             dg.outputTypes[dSaveId] == saveIdType)) &&
-            (!isBeam || (hasDecodeOutput(dBeamPr) &&
-             dg.outputTypes[dBeamPr] == dg.inputTypes[beamPreviousProbIn]));
+             dg.outputTypes[dSaveId] == saveIdType));
         if (!stateTypesValid || !prefillTypesValid || !decodeTypesValid ||
             !hasPrefillOutput(pMaxIdx) || !hasPrefillOutput(pNextTok) ||
             !hasPrefillOutput(pKvSeq) || (requiresSaveId && !hasPrefillOutput(pSaveId)) ||
-            (isBeam && !hasPrefillOutput(pBeamPr)) ||
             !hasDecodeOutput(dMaxIdx) || !hasDecodeOutput(dNextTok) ||
-            !hasDecodeOutput(dKvSeq) || (requiresSaveId && !hasDecodeOutput(dSaveId)) ||
-            (isBeam && !hasDecodeOutput(dBeamPr))) {
+              !hasDecodeOutput(dKvSeq) || (requiresSaveId && !hasDecodeOutput(dSaveId))) {
             LOGE("Run_LLM(merged): invalid output contract (prefill=%s max=%d next=%d kv=%d save=%d "
-                 "beam_prob=%d outputs=%zu; decode=%s max=%d next=%d kv=%d save=%d beam_prob=%d outputs=%zu; "
-                 "state_count=%d)", pg.fileName.c_str(), pMaxIdx, pNextTok, pKvSeq, pSaveId, pBeamPr,
-                 prefillOut.size(), dg.fileName.c_str(), dMaxIdx, dNextTok, dKvSeq, dSaveId, dBeamPr,
+                  "outputs=%zu; decode=%s max=%d next=%d kv=%d save=%d outputs=%zu; state_count=%d)",
+                  pg.fileName.c_str(), pMaxIdx, pNextTok, pKvSeq, pSaveId,
+                  prefillOut.size(), dg.fileName.c_str(), dMaxIdx, dNextTok, dKvSeq, dSaveId,
                  dg.outputNames.size(), num_main_states);
             clearAllModelBindingRefs();
             releaseValues(mApi, prefillOut);
@@ -4735,9 +4470,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         if (prefillDecoupled) {
             std::vector<OrtValue*> suffixKV(stateVec.begin(), stateVec.begin() + num_keys_values);
             std::vector<OrtValue*> fullKV;
-            const bool concatOk = isBeam
-                    ? runKVConcatFirstBeam(prefillPrefixKV, suffixKV, fullKV)
-                    : runKVConcat(prefillPrefixKV, suffixKV, fullKV);
+                const bool concatOk = runKVConcat(prefillPrefixKV, suffixKV, fullKV);
             if (!concatOk ||
                 fullKV.size() < static_cast<size_t>(num_keys_values)) {
                 LOGE("Run_LLM(merged): prefill KV concat failed");
@@ -4765,7 +4498,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         OrtValue* nextToken = takeOut(pNextTok);
         OrtValue* kvSeqTok  = takeOut(pKvSeq);
         OrtValue* saveId    = takeOut(pSaveId);
-        OrtValue* beamProb  = takeOut(pBeamPr);
         int64_t initialKvSeq = -1;
         if (selectedToken < 0 ||
             !readScalarInteger(mApi, kvSeqTok, pg.outputTypes[pKvSeq], initialKvSeq) ||
@@ -4774,7 +4506,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             releaseOne(mApi, nextToken);
             releaseOne(mApi, kvSeqTok);
             releaseOne(mApi, saveId);
-            releaseOne(mApi, beamProb);
             releaseValues(mApi, prefillOut);
             releasePrefillSlices();
             releaseInputBuffers();
@@ -4811,7 +4542,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         int decodeBudget = memory.decodeTokens;
         const int rotaryRoom = static_cast<int>(std::max<int64_t>(
                 0, static_cast<int64_t>(max_seq_len) - initialKvSeq - decodeMargin));
-        const bool canRecycleDecode = !isBeam && !hasLinearState() && !isVisionTurn &&
+        const bool canRecycleDecode = !hasLinearState() && !isVisionTurn &&
             mKVSlice.session != nullptr && mRopeShift.session != nullptr;
         if (!canRecycleDecode) { decodeBudget = std::min(decodeBudget, rotaryRoom); }
         LOGI("FLOW prefill_end turn=%d token=%d stop=%d kv_seq=%lld prefill_ms=%lld "
@@ -4844,16 +4575,13 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         }
         tokens_since_flush = 0;
         last_flush_ms = prefill_start_ms;
-        // Commit the prefill's first token (non-beam streams it; beam accumulates in saveId and streams
-        // the winning row at the end).
-        if (!isBeam && selectedToken >= 0 && !is_stop_token(selectedToken) && generated < decodeBudget) {
+        // Commit the prefill's first token.
+        if (selectedToken >= 0 && !is_stop_token(selectedToken) && generated < decodeBudget) {
             generated += 1; numDecode += 1;
             appendReply(selectedToken);
             if (!organizeMemory) { fullReplyVec.push_back(selectedToken); }
             stream_token(env, selectedToken);
             pendingTokenInState = true;
-        } else if (isBeam && selectedToken >= 0 && !is_stop_token(selectedToken) && numDecode < decodeBudget) {
-            numDecode += 1;
         }
 
         const auto decode_start_clock = std::chrono::steady_clock::now();
@@ -4910,9 +4638,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             if (controlRebindsLeft[bindingIndex] > 0) {
                 decodeBound = bindIn(dg, dTokenIn, nextToken) && decodeBound;
                 decodeBound = bindIn(dg, dKvSeqIn, kvSeqTok) && decodeBound;
-                if (isBeam) {
-                    decodeBound = bindIn(dg, beamPreviousProbIn, beamProb) && decodeBound;
-                }
             }
                 decodeBound = bindDynamicStrategyInput(
                     saveId != nullptr ? saveId : emptySaveIdBuf.value) && decodeBound;
@@ -4948,12 +4673,10 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             OrtValue* newNext = takeStep(dNextTok);
             OrtValue* newKvSeq = takeStep(dKvSeq);
             OrtValue* newSaveId = takeStep(dSaveId);
-            OrtValue* newBeamPr = takeStep(dBeamPr);
             releaseValues(mApi, stepOut);
             releaseOne(mApi, nextToken); nextToken = newNext;
             releaseOne(mApi, kvSeqTok);  kvSeqTok  = newKvSeq;
             if (newSaveId != nullptr) { releaseOne(mApi, saveId); saveId = newSaveId; }
-            if (newBeamPr != nullptr) { releaseOne(mApi, beamProb); beamProb = newBeamPr; }
 
             // This successful run consumed the previously selected token. The returned counter is the
             // authoritative next mRoPE position.
@@ -4968,19 +4691,17 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             currentPhysicalLen += 1;
 
             if (is_stop_token(selectedToken)) { break; }
-            if (!isBeam) {
-                generated += 1;
-                appendReply(selectedToken);
-                if (!organizeMemory) { fullReplyVec.push_back(selectedToken); }
-                stream_token(env, selectedToken);
-                const int64_t perf_now_ms = now_ms();
-                if (tokens_since_flush == 0 &&
-                    perf_now_ms - last_decode_perf_ms >= PERF_STATS_INTERVAL_MS) {
-                    pushLiveDecodeStats(generated);
-                    last_decode_perf_ms = perf_now_ms;
-                }
-                pendingTokenInState = true;
+            generated += 1;
+            appendReply(selectedToken);
+            if (!organizeMemory) { fullReplyVec.push_back(selectedToken); }
+            stream_token(env, selectedToken);
+            const int64_t perf_now_ms = now_ms();
+            if (tokens_since_flush == 0 &&
+                perf_now_ms - last_decode_perf_ms >= PERF_STATS_INTERVAL_MS) {
+                pushLiveDecodeStats(generated);
+                last_decode_perf_ms = perf_now_ms;
             }
+            pendingTokenInState = true;
 
             if (canRecycleDecode && absNext + decodeMargin >= static_cast<int64_t>(max_seq_len)) {
                 const int64_t keepForAppend = memoryGreenTargetUsed(memory.decodeKeepWindow);
@@ -5002,13 +4723,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                 }
             }
             numDecode += 1;
-            if (isBeam) {
-                const int64_t perf_now_ms = now_ms();
-                if (perf_now_ms - last_decode_perf_ms >= PERF_STATS_INTERVAL_MS) {
-                    pushLiveDecodeStats(numDecode);
-                    last_decode_perf_ms = perf_now_ms;
-                }
-            }
         }
 
             const char* decodeExitReason = numDecode >= decodeBudget ? "budget"
@@ -5024,18 +4738,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
                  g_cancel.load(std::memory_order_acquire) ? 1 : 0,
                  g_manual_stop.load(std::memory_order_acquire) ? 1 : 0,
                  kvStateValid ? 1 : 0, stream_buf.size());
-
-        // ---- beam finalize: buffer + record row 0; the shared final flush emits one complete reply ----
-        if (isBeam && saveId != nullptr) {
-            std::vector<int> best = extractFirstRowIntegers(mApi, saveId, saveIdType);
-            for (int id : best) {
-                if (is_stop_token(id) || generated >= memory.decodeTokens) { break; }
-                generated += 1;
-                appendReply(id);
-                if (!organizeMemory) { fullReplyVec.push_back(id); }
-                buffer_token(id);
-            }
-        }
 
         auto appendExplicitTokensToMergedState = [&](const std::vector<int>& ids) -> bool {
             for (int id : ids) {
@@ -5112,7 +4814,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
 
         // Detach the final state now so OFF mode can append the last selected token (which has been
         // streamed but not consumed when decode stops at its budget/cancel boundary) and a manual-stop
-        // notice before persistence. ON/beam rebuild from IDs and do not consume this live state.
+        // notice before persistence. Organize-memory mode rebuilds from IDs and does not consume this live state.
         std::vector<int> manualStopIds;
         if (g_manual_stop.load(std::memory_order_acquire)) {
             {
@@ -5127,7 +4829,7 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             stream_buf.append(MANUAL_STOP_NOTICE);
         }
 
-        if (offDirectSave && kvStateValid && !isBeam) {
+        if (offDirectSave && kvStateValid) {
             std::vector<int> stateAppendIds;
             if (pendingTokenInState) {
                 stateAppendIds.push_back(selectedToken);
@@ -5149,28 +4851,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
         std::vector<OrtValue*> finalKV(stateVec.begin(), stateVec.begin() + num_keys_values);
         std::vector<OrtValue*> finalLinear(stateVec.begin() + num_keys_values, stateVec.begin() + num_main_states);
         for (int i = 0; i < num_main_states; ++i) { stateVec[i] = nullptr; }
-
-        if (isVisionTurn && isBeam && kvStateValid) {
-            kvStateValid = runGatherFirstBeam(finalKV, finalLinear);
-            std::vector<int> pendingBestIds;
-            if (kvStateValid && selectedToken >= 0 && !is_stop_token(selectedToken)) {
-                pendingBestIds.push_back(selectedToken);
-            }
-            if (kvStateValid && !manualStopIds.empty()) {
-                pendingBestIds.insert(pendingBestIds.end(), manualStopIds.begin(), manualStopIds.end());
-            }
-            if (kvStateValid && !pendingBestIds.empty()) {
-                if (!appendIdsWithModalityGreedyDecode(
-                        modality, finalKV, finalLinear, pendingBestIds, absNext)) {
-                    kvStateValid = false;
-                } else {
-                    currentPhysicalLen += static_cast<int64_t>(pendingBestIds.size());
-                    if (!manualStopIds.empty()) {
-                        fullReplyVec.insert(fullReplyVec.end(), manualStopIds.begin(), manualStopIds.end());
-                    }
-                }
-            }
-        }
 
         const auto end_clock = std::chrono::steady_clock::now();
         flush_stream(env);
@@ -5198,7 +4878,6 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             releaseOne(mApi, nextToken);
             releaseOne(mApi, kvSeqTok);
             releaseOne(mApi, saveId);
-            releaseOne(mApi, beamProb);
             releaseInputBuffers();
             clearAllModelBindingRefs();
         };
@@ -5218,12 +4897,9 @@ Java_com_example_myapplication_MainActivity_Run_1LLM(JNIEnv* env, jclass /*clazz
             return env->NewStringUTF(stats);
         }
 
-        // Organize-memory ON / text beam: rebuild clean KV and linear state from ids. Vision prompts
+        // Organize-memory ON rebuilds clean KV and linear state from ids. Vision prompts
         // use dialogueBaseIds' natural-language note instead of unrebuildable vision placeholders.
-        // The "整理记忆" box tracks whether an organization actually runs, independent of the toggle:
-        // Organize Memory ON rebuilds clean state every turn, and a toggle-off text-beam turn still
-        // forces a red-zone rebuild to the green target once the retained KV crosses the trigger
-        // threshold (routine below-threshold text-beam turns rebuild here silently).
+        // The "整理记忆" box tracks whether an organization actually runs.
         std::vector<int> dialogueIds;
         if (kvStateValid) {
             dialogueIds.reserve(static_cast<size_t>(prev_close_len) + dialogueBaseIds.size() + replyVec.size());

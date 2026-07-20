@@ -14,38 +14,29 @@
 // sidecars. Bundle descriptors are recognized by their *_SharedInitializers.onnx / *_Metadata.onnx
 // suffixes, so their exporter-specific prefix can change without changing the runtime lookup logic.
 //
-// The 27 available merged graphs are laid out modality-major (Text, Image, Video) with a fixed 9-slot
-// block per modality: [PrefillGreedy, PrefillPenaltyGreedy, PrefillBeam, PrefillSampling,
-// DecodeGreedy, DecodePenaltyGreedy, DecodeBeam, DecodePenaltyBeam, DecodeSampling]. The runtime keeps
-// the canonical text-greedy pair plus only the current strategy pair per modality resident. Standalone
-// Vision/preprocess sessions stay resident across strategy changes; unused merged pairs are released.
+// The 18 available merged graphs are laid out modality-major (Text, Image, Video) with a fixed 6-slot
+// block per modality: [PrefillGreedy, PrefillPenaltyGreedy, PrefillSampling,
+// DecodeGreedy, DecodePenaltyGreedy, DecodeSampling]. The runtime keeps the canonical text-greedy pair
+// and lazily loads selected strategy pairs. Loaded producer sessions remain resident while cross-turn
+// OrtValues may use their allocators; vision trim releases image/video pairs after visual KV is gone.
 #define LLM_MODEL_TABLE(X) \
     X(LLM_TextPrefillGreedy,         "LLM_TextPrefillGreedy.onnx",         "") \
     X(LLM_TextPrefillPenaltyGreedy,  "LLM_TextPrefillPenaltyGreedy.onnx",  "") \
-    X(LLM_TextPrefillBeam,           "LLM_TextPrefillBeamFirst.onnx",      "") \
     X(LLM_TextPrefillSampling,       "LLM_TextPrefillSampling.onnx",       "") \
     X(LLM_TextDecodeGreedy,          "LLM_TextDecodeGreedy.onnx",          "") \
     X(LLM_TextDecodePenaltyGreedy,   "LLM_TextDecodePenaltyGreedy.onnx",   "") \
-    X(LLM_TextDecodeBeam,            "LLM_TextDecodeBeamNext.onnx",        "") \
-    X(LLM_TextDecodePenaltyBeam,     "LLM_TextDecodePenaltyBeamNext.onnx", "") \
     X(LLM_TextDecodeSampling,        "LLM_TextDecodeSampling.onnx",        "") \
     X(LLM_ImagePrefillGreedy,        "LLM_ImagePrefillGreedy.onnx",        "") \
     X(LLM_ImagePrefillPenaltyGreedy, "LLM_ImagePrefillPenaltyGreedy.onnx", "") \
-    X(LLM_ImagePrefillBeam,          "LLM_ImagePrefillBeamFirst.onnx",     "") \
     X(LLM_ImagePrefillSampling,      "LLM_ImagePrefillSampling.onnx",      "") \
     X(LLM_ImageDecodeGreedy,         "LLM_ImageDecodeGreedy.onnx",         "") \
     X(LLM_ImageDecodePenaltyGreedy,  "LLM_ImageDecodePenaltyGreedy.onnx",  "") \
-    X(LLM_ImageDecodeBeam,           "LLM_ImageDecodeBeamNext.onnx",       "") \
-    X(LLM_ImageDecodePenaltyBeam,    "LLM_ImageDecodePenaltyBeamNext.onnx","") \
     X(LLM_ImageDecodeSampling,       "LLM_ImageDecodeSampling.onnx",       "") \
     X(LLM_VideoPrefillGreedy,        "LLM_VideoPrefillGreedy.onnx",        "") \
     X(LLM_VideoPrefillPenaltyGreedy, "LLM_VideoPrefillPenaltyGreedy.onnx", "") \
-    X(LLM_VideoPrefillBeam,          "LLM_VideoPrefillBeamFirst.onnx",     "") \
     X(LLM_VideoPrefillSampling,      "LLM_VideoPrefillSampling.onnx",      "") \
     X(LLM_VideoDecodeGreedy,         "LLM_VideoDecodeGreedy.onnx",         "") \
     X(LLM_VideoDecodePenaltyGreedy,  "LLM_VideoDecodePenaltyGreedy.onnx",  "") \
-    X(LLM_VideoDecodeBeam,           "LLM_VideoDecodeBeamNext.onnx",       "") \
-    X(LLM_VideoDecodePenaltyBeam,    "LLM_VideoDecodePenaltyBeamNext.onnx","") \
     X(LLM_VideoDecodeSampling,       "LLM_VideoDecodeSampling.onnx",       "") \
     X(LLM_Vision,                    "LLM_Vision.onnx",                    "LLM_Vision.onnx.data") \
     X(LLM_Image_Preprocess,          "LLM_Image_Preprocess.onnx",          "") \
@@ -53,19 +44,17 @@
     X(LLM_KV_Slice,                  "LLM_KV_Slice.onnx",                  "") \
     X(LLM_KV_Split2,                 "LLM_KV_Split2.onnx",                 "") \
     X(LLM_KV_Concat,                 "LLM_KV_Concat.onnx",                 "") \
-    X(LLM_KV_Concat_FirstBeam,       "LLM_KV_Concat_FirstBeam.onnx",       "") \
-    X(LLM_GatherFirstBeam,           "LLM_GatherFirstBeam.onnx",           "") \
     X(LLM_RopeShift,                 "LLM_RopeShift.onnx",                 "") \
     X(LLM_SharedInitializers,        "LLM_SharedInitializers.onnx",        "LLM_SharedInitializers.onnx.data") \
     X(LLM_Metadata,                  "LLM_Metadata.onnx",                  "")
 
-// Merged-graph geometry: 9 Android strategy slots per modality (prefill x4 + decode x5). The offsets index
+// Merged-graph geometry: 6 Android strategy slots per modality (prefill x3 + decode x3). The offsets index
 // into a modality's block; mergedPrefillModel/mergedDecodeModel add modality*LLM_MERGED_MODELS_PER_MODALITY.
-#define LLM_MERGED_MODELS_PER_MODALITY 9
+#define LLM_MERGED_MODELS_PER_MODALITY 6
 #define LLM_FIRST_MERGED_MODEL         LLM_TextPrefillGreedy
 
 // First optional ModelId: the Image/Video merged blocks and standalone vision/KV-management graphs are
-// optional. All nine Text strategy graphs are required. Image merged block starts here.
+// optional. All six Text strategy graphs are required. Image merged block starts here.
 #define LLM_FIRST_OPTIONAL_VISION_MODEL LLM_ImagePrefillGreedy
 
 // Vision (image/video) support toggle. Defined to 1 for this multimodal build; a text-only build can
@@ -144,19 +133,17 @@ constexpr int MIN_MEMORY_BAND_PERCENT = 15;
 constexpr int MAX_MEMORY_BAND_PERCENT = 95;
 constexpr int MIN_MEMORY_BAND_GAP     = 1;
 
-// Decode defaults and UI-safe runtime bounds. Greedy/beam use the exporter's direct 0..1 logit
+// Decode defaults and UI-safe runtime bounds. Greedy uses the exporter's direct 0..1 logit
 // multiplier; sampling uses the standard >=1 repetition penalty from the Python inference path.
 constexpr int   DECODE_MODE_GREEDY       = 0;
-constexpr int   DECODE_MODE_BEAM         = 1;
-constexpr int   DECODE_MODE_SAMPLING     = 2;
+constexpr int   DECODE_MODE_SAMPLING     = 1;
+static_assert(DECODE_MODE_GREEDY == 0 && DECODE_MODE_SAMPLING == 1,
+              "Decode mode protocol must contain only Greedy and Sampling");
 constexpr int   DEFAULT_TOP_K           = 3;
-constexpr int   DEFAULT_BEAM_SIZE       = 3;
 constexpr float DEFAULT_REPEAT_PENALTY  = 1.0f;
 constexpr int   DEFAULT_PENALTY_RANGE   = 20;
 constexpr float DEFAULT_TEMPERATURE     = 0.8f;
 constexpr float DEFAULT_TOP_P           = 0.95f;
-constexpr int   MAX_TOP_K_RUNTIME       = 10;
-constexpr int   MAX_BEAM_SIZE_RUNTIME   = 10;
 constexpr int   MAX_SAMPLING_TOP_K_RUNTIME = 50;
 constexpr int   MAX_PENALTY_RANGE_RUNTIME  = 256;
 constexpr float MIN_TEMPERATURE_RUNTIME    = 0.1f;
@@ -263,7 +250,7 @@ inline const std::string VISION_VIDEO_MEMORY_NOTE =
 // ORT run/session/provider configs. Runtime-specific overrides stay in loadModels.cpp/ort_helpers.h.
 struct OrtConfigEntry { const char* key; const char* value; };
 
-// CPU EP policy for the 27 merged LLM strategy graphs. These exceptions were isolated under ORT 1.27;
+// CPU EP policy for the 18 merged LLM strategy graphs. These exceptions were isolated under ORT 1.27;
 // keep the switch explicit so each Android CPU/model combination can be A/B benchmarked on-device.
 // XNNPACK, QNN, Vision, Preprocess, and KV/RoPE utility graphs retain their provider defaults.
 constexpr bool kUseCpuMergedOptimizerExceptions = true;

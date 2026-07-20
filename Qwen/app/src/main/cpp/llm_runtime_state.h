@@ -40,14 +40,6 @@ inline constexpr std::array<const char*, kModelCount> kModelExternalFileNames = 
 #undef X
 };
 
-inline std::array<std::string, kModelCount> gModelExternalFileNames = [] {
-    std::array<std::string, kModelCount> names;
-    for (int i = 0; i < kModelCount; ++i) {
-        names[i] = kModelExternalFileNames[i];
-    }
-    return names;
-}();
-
 // Shared merged-initializer descriptor filenames: compile-time defaults straight from the model table,
 // plus mutable copies the runtime overwrites from stamped ONNX metadata (mirrors gModelFileNames).
 inline constexpr const char* kSharedInitializersFileName =
@@ -81,8 +73,6 @@ static_assert(modelFileNameEndsWith(kModelFileNames[LLM_SharedInitializers],
 static_assert(modelFileNameEndsWith(kModelFileNames[LLM_Metadata], kMetadataModelSuffix),
               "LLM metadata descriptor must match *_Metadata.onnx");
 
-inline constexpr ModelId kSharedInitializersModelId = LLM_SharedInitializers;
-inline constexpr ModelId kMetadataModelId = LLM_Metadata;
 inline constexpr int kSessionModelCount =
         kModelCount - countModelsWithSuffix(kSharedInitializersModelSuffix) -
         countModelsWithSuffix(kMetadataModelSuffix);
@@ -96,50 +86,36 @@ inline std::array<ModelRuntime, kModelCount> gModelRuntimes;
 inline ModelRuntime& getModel(ModelId id) { return gModelRuntimes[id]; }
 
 // Decode strategy identity for merged-graph selection. Order is independent of the graph layout; the
-// prefill/decode helpers translate a strategy into the right slot inside a modality's 9-graph block.
+// prefill/decode helpers translate a strategy into the right slot inside a modality's 6-graph block.
 enum MergedStrategy {
     MSTRAT_GREEDY         = 0,
     MSTRAT_PENALTY_GREEDY = 1,
-    MSTRAT_BEAM           = 2,
-    MSTRAT_PENALTY_BEAM   = 3,
-    MSTRAT_SAMPLING       = 4,
+    MSTRAT_SAMPLING       = 2,
 };
+static_assert(MSTRAT_GREEDY == 0 && MSTRAT_PENALTY_GREEDY == 1 && MSTRAT_SAMPLING == 2,
+              "Merged strategies must match their graph-slot offsets");
 
-// modality: 0 = text, 1 = image, 2 = video (matches VisionModality's numeric value). The 27 available graphs
-// are laid out modality-major with a fixed 9-slot block: prefill {greedy,penaltyGreedy,beam,sampling} then
-// decode {greedy,penaltyGreedy,beam,penaltyBeam,sampling}. Prefill has no separate penalty-beam graph
-// (the beam-first graph seeds both), so penalty_beam maps to the beam prefill slot.
+// modality: 0 = text, 1 = image, 2 = video (matches VisionModality's numeric value). The 18 available graphs
+// are laid out modality-major with a fixed 6-slot block: prefill {greedy,penaltyGreedy,sampling} then
+// decode {greedy,penaltyGreedy,sampling}.
 inline ModelId mergedPrefillModel(int modality, MergedStrategy strat) {
-    int off;
-    switch (strat) {
-        case MSTRAT_PENALTY_GREEDY:                    off = 1; break;
-        case MSTRAT_BEAM: case MSTRAT_PENALTY_BEAM:    off = 2; break;
-        case MSTRAT_SAMPLING:                          off = 3; break;
-        default:                                       off = 0; break;   // greedy
-    }
-    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL + modality * LLM_MERGED_MODELS_PER_MODALITY + off);
+    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL +
+            modality * LLM_MERGED_MODELS_PER_MODALITY + static_cast<int>(strat));
 }
 
 inline ModelId mergedDecodeModel(int modality, MergedStrategy strat) {
-    int off;
-    switch (strat) {
-        case MSTRAT_PENALTY_GREEDY:  off = 5; break;
-        case MSTRAT_BEAM:            off = 6; break;
-        case MSTRAT_PENALTY_BEAM:    off = 7; break;
-        case MSTRAT_SAMPLING:        off = 8; break;
-        default:                     off = 4; break;   // greedy
-    }
-    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL + modality * LLM_MERGED_MODELS_PER_MODALITY + off);
+    return static_cast<ModelId>(LLM_FIRST_MERGED_MODEL +
+            modality * LLM_MERGED_MODELS_PER_MODALITY + 3 + static_cast<int>(strat));
 }
 
-// True for the 27 available merged strategy graphs, only a bounded selected subset of which is resident.
+// True for the 18 available merged strategy graphs, only a bounded selected subset of which is resident.
 constexpr bool modelIsMergedGraph(int id) {
     return id >= LLM_FIRST_MERGED_MODEL &&
            id < LLM_FIRST_MERGED_MODEL + 3 * LLM_MERGED_MODELS_PER_MODALITY;
 }
 
 // KV-cache management + RoPE-shift utility graphs. They run once per decoded token alongside the merged
-// decode graph (append/slice/split/concat KV, gather beams, shift the rotary window), so they are tiny
+// decode graph (append/slice/split/concat KV and shift the rotary window), so they are tiny
 // and latency-bound. Like the merged decode graphs they belong on the small Top-N big-core decode thread
 // pool, NOT the wide prefill pool that drives the heavy prefill/vision GEMMs. Enumerated explicitly so the
 // classification does not depend on the model-table ordering.
@@ -148,8 +124,6 @@ constexpr bool modelIsKvControlGraph(int id) {
         case LLM_KV_Slice:
         case LLM_KV_Split2:
         case LLM_KV_Concat:
-        case LLM_KV_Concat_FirstBeam:
-        case LLM_GatherFirstBeam:
         case LLM_RopeShift:
             return true;
         default:
@@ -187,10 +161,7 @@ inline std::atomic<int> g_memory_green_target_percent{DEFAULT_MEMORY_GREEN_TARGE
 inline std::atomic<int> g_memory_red_zone_percent{DEFAULT_MEMORY_RED_ZONE_PERCENT};
 
 inline int   decodeMode    = DECODE_MODE_GREEDY;
-inline bool  useBeamSearch = false;
-inline bool  useSampling   = false;
 inline int   topK          = DEFAULT_TOP_K;
-inline int   beamSize      = DEFAULT_BEAM_SIZE;
 inline float repeatPenalty = DEFAULT_REPEAT_PENALTY;
 inline int   penaltyRange  = DEFAULT_PENALTY_RANGE;
 inline float temperature   = DEFAULT_TEMPERATURE;
@@ -292,7 +263,6 @@ JNIEXPORT jboolean JNICALL
 Java_com_example_myapplication_MainActivity_Configure_1LLM(JNIEnv* env, jclass clazz,
                                                            jint decode_mode,
                                                            jint top_k,
-                                                           jint beam_size,
                                                            jfloat repeat_penalty,
                                                            jint penalty_range,
                                                            jfloat temperature,

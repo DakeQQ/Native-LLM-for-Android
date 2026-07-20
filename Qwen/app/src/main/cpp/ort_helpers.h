@@ -397,53 +397,6 @@ inline bool readScalarInteger(const OrtApi* api, OrtValue* tensor,
     return true;
 }
 
-inline std::vector<int> extractFirstRowIntegers(const OrtApi* api, OrtValue* tensor,
-                                                ONNXTensorElementDataType type) {
-    std::vector<int> ids;
-    if (tensor == nullptr || !isIntegerTensorType(type)) {
-        LOGE("ORT: ID tensor has unsupported integer type %d", static_cast<int>(type));
-        return ids;
-    }
-    OrtTensorTypeAndShapeInfo* info = nullptr;
-    if (!logOrtStatus(api, api->GetTensorTypeAndShape(tensor, &info), "GetTensorTypeAndShape") || !info) {
-        return ids;
-    }
-    size_t dimCount = 0;
-    if (!logOrtStatus(api, api->GetDimensionsCount(info, &dimCount), "GetDimensionsCount")) {
-        api->ReleaseTensorTypeAndShapeInfo(info);
-        return ids;
-    }
-    std::vector<int64_t> dims(dimCount, 0);
-    if (dimCount > 0 &&
-        !logOrtStatus(api, api->GetDimensions(info, dims.data(), dimCount), "GetDimensions")) {
-        api->ReleaseTensorTypeAndShapeInfo(info);
-        return ids;
-    }
-    api->ReleaseTensorTypeAndShapeInfo(info);
-    size_t rowLen = (dimCount >= 2) ? static_cast<size_t>(dims[dimCount - 1]) : 0;
-    if (rowLen == 0) {
-        return ids;
-    }
-    void* raw = nullptr;
-    if (!logOrtStatus(api, api->GetTensorMutableData(tensor, &raw), "GetTensorMutableData(ids)") ||
-        raw == nullptr) {
-        return ids;
-    }
-    ids.reserve(rowLen);
-    for (size_t i = 0; i < rowLen; ++i) {
-        const int64_t value = type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
-                ? static_cast<const int32_t*>(raw)[i]
-                : static_cast<const int64_t*>(raw)[i];
-        if (value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) {
-            LOGE("ORT: token ID %lld is outside the native int range", static_cast<long long>(value));
-            ids.clear();
-            return ids;
-        }
-        ids.push_back(static_cast<int>(value));
-    }
-    return ids;
-}
-
 inline uint16_t floatToHalf(float f) {
     uint32_t x;
     std::memcpy(&x, &f, sizeof(x));

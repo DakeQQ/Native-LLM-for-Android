@@ -104,16 +104,15 @@ public class MainActivity extends AppCompatActivity {
     private TextInputEditText inputBox;
     // Decode strategy is a required single choice. Only the selected mode's parameter group is visible.
     private static final int DECODE_MODE_GREEDY = 0;
-    private static final int DECODE_MODE_BEAM = 1;
-    private static final int DECODE_MODE_SAMPLING = 2;
+    private static final int DECODE_MODE_SAMPLING = 1;
+    private static final int DECODE_MODE_PREFERENCE_VERSION = 2;
+    // Existing installs stored Sampling as 2; readDecodePreferences rewrites it once to the 0/1 protocol.
+    private static final int PREVIOUS_DECODE_MODE_SAMPLING = 2;
     private int decodeMode = DECODE_MODE_GREEDY;
     private DecodePreferences decodePreferences;
     private MaterialButtonToggleGroup decodeStrategyGroup;
-    private View beamControls;
     private View directPenaltyControls;
     private View samplerControls;
-    private Slider beamSlider;
-    private Slider topKSlider;
     private Slider penaltySlider;
     private Slider penaltyRangeSlider;
     private Slider samplingTemperatureSlider;
@@ -124,8 +123,6 @@ public class MainActivity extends AppCompatActivity {
     private Slider prefillSlider;
     private View prefillControls;
     private Slider decodeLimitSlider;
-    private TextView beamValue;
-    private TextView topKValue;
     private TextView penaltyValue;
     private TextView penaltyRangeValue;
     private TextView samplingTemperatureValue;
@@ -208,8 +205,6 @@ public class MainActivity extends AppCompatActivity {
     private static float visionVideoSeconds = 0f;
     private static int pendingVideoFrameCount = 0;
     private static float pendingVideoSeconds = 0f;
-    // Mirrors the latest beam toggle. Beam decodes silently so it needs the "typing" placeholder.
-    private static boolean useBeamSearch = false;
     private RecyclerView answerView;
     private ChatAdapter chatAdapter;
     private static List<ChatMessage> messages;
@@ -467,7 +462,7 @@ public class MainActivity extends AppCompatActivity {
             Intent launchIntent = getIntent();
             final boolean keepLoadingServiceForBenchmark = launchIntent != null &&
                     launchIntent.hasExtra("benchmark_workload");
-            // Keep the transcript empty while loading; TYPE_LOADING is reserved for beam replies.
+            // Keep the transcript empty while loading; TYPE_LOADING is used for deferred first-token work.
             final AssetManager bgMgr = loadContext.getAssets();
             new Thread(() -> {
                 final long modelReadyStartNanos = SystemClock.elapsedRealtimeNanos();
@@ -1388,7 +1383,7 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== Loading placeholder bubble ====================
 
-    // Append the "typing" placeholder row (beam decodes silently). Idempotent: never stacked on another placeholder.
+    // Append the loading placeholder used by vision prewarm and edit/rollback. Never stack duplicates.
     private void showLoadingBubble() {
         int lastIndex = messages.size() - 1;
         if (lastIndex >= 0 && messages.get(lastIndex).type() == ChatMessage.TYPE_LOADING) {
@@ -1701,8 +1696,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // Shared send path (fresh message + edited-bubble resend): snapshot query + turn id, launch the worker,
-    // append the user bubble, show the typing placeholder for beam.
+    // Shared send path (fresh message + edited-bubble resend): snapshot query + turn id and launch the worker.
     private void dispatchGeneration(String query, int turnId) {
         usrInputText = query;
         usrTurnId = turnId;
@@ -1710,10 +1704,6 @@ public class MainActivity extends AppCompatActivity {
         updateJumpToBottomVisibility();
         startLLM();
         addHistory(ChatMessage.TYPE_USER, query, turnId);
-        if (useBeamSearch) {
-            // Beam streams nothing until done; show a placeholder so the wait isn't a frozen screen.
-            showLoadingBubble();
-        }
     }
 
     private void startLLM() {
@@ -2238,8 +2228,7 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== Decode-strategy controls ====================
 
-    // Wire the required Greedy / Beam / Sampler choice. Values and guards mirror the Python inference path:
-    // Beam >= 2, Beam Top-K >= Beam, sampling Top-K >= 1, and 1.0 disables either penalty formulation.
+    // Wire the required Greedy / Sampler choice. Sampling Top-K stays >= 1; 1.0 disables repetition penalty.
     private void setupDecodeControls() {
         if (decodeControlsInitialized) {
             return;
@@ -2255,8 +2244,6 @@ public class MainActivity extends AppCompatActivity {
         prefillControls = findViewById(R.id.prefill_controls);
         decodeLimitSlider = findViewById(R.id.decode_limit_slider);
         setCompactSliderRowHeights(memorySlider, prefillSlider, decodeLimitSlider);
-        beamValue = findViewById(R.id.beam_value);
-        topKValue = findViewById(R.id.top_k_value);
         penaltyValue = findViewById(R.id.penalty_value);
         penaltyRangeValue = findViewById(R.id.penalty_range_value);
         samplingTemperatureValue = findViewById(R.id.sampling_temperature_value);
@@ -2289,23 +2276,18 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences prefs = getSharedPreferences(App.PREFS, MODE_PRIVATE);
         decodePreferences = readDecodePreferences(prefs);
         decodeMode = decodePreferences.mode;
-        int checkedId = decodeMode == DECODE_MODE_BEAM
-            ? R.id.decode_mode_beam
-            : (decodeMode == DECODE_MODE_SAMPLING
-            ? R.id.decode_mode_sampler : R.id.decode_mode_greedy);
+        int checkedId = decodeMode == DECODE_MODE_SAMPLING
+            ? R.id.decode_mode_sampler : R.id.decode_mode_greedy;
         decodeStrategyGroup.check(checkedId);
         decodeStrategyGroup.addOnButtonCheckedListener((group, selectedId, isChecked) -> {
             if (!isChecked) {
                 return;
             }
-            if (selectedId == R.id.decode_mode_beam) {
-                decodeMode = DECODE_MODE_BEAM;
-            } else if (selectedId == R.id.decode_mode_sampler) {
+            if (selectedId == R.id.decode_mode_sampler) {
                 decodeMode = DECODE_MODE_SAMPLING;
             } else {
                 decodeMode = DECODE_MODE_GREEDY;
             }
-            useBeamSearch = decodeMode == DECODE_MODE_BEAM;
             ensureDecodeStrategyControlsInflated();
             updateDecodeModeVisibility();
             applyDecodeConfig(null);
@@ -2344,7 +2326,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void ensureDecodeStrategyControlsInflated() {
-        if (beamSlider != null) {
+        if (penaltySlider != null) {
             return;
         }
         View controls = findViewById(R.id.decode_strategy_controls);
@@ -2355,22 +2337,17 @@ public class MainActivity extends AppCompatActivity {
             }
             controls = stub.inflate();
         }
-        beamControls = controls.findViewById(R.id.beam_controls);
         directPenaltyControls = controls.findViewById(R.id.direct_penalty_controls);
         samplerControls = controls.findViewById(R.id.sampler_controls);
-        beamSlider = controls.findViewById(R.id.beam_slider);
-        topKSlider = controls.findViewById(R.id.top_k_slider);
         penaltySlider = controls.findViewById(R.id.penalty_slider);
         penaltyRangeSlider = controls.findViewById(R.id.penalty_range_slider);
         samplingTemperatureSlider = controls.findViewById(R.id.sampling_temperature_slider);
         samplingTopKSlider = controls.findViewById(R.id.sampling_top_k_slider);
         samplingTopPSlider = controls.findViewById(R.id.sampling_top_p_slider);
         samplingPenaltySlider = controls.findViewById(R.id.sampling_penalty_slider);
-        setCompactSliderRowHeights(beamSlider, topKSlider, penaltySlider, penaltyRangeSlider,
+        setCompactSliderRowHeights(penaltySlider, penaltyRangeSlider,
             samplingTemperatureSlider, samplingTopKSlider, samplingTopPSlider,
             samplingPenaltySlider);
-        beamValue = controls.findViewById(R.id.beam_value);
-        topKValue = controls.findViewById(R.id.top_k_value);
         penaltyValue = controls.findViewById(R.id.penalty_value);
         penaltyRangeValue = controls.findViewById(R.id.penalty_range_value);
         samplingTemperatureValue = controls.findViewById(R.id.sampling_temperature_value);
@@ -2379,7 +2356,7 @@ public class MainActivity extends AppCompatActivity {
         samplingPenaltyValue = controls.findViewById(R.id.sampling_penalty_value);
         restoreDecodeControls();
         Slider.OnChangeListener decodeListener = (slider, value, fromUser) -> applyDecodeConfig(slider);
-        for (Slider slider : new Slider[]{beamSlider, topKSlider, penaltySlider, penaltyRangeSlider,
+        for (Slider slider : new Slider[]{penaltySlider, penaltyRangeSlider,
                 samplingTemperatureSlider, samplingTopKSlider, samplingTopPSlider,
                 samplingPenaltySlider}) {
             slider.addOnChangeListener(decodeListener);
@@ -2454,23 +2431,18 @@ public class MainActivity extends AppCompatActivity {
         private void restoreDecodeControls() {
         DecodePreferences preferences = decodePreferences;
         decodeMode = preferences.mode;
-        beamSlider.setValue(preferences.beamSize);
-        topKSlider.setValue(preferences.beamTopK);
         penaltySlider.setValue(preferences.directPenalty);
         penaltyRangeSlider.setValue(preferences.penaltyRange);
         samplingTemperatureSlider.setValue(preferences.samplingTemperature);
         samplingTopKSlider.setValue(preferences.samplingTopK);
         samplingTopPSlider.setValue(preferences.samplingTopP);
         samplingPenaltySlider.setValue(preferences.samplingPenalty);
-        int checkedId = decodeMode == DECODE_MODE_BEAM
-            ? R.id.decode_mode_beam
-            : (decodeMode == DECODE_MODE_SAMPLING
-                ? R.id.decode_mode_sampler : R.id.decode_mode_greedy);
+        int checkedId = decodeMode == DECODE_MODE_SAMPLING
+            ? R.id.decode_mode_sampler : R.id.decode_mode_greedy;
         decodeStrategyGroup.check(checkedId);
         }
 
         private void updateDecodeModeVisibility() {
-        beamControls.setVisibility(decodeMode == DECODE_MODE_BEAM ? View.VISIBLE : View.GONE);
         directPenaltyControls.setVisibility(
             decodeMode == DECODE_MODE_SAMPLING ? View.GONE : View.VISIBLE);
         samplerControls.setVisibility(decodeMode == DECODE_MODE_SAMPLING ? View.VISIBLE : View.GONE);
@@ -2480,14 +2452,13 @@ public class MainActivity extends AppCompatActivity {
             if (decodeStrategyGroup != null) {
                 decodeStrategyGroup.setEnabled(enabled);
             }
-            for (int id : new int[]{R.id.decode_mode_greedy, R.id.decode_mode_beam,
-                                    R.id.decode_mode_sampler}) {
+            for (int id : new int[]{R.id.decode_mode_greedy, R.id.decode_mode_sampler}) {
                 View control = findViewById(id);
                 if (control != null) {
                     control.setEnabled(enabled);
                 }
             }
-            for (Slider slider : new Slider[]{beamSlider, topKSlider, penaltySlider, penaltyRangeSlider,
+            for (Slider slider : new Slider[]{penaltySlider, penaltyRangeSlider,
                                               samplingTemperatureSlider, samplingTopKSlider,
                                               samplingTopPSlider, samplingPenaltySlider}) {
                 if (slider != null) {
@@ -2500,17 +2471,15 @@ public class MainActivity extends AppCompatActivity {
         private static final class DecodeConfig {
             final int mode;
             final int topK;
-            final int beamSize;
             final float repeatPenalty;
             final int penaltyRange;
             final float temperature;
             final float topP;
 
-            DecodeConfig(int mode, int topK, int beamSize, float repeatPenalty, int penaltyRange,
+            DecodeConfig(int mode, int topK, float repeatPenalty, int penaltyRange,
                          float temperature, float topP) {
                 this.mode = mode;
                 this.topK = topK;
-                this.beamSize = beamSize;
                 this.repeatPenalty = repeatPenalty;
                 this.penaltyRange = penaltyRange;
                 this.temperature = temperature;
@@ -2520,8 +2489,6 @@ public class MainActivity extends AppCompatActivity {
 
         private static final class DecodePreferences {
             final int mode;
-            final int beamSize;
-            final int beamTopK;
             final float directPenalty;
             final int penaltyRange;
             final float samplingTemperature;
@@ -2529,12 +2496,10 @@ public class MainActivity extends AppCompatActivity {
             final float samplingTopP;
             final float samplingPenalty;
 
-            DecodePreferences(int mode, int beamSize, int beamTopK, float directPenalty,
+            DecodePreferences(int mode, float directPenalty,
                               int penaltyRange, float samplingTemperature, int samplingTopK,
                               float samplingTopP, float samplingPenalty) {
                 this.mode = mode;
-                this.beamSize = beamSize;
-                this.beamTopK = beamTopK;
                 this.directPenalty = directPenalty;
                 this.penaltyRange = penaltyRange;
                 this.samplingTemperature = samplingTemperature;
@@ -2545,14 +2510,22 @@ public class MainActivity extends AppCompatActivity {
         }
 
         private static DecodePreferences readDecodePreferences(SharedPreferences prefs) {
-            int mode = clamp(prefs.getInt(App.KEY_DECODE_MODE, DECODE_MODE_GREEDY),
-                    DECODE_MODE_GREEDY, DECODE_MODE_SAMPLING);
-            int beam = clamp(prefs.getInt(App.KEY_BEAM_SIZE, 3), 2, 10);
-            int beamTopK = clamp(prefs.getInt(App.KEY_BEAM_TOP_K, 3), beam, 10);
+            int storedMode = prefs.getInt(App.KEY_DECODE_MODE, DECODE_MODE_GREEDY);
+            int storedVersion = prefs.getInt(App.KEY_DECODE_MODE_VERSION, 1);
+            int mode;
+            if (storedVersion < DECODE_MODE_PREFERENCE_VERSION) {
+                mode = storedMode == PREVIOUS_DECODE_MODE_SAMPLING
+                    ? DECODE_MODE_SAMPLING : DECODE_MODE_GREEDY;
+                prefs.edit()
+                    .putInt(App.KEY_DECODE_MODE, mode)
+                    .putInt(App.KEY_DECODE_MODE_VERSION, DECODE_MODE_PREFERENCE_VERSION)
+                    .apply();
+            } else {
+                mode = storedMode == DECODE_MODE_SAMPLING
+                    ? DECODE_MODE_SAMPLING : DECODE_MODE_GREEDY;
+            }
             return new DecodePreferences(
                     mode,
-                    beam,
-                    beamTopK,
                     snapToStep(prefs.getFloat(App.KEY_DIRECT_REPEAT_PENALTY, 0.8f),
                             0.0f, 1.0f, 0.05f),
                     clamp(prefs.getInt(App.KEY_PENALTY_RANGE, 20), 1, 256),
@@ -2568,13 +2541,11 @@ public class MainActivity extends AppCompatActivity {
             private void applySavedDecodeConfig() {
             DecodePreferences preferences = decodePreferences;
             decodeMode = preferences.mode;
-            useBeamSearch = decodeMode == DECODE_MODE_BEAM;
             int nativeTopK = decodeMode == DECODE_MODE_SAMPLING
-                ? preferences.samplingTopK : (useBeamSearch ? preferences.beamTopK : 1);
-            int nativeBeam = useBeamSearch ? preferences.beamSize : 1;
+                ? preferences.samplingTopK : 1;
             float nativePenalty = decodeMode == DECODE_MODE_SAMPLING
                 ? preferences.samplingPenalty : preferences.directPenalty;
-            boolean applied = Configure_LLM(decodeMode, nativeTopK, nativeBeam, nativePenalty,
+            boolean applied = Configure_LLM(decodeMode, nativeTopK, nativePenalty,
                 preferences.penaltyRange, preferences.samplingTemperature, preferences.samplingTopP);
             if (applied) {
                 configuredDecodeMode = decodeMode;
@@ -2623,7 +2594,7 @@ public class MainActivity extends AppCompatActivity {
                         break;
                     }
                 }
-                latestApplied = Configure_LLM(config.mode, config.topK, config.beamSize,
+                latestApplied = Configure_LLM(config.mode, config.topK,
                         config.repeatPenalty, config.penaltyRange, config.temperature, config.topP);
                 if (latestApplied) {
                     configuredDecodeMode = config.mode;
@@ -2642,27 +2613,14 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // Read all mode-specific controls, enforce Beam Top-K >= Beam, refresh labels, persist, then push one
-        // immutable configuration snapshot to native. Hidden modes retain their independent tuning values.
+        // Read all mode-specific controls, refresh labels, persist, then push one immutable snapshot.
     private void applyDecodeConfig(Slider changed) {
-        int beam = Math.round(beamSlider.getValue());
-        int topk = Math.round(topKSlider.getValue());
-        if (changed == beamSlider && topk < beam) {
-            topKSlider.setValue(beam);
-            return;
-        }
-        if (changed == topKSlider && topk < beam) {
-            beamSlider.setValue(topk);
-            return;
-        }
         float penalty = penaltySlider.getValue();
         int penaltyRange = Math.round(penaltyRangeSlider.getValue());
         float samplingTemperature = samplingTemperatureSlider.getValue();
         int samplingTopK = Math.round(samplingTopKSlider.getValue());
         float samplingTopP = samplingTopPSlider.getValue();
         float samplingPenalty = samplingPenaltySlider.getValue();
-        beamValue.setText(String.valueOf(beam));
-        topKValue.setText(String.valueOf(topk));
         String penaltyText = penalty >= 1.0f
                 ? getString(R.string.penalty_off)
                 : String.format(Locale.US, "%.2f", penalty);
@@ -2679,13 +2637,12 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             decodeConfigDirty = false;
-                decodePreferences = new DecodePreferences(decodeMode, beam, topk, penalty,
+                decodePreferences = new DecodePreferences(decodeMode, penalty,
                     penaltyRange, samplingTemperature, samplingTopK, samplingTopP,
                     samplingPenalty);
             getSharedPreferences(App.PREFS, MODE_PRIVATE).edit()
                 .putInt(App.KEY_DECODE_MODE, decodeMode)
-                .putInt(App.KEY_BEAM_SIZE, beam)
-                .putInt(App.KEY_BEAM_TOP_K, topk)
+                .putInt(App.KEY_DECODE_MODE_VERSION, DECODE_MODE_PREFERENCE_VERSION)
                 .putFloat(App.KEY_DIRECT_REPEAT_PENALTY, penalty)
                 .putInt(App.KEY_PENALTY_RANGE, penaltyRange)
                 .putFloat(App.KEY_SAMPLING_TEMPERATURE, samplingTemperature)
@@ -2693,17 +2650,15 @@ public class MainActivity extends AppCompatActivity {
                 .putFloat(App.KEY_SAMPLING_TOP_P, samplingTopP)
                 .putFloat(App.KEY_SAMPLING_REPEAT_PENALTY, samplingPenalty)
                 .apply();
-            useBeamSearch = decodeMode == DECODE_MODE_BEAM;
             int nativeTopK = decodeMode == DECODE_MODE_SAMPLING ? samplingTopK
-                : (decodeMode == DECODE_MODE_BEAM ? topk : 1);
-            int nativeBeam = decodeMode == DECODE_MODE_BEAM ? beam : 1;
+                : 1;
             float nativePenalty = decodeMode == DECODE_MODE_SAMPLING ? samplingPenalty : penalty;
-            DecodeConfig config = new DecodeConfig(decodeMode, nativeTopK, nativeBeam,
+            DecodeConfig config = new DecodeConfig(decodeMode, nativeTopK,
                 nativePenalty, penaltyRange, samplingTemperature, samplingTopP);
             boolean applyImmediately = !modelsLoading && !systemPromptConfigLoading &&
                 (!modelsReady || (!decodeConfigLoading && config.mode == configuredDecodeMode));
             if (applyImmediately) {
-                boolean applied = Configure_LLM(config.mode, config.topK, config.beamSize,
+                boolean applied = Configure_LLM(config.mode, config.topK,
                     config.repeatPenalty, config.penaltyRange, config.temperature, config.topP);
                 if (applied) {
                     configuredDecodeMode = config.mode;
@@ -3843,7 +3798,7 @@ public class MainActivity extends AppCompatActivity {
             if (!awaitModelConfigBarrier()) {
                 throw new IllegalStateException("Model configuration did not complete");
             }
-            Configure_LLM(DECODE_MODE_GREEDY, 1, 1, 1.0f, 20, 0.8f, 0.95f);
+            Configure_LLM(DECODE_MODE_GREEDY, 1, 1.0f, 20, 0.8f, 0.95f);
             Configure_Organize_Memory(false);
             Configure_Memory(memoryTokens, prefillTokens, decodeTokens);
             Set_System_Prompt(SYSTEM_PROMPT_DEFAULT);
@@ -4045,9 +4000,8 @@ public class MainActivity extends AppCompatActivity {
     // Rolls the KV cache back to before TURN_ID's prompt (dropping it + later turns) so an edited bubble can
     // regenerate. Returns false (and clears history) when no longer rollable.
     private static native boolean Rollback_LLM(int TURN_ID);
-    // Runtime decode-strategy: beam when enabled with TOP_K/BEAM_SIZE >= 2, greedy for penalty, else argmax.
-    // Values clamped natively to the exported graph limits.
-    private static native boolean Configure_LLM(int DECODE_MODE, int TOP_K, int BEAM_SIZE,
+    // Runtime decode strategy and sampling/penalty values are clamped to exported graph limits.
+    private static native boolean Configure_LLM(int DECODE_MODE, int TOP_K,
                                                 float REPEAT_PENALTY, int PENALTY_RANGE,
                                                 float TEMPERATURE, float TOP_P);
     // Replaces the slot system prompt (next turn). Organize Memory ON strips its block during clean recompute.
