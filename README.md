@@ -1,6 +1,6 @@
 # Native-LLM-for-Android
 
-Quick Try: [Qwen3.5-0.8B-Android](https://drive.google.com/file/d/1hHS7fHkmmKWfTdog3uqFIGOcq73H2Hks/view?usp=sharing)
+Quick Try: [Qwen3.5-0.8B-Android](https://drive.google.com/file/d/19dendHRrKxtNzQFPQsNX5AQcZDOxFfQO/view?usp=sharing)
 
 ### Qwen3.5-0.8B / 4096 Context
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen3.5.gif)
