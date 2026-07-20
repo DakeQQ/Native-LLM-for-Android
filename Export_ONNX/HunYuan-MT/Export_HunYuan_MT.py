@@ -26,15 +26,15 @@ REORDER_KEY                    = "absmean"                           # Channel s
 
 # KV cache storage. F16/F32 are unquantized; Q8/Q4 variants store KV as integer caches.
 KV_QUANT_DTYPE                 = "Q8"                                # ROTARY_Q4[_CUDA] | Q8[_CUDA] | ROTARY_Q8[_CUDA] | F16 | F32.
-KV_QUANT_GROUP_SIZE            = 32                                  # Quant group along head_dim; auto-clamped to a divisor.
+KV_QUANT_GROUP_SIZE            = 128                                 # Quant group along head_dim; auto-clamped to a divisor.
 COMPUTE_IN_F32                 = False                               # F16 KV only: False=f16 attention, True=upcast KV for f32 math.
 
 # Quantized-KV accuracy/storage knobs. Ignored by F16/F32 KV.
-USE_HADAMARD                   = True                               # Grouped Q4/Q8 only: rotate channels before quantization.
+USE_HADAMARD                   = False                               # Grouped Q4/Q8 only: rotate channels before quantization.
 HADAMARD_RANDOM_SEED           = 9527                                # Deterministic Hadamard sign pattern.
 USE_CLIP                       = False                               # Clip outliers before KV quantization.
 CLIP_SIGMA                     = 3.0                                 # Sigma bound used when USE_CLIP=True.
-USE_SHUFFLE                    = True                               # Grouped Q4/Q8 only: spread channels across groups.
+USE_SHUFFLE                    = False                               # Grouped Q4/Q8 only: spread channels across groups.
 USE_SYM                        = True                                # True=signed absmax/no bias; False=min-max with bias.
 USE_FLOAT16_SCALE_BIAS         = True                                # Store quant scales/biases as f16 instead of f32.
 USE_QDQ_FRIENDLY_ASYM          = False                               # Asym only: enables blocked Q/DQ rewrite, disables residual correction.
