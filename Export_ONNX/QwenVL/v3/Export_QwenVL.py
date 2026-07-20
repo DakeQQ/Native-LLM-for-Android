@@ -38,42 +38,29 @@ MODEL_FILE_NAMES = {
     "greedy": "LLM_Greedy.onnx",
     "sampling": "LLM_TopKTopPSampling.onnx",
     "penalty_greedy": "LLM_PenaltyGreedy.onnx",
-    "first_beam": "LLM_FirstBeam.onnx",
-    "second_beam": "LLM_SecondBeam.onnx",
     "penalty": "LLM_Penalty.onnx",
     "argmax": "LLM_Argmax.onnx",
     "kv_slice": "LLM_KV_Slice.onnx",
     "kv_split2": "LLM_KV_Split2.onnx",
     "kv_concat": "LLM_KV_Concat.onnx",
-    "kv_concat_first_beam": "LLM_KV_Concat_FirstBeam.onnx",
-    "gather_first_beam": "LLM_GatherFirstBeam.onnx",
     "rope_shift": "LLM_RopeShift.onnx",
     "text_prefill_greedy": "LLM_TextPrefillGreedy.onnx",
     "text_prefill_penalty_greedy": "LLM_TextPrefillPenaltyGreedy.onnx",
-    "text_prefill_beam": "LLM_TextPrefillBeamFirst.onnx",
     "text_prefill_sampling": "LLM_TextPrefillSampling.onnx",
     "text_decode_greedy": "LLM_TextDecodeGreedy.onnx",
     "text_decode_penalty_greedy": "LLM_TextDecodePenaltyGreedy.onnx",
-    "text_decode_beam": "LLM_TextDecodeBeamNext.onnx",
-    "text_decode_penalty_beam": "LLM_TextDecodePenaltyBeamNext.onnx",
     "text_decode_sampling": "LLM_TextDecodeSampling.onnx",
     "image_prefill_greedy": "LLM_ImagePrefillGreedy.onnx",
     "image_prefill_penalty_greedy": "LLM_ImagePrefillPenaltyGreedy.onnx",
-    "image_prefill_beam": "LLM_ImagePrefillBeamFirst.onnx",
     "image_prefill_sampling": "LLM_ImagePrefillSampling.onnx",
     "image_decode_greedy": "LLM_ImageDecodeGreedy.onnx",
     "image_decode_penalty_greedy": "LLM_ImageDecodePenaltyGreedy.onnx",
-    "image_decode_beam": "LLM_ImageDecodeBeamNext.onnx",
-    "image_decode_penalty_beam": "LLM_ImageDecodePenaltyBeamNext.onnx",
     "image_decode_sampling": "LLM_ImageDecodeSampling.onnx",
     "video_prefill_greedy": "LLM_VideoPrefillGreedy.onnx",
     "video_prefill_penalty_greedy": "LLM_VideoPrefillPenaltyGreedy.onnx",
-    "video_prefill_beam": "LLM_VideoPrefillBeamFirst.onnx",
     "video_prefill_sampling": "LLM_VideoPrefillSampling.onnx",
     "video_decode_greedy": "LLM_VideoDecodeGreedy.onnx",
     "video_decode_penalty_greedy": "LLM_VideoDecodePenaltyGreedy.onnx",
-    "video_decode_beam": "LLM_VideoDecodeBeamNext.onnx",
-    "video_decode_penalty_beam": "LLM_VideoDecodePenaltyBeamNext.onnx",
     "video_decode_sampling": "LLM_VideoDecodeSampling.onnx",
     "shared_initializers": "LLM_SharedInitializers.onnx",
 }
@@ -99,17 +86,11 @@ onnx_model_Main = str(ONNX_DIR / MODEL_FILE_NAMES["main"])
 onnx_model_Greedy = str(ONNX_DIR / MODEL_FILE_NAMES["greedy"])
 onnx_model_TopKTopP_Sampling = str(ONNX_DIR / MODEL_FILE_NAMES["sampling"])
 onnx_model_Penalty_Greedy = str(ONNX_DIR / MODEL_FILE_NAMES["penalty_greedy"])
-onnx_model_First_Beam = str(ONNX_DIR / MODEL_FILE_NAMES["first_beam"])
-onnx_model_Second_Beam = str(ONNX_DIR / MODEL_FILE_NAMES["second_beam"])
 onnx_model_Penalty = str(ONNX_DIR / MODEL_FILE_NAMES["penalty"])
 onnx_model_Argmax = str(ONNX_DIR / MODEL_FILE_NAMES["argmax"])
 onnx_model_KV_Slice = str(ONNX_DIR / MODEL_FILE_NAMES["kv_slice"])
 onnx_model_KV_Split2 = str(ONNX_DIR / MODEL_FILE_NAMES["kv_split2"])
 onnx_model_KV_Concat = str(ONNX_DIR / MODEL_FILE_NAMES["kv_concat"])
-onnx_model_KV_Concat_FirstBeam = str(
-    ONNX_DIR / MODEL_FILE_NAMES["kv_concat_first_beam"]
-)
-onnx_model_Gather_FirstBeam = str(ONNX_DIR / MODEL_FILE_NAMES["gather_first_beam"])
 onnx_model_Rope_Shift = str(ONNX_DIR / MODEL_FILE_NAMES["rope_shift"])
 
 # Test Input
@@ -122,6 +103,7 @@ TEST_QUERY               = [DEFAULT_IMAGE_QUERY, "Describe this video."]        
 # Model Config
 DO_EXPORT                = True                                     # Whether to export the ONNX models
 RUN_INFERENCE_AFTER_EXPORT = False                                  # Launch the separate merged-graph self-test after export.
+USE_BATCH                = False                                    # True = dynamic batch axis; False = fixed batch 1 for CUDA-friendly Reshape nodes.
 COMPUTE_IN_F32           = False                                    # F16 KV only: False keeps attention in float16; True upcasts cached K/V for float32 attention.
 STOP_TOKEN               = [151643, 151645]                         # Qwen stop token ids
 MAX_SEQ_LEN              = 4096                                     # Max context length. Can not edit after export.
@@ -168,12 +150,8 @@ REORDER_VISION_OPROJ_FOR_QUANT = False
 REORDER_KEY                    = "absmean"                          # "absmean" | "L4" | "rms" | "std"
 
 # Decoding strategy
-USE_BEAM_SEARCH          = False                                    # Use beam search or greedy search
 REPEAT_PENALTY           = 1.0                                      # 0.0 ~ 1.0; No penalty = 1.0
 PENALTY_RANGE            = 20                                       # Recent-token window to apply penalty
-MAX_BEAM_SIZE            = 10                                       # Max beam size for beam search. Can not edit after export.
-TOP_K                    = 3                                        # Top-K for beam search
-BEAM_SIZE                = 3                                        # Beam size for beam search. Must be <= MAX_BEAM_SIZE
 
 # Runtime config
 ORT_LOG                  = False                                    # Enable ONNX Runtime logging for debugging. Set to False for best performance.
@@ -294,104 +272,6 @@ class GREEDY_SEARCH(torch.nn.Module):
 
     def forward(self, logits):
         return torch.argmax(logits, dim=-1, keepdim=True).int()
-
-
-class GATHER_FIRST_BEAM(torch.nn.Module):
-    """Collapse an ordered beam-state block to its best row."""
-
-    def __init__(self):
-        super().__init__()
-        self.register_buffer(
-            "first_beam_row", torch.tensor([0], dtype=torch.int64), persistent=False
-        )
-
-    def forward(self, *states):
-        return tuple(
-            torch.index_select(state, dim=0, index=self.first_beam_row)
-            for state in states
-        )
-
-
-class FIRST_BEAM_SEARCH(torch.nn.Module):
-    """First beam-search step: expand a single hypothesis into `beam_size` beams."""
-
-    def __init__(self, total_layers):
-        super().__init__()
-        self.total_layers = total_layers
-
-    def forward(self, *all_inputs):
-        logits    = all_inputs[-3]
-        save_id   = all_inputs[-2]
-        beam_size = all_inputs[-1]
-
-        # Compute log-probabilities for the top-k beams
-        row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_beam_logits, top_beam_indices = torch.topk(logits, dim=-1, k=beam_size, sorted=True, largest=True)
-        top_beam_prob = top_beam_logits - row_logsumexp
-
-        save_states = []
-        for i in range(self.total_layers):
-            state = all_inputs[i]
-            save_states.append(
-                state.repeat(beam_size, *([1] * (state.dim() - 1)))
-            )
-
-        top_beam_indices = top_beam_indices.transpose(0, 1).int()
-        save_id          = torch.cat([save_id, top_beam_indices], dim=-1)
-        max_logits_idx   = top_beam_indices[[0]]
-
-        return (
-            *save_states,
-            save_id,
-            top_beam_prob.transpose(0, 1),
-            top_beam_indices,
-            max_logits_idx
-        )
-
-
-class SECOND_BEAM_SEARCH(torch.nn.Module):
-    """Subsequent beam-search steps: prune and re-expand beams."""
-
-    def __init__(self, total_layers):
-        super().__init__()
-        self.total_layers = total_layers
-
-    def forward(self, *all_inputs):
-        logits        = all_inputs[-5]
-        save_id       = all_inputs[-4]
-        previous_prob = all_inputs[-3]
-        beam_size     = all_inputs[-2]
-        top_k         = all_inputs[-1]
-
-        # Compute log-probabilities and accumulate with previous scores
-        row_logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
-        top_k_logits, top_k_indices = torch.topk(logits, k=top_k, dim=-1, largest=True, sorted=True)
-        top_k_prob    = top_k_logits - row_logsumexp
-        current_prob  = (top_k_prob + previous_prob).view(-1)
-
-        # Select the top beams from all candidates
-        top_beam_prob, flat_beam_indices = torch.topk(current_prob, k=beam_size, dim=-1, largest=True, sorted=True)
-        beam_index       = flat_beam_indices // top_k
-        top_beam_indices = top_k_indices.view(-1)[flat_beam_indices]
-
-        save_states = []
-        for i in range(self.total_layers):
-            save_states.append(
-                torch.index_select(all_inputs[i], dim=0, index=beam_index)
-            )
-
-        gathered_save_id = torch.index_select(save_id, dim=0, index=beam_index)
-        top_beam_indices = top_beam_indices.unsqueeze(-1).int()
-        max_logits_idx   = top_beam_indices[[0]]
-        save_id          = torch.cat([gathered_save_id, top_beam_indices], dim=-1)
-
-        return (
-            *save_states,
-            save_id,
-            top_beam_prob.unsqueeze(-1),
-            top_beam_indices,
-            max_logits_idx
-        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -729,14 +609,10 @@ class KV_SPLIT2(torch.nn.Module):
 
 
 class KV_CONCAT(torch.nn.Module):
-    """Concatenate KV prefix/window blocks, optionally restoring beam batch."""
+    """Concatenate KV prefix/window blocks."""
 
-    def __init__(self, num_layers, head_dim=0, first_beam=False):
+    def __init__(self, num_layers, head_dim=0):
         super().__init__()
-        self.first_beam = first_beam
-        self.register_buffer(
-            "first_beam_row", torch.tensor([0], dtype=torch.int64), persistent=False
-        )
         self.kv_quantized = KV_QUANT_DTYPE in (
             "Q8", "Q8_CUDA", "ROTARY_Q8", "ROTARY_Q8_CUDA",
             "ROTARY_Q4", "ROTARY_Q4_CUDA",
@@ -765,11 +641,7 @@ class KV_CONCAT(torch.nn.Module):
                 self.save_v_bias = [None] * num_layers
 
     def _concat(self, prefix, suffix, dim):
-        if not self.first_beam:
-            return torch.cat([prefix, suffix], dim=dim)
-        suffix_top1 = torch.index_select(suffix, 0, self.first_beam_row)
-        full_top1 = torch.cat([prefix, suffix_top1], dim=dim)
-        return full_top1.expand(suffix.shape[0], *([-1] * (full_top1.dim() - 1)))
+        return torch.cat([prefix, suffix], dim=dim)
 
     def forward(self, *all_inputs):
         state_count = len(all_inputs) // 2
@@ -823,7 +695,15 @@ def onnx_static_reshape(x, shape):
 
 
 def onnx_reshape_batch(x, shape):
-    return onnx_static_reshape(x, (0,) + tuple(shape))
+    batch_dim = 0 if USE_BATCH else 1
+    return onnx_static_reshape(x, (batch_dim,) + tuple(shape))
+
+
+def add_batch_dynamic_axes(dynamic_axes, *tensor_names, axis_name='batch'):
+    if USE_BATCH:
+        for tensor_name in tensor_names:
+            dynamic_axes.setdefault(tensor_name, {})[0] = axis_name
+    return dynamic_axes
 
 
 class KVQuantizer(torch.nn.Module):
@@ -3578,7 +3458,6 @@ if DO_EXPORT:
         history_len = torch.tensor([0],  dtype=torch.int64)
         cache_len   = history_len.clone()
         kv_seq_len  = ids_len + history_len
-        beam_size   = torch.tensor([1], dtype=torch.int64)
         logits      = torch.ones((batch_size, vocab_size), dtype=torch.float32)
 
         # KV cache spec: list of (name, concat_dim)
@@ -3703,8 +3582,11 @@ if DO_EXPORT:
                     inputs.append(tensor)
                     in_names.append(in_n)
                     out_names.append(out_n)
-                    axes[in_n]  = {0: batch_axis, dim: seq_axis}
-                    axes[out_n] = {0: batch_axis, dim: out_seq_axis}
+                    axes[in_n]  = {dim: seq_axis}
+                    axes[out_n] = {dim: out_seq_axis}
+                    add_batch_dynamic_axes(
+                        axes, in_n, out_n, axis_name=batch_axis
+                    )
             return inputs, in_names, out_names, axes
 
         chat_token_metadata = collect_special_token_ids(tokenizer)
@@ -3848,10 +3730,14 @@ if DO_EXPORT:
             onnx_model_Embed,
             input_names=['input_ids'],
             output_names=['text_hidden_states'],
-            dynamic_axes={
-                'input_ids':          {0: 'batch', 1: 'ids_len'},
-                'text_hidden_states': {0: 'batch', 1: 'ids_len'}
-            },
+            dynamic_axes=add_batch_dynamic_axes(
+                {
+                    'input_ids':          {1: 'ids_len'},
+                    'text_hidden_states': {1: 'ids_len'},
+                },
+                'input_ids',
+                'text_hidden_states',
+            ),
             opset_version=OPSET,
             dynamo=False
         )
@@ -4306,14 +4192,17 @@ if DO_EXPORT:
 
         all_inputs  = kv_ins + [hidden_states]
         input_names = kv_in_names + ['hidden_states']
-        dynamic_axes = {
-            **kv_axes,
-            'hidden_states':  {0: 'batch', 1: 'ids_len'},
-            'logits':         {0: 'batch'},
-            'rotary_cos':     {1: 'ids_len'},
-            'rotary_sin':     {1: 'ids_len'},
-            'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'}
-        }
+        dynamic_axes = add_batch_dynamic_axes(
+            {
+                **kv_axes,
+                'hidden_states':  {1: 'ids_len'},
+                'rotary_cos':     {1: 'ids_len'},
+                'rotary_sin':     {1: 'ids_len'},
+                'attention_mask': {3: 'ids_len', 4: 'kv_seq_len'},
+            },
+            'hidden_states',
+            'logits',
+        )
 
         for i in range(deepstack_features_len):
             name = f'deepstack_features_{i}'
@@ -4358,10 +4247,9 @@ if DO_EXPORT:
             onnx_model_Greedy,
             input_names=['logits'],
             output_names=['max_logits_idx'],
-            dynamic_axes={
-                'logits':         {0: 'batch'},
-                'max_logits_idx': {0: 'batch'}
-            },
+            dynamic_axes=add_batch_dynamic_axes(
+                {}, 'logits', 'max_logits_idx'
+            ),
             opset_version=OPSET,
             dynamo=False
         )
@@ -4372,94 +4260,19 @@ if DO_EXPORT:
             onnx_model_Penalty_Greedy,
             input_names=['logits', 'save_id_in'],
             output_names=['max_logits_idx', 'save_id_out'],
-            dynamic_axes={
-                'logits':         {0: 'batch'},
-                'save_id_in':     {0: 'batch', 1: 'history_len'},
-                'save_id_out':    {0: 'batch', 1: 'history_len'},
-                'max_logits_idx': {0: 'batch'}
-            },
+            dynamic_axes=add_batch_dynamic_axes(
+                {
+                    'save_id_in':  {1: 'history_len'},
+                    'save_id_out': {1: 'history_len'},
+                },
+                'logits',
+                'save_id_in',
+                'save_id_out',
+                'max_logits_idx',
+            ),
             opset_version=OPSET,
             dynamo=False
         )
-
-        # ══════════════════════════════════════════════════════════════════
-        # Export: First Beam Search
-        # ══════════════════════════════════════════════════════════════════
-        num_layers_beam = num_layers * len(kv_specs)
-        # First beam uses single-batch KV (batch dim = 1)
-        kv_tensors_Greedy = {k: v[[0]] for k, v in kv_tensors.items()}
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors_Greedy)
-        # Remove output axes — first beam outputs have variable batch, not tracked here
-        kv_input_only_axes = {k: v for k, v in kv_axes.items() if k not in kv_out_names}
-
-        torch.onnx.export(
-            FIRST_BEAM_SEARCH(num_layers_beam),
-            tuple(kv_ins + [logits[[0]], save_id_in, beam_size]),
-            onnx_model_First_Beam,
-            input_names=kv_in_names + ['logits', 'save_id_in', 'beam_size'],
-            output_names=(['out_' + n[3:] for n in kv_in_names] + ['save_id_out', 'top_beam_prob', 'top_beam_indices', 'max_logits_idx']),
-            dynamic_axes={
-                **kv_input_only_axes,
-                'logits':           {0: 'batch'},
-                'save_id_in':       {0: 'batch', 1: 'history_len'},
-                'top_beam_prob':    {0: 'batch'},
-                'top_beam_indices': {0: 'batch'},
-                'max_logits_idx':   {0: 'batch'},
-                'save_id_out':      {0: 'batch', 1: 'history_len'}
-            },
-            opset_version=OPSET,
-            dynamo=False
-        )
-
-        # ══════════════════════════════════════════════════════════════════
-        # Export: Second Beam Search
-        # ══════════════════════════════════════════════════════════════════
-        kv_ins, kv_in_names, kv_out_names, kv_axes = get_kv_io(kv_tensors)
-        previous_prob = torch.zeros((batch_size, 1), dtype=torch.float32)
-        topK = torch.tensor([TOP_K], dtype=torch.int64)
-
-        torch.onnx.export(
-            SECOND_BEAM_SEARCH(num_layers_beam),
-            tuple(kv_ins + [logits, save_id_in, previous_prob, beam_size, topK]),
-            onnx_model_Second_Beam,
-            input_names=kv_in_names + ['logits', 'save_id_in', 'previous_prob', 'beam_size', 'topK'],
-            output_names=kv_out_names + ['save_id_out', 'top_beam_prob', 'top_beam_indices', 'max_logits_idx'],
-            dynamic_axes={
-                **kv_axes,
-                'logits':           {0: 'batch'},
-                'save_id_in':       {0: 'batch', 1: 'history_len'},
-                'previous_prob':    {0: 'batch'},
-                'save_id_out':      {0: 'batch', 1: 'history_len'},
-                'top_beam_prob':    {0: 'batch'},
-                'top_beam_indices': {0: 'batch'},
-                'max_logits_idx':   {0: 'batch'}
-            },
-            opset_version=OPSET,
-            dynamo=False
-        )
-        del kv_tensors_Greedy, previous_prob, topK
-
-        gather_dynamic_axes = {}
-        for input_name, output_name in zip(kv_in_names, kv_out_names):
-            gather_dynamic_axes[input_name] = dict(kv_axes[input_name])
-            output_axes = {
-                axis: axis_name
-                for axis, axis_name in kv_axes[output_name].items()
-                if axis != 0
-            }
-            if output_axes:
-                gather_dynamic_axes[output_name] = output_axes
-        torch.onnx.export(
-            GATHER_FIRST_BEAM(),
-            tuple(kv_ins),
-            onnx_model_Gather_FirstBeam,
-            input_names=kv_in_names,
-            output_names=kv_out_names,
-            dynamic_axes=gather_dynamic_axes,
-            opset_version=OPSET,
-            dynamo=False,
-        )
-        del gather_dynamic_axes
 
         # ══════════════════════════════════════════════════════════════════
         # Export: Apply Penalty
@@ -4473,11 +4286,12 @@ if DO_EXPORT:
             onnx_model_Penalty,
             input_names=['logits_in', 'save_id_in', 'penalty_value', 'penalty_range'],
             output_names=['logits_out'],
-            dynamic_axes={
-                'logits_in':  {0: 'batch'},
-                'save_id_in': {0: 'batch', 1: 'history_len'},
-                'logits_out': {0: 'batch'}
-            },
+            dynamic_axes=add_batch_dynamic_axes(
+                {'save_id_in': {1: 'history_len'}},
+                'logits_in',
+                'save_id_in',
+                'logits_out',
+            ),
             opset_version=OPSET,
             dynamo=False
         )
@@ -4492,10 +4306,9 @@ if DO_EXPORT:
             onnx_model_Argmax,
             input_names=['logits'],
             output_names=['max_logits_idx'],
-            dynamic_axes={
-                'logits':         {0: 'batch'},
-                'max_logits_idx': {0: 'batch'}
-            },
+            dynamic_axes=add_batch_dynamic_axes(
+                {}, 'logits', 'max_logits_idx'
+            ),
             opset_version=OPSET,
             dynamo=False
         )
@@ -4601,9 +4414,16 @@ if DO_EXPORT:
                 cat_b_inputs.append(tensor.clone())
                 cat_b_names.append(b_name)
                 cat_output_names.append(output_name)
-                cat_axes[a_name] = {0: 'batch_size', dim: 'prefix_len'}
-                cat_axes[b_name] = {0: 'batch_size', dim: 'suffix_len'}
-                cat_axes[output_name] = {0: 'batch_size', dim: 'concat_len'}
+                cat_axes[a_name] = {dim: 'prefix_len'}
+                cat_axes[b_name] = {dim: 'suffix_len'}
+                cat_axes[output_name] = {dim: 'concat_len'}
+                add_batch_dynamic_axes(
+                    cat_axes,
+                    a_name,
+                    b_name,
+                    output_name,
+                    axis_name='batch_size',
+                )
         torch.onnx.export(
             KV_CONCAT(num_layers, head_dim).eval(),
             tuple(cat_a_inputs + cat_b_inputs),
@@ -4611,34 +4431,6 @@ if DO_EXPORT:
             input_names=cat_a_names + cat_b_names,
             output_names=cat_output_names,
             dynamic_axes=cat_axes,
-            opset_version=OPSET,
-            dynamo=False,
-        )
-
-        single_kv_tensors = {name: tensor[[0]] for name, tensor in kv_tensors.items()}
-        beam_prefix_inputs, beam_prefix_names = [], []
-        beam_suffix_inputs, beam_suffix_names = [], []
-        beam_output_names, beam_axes = [], {}
-        for name, dim in kv_specs:
-            for layer_index in range(num_layers):
-                prefix_name = f'in_prefix_{name}_{layer_index}'
-                suffix_name = f'in_beam_{name}_{layer_index}'
-                output_name = f'out_{name}_{layer_index}'
-                beam_prefix_inputs.append(single_kv_tensors[name])
-                beam_prefix_names.append(prefix_name)
-                beam_suffix_inputs.append(kv_tensors[name])
-                beam_suffix_names.append(suffix_name)
-                beam_output_names.append(output_name)
-                beam_axes[prefix_name] = {dim: 'prefix_len'}
-                beam_axes[suffix_name] = {0: 'beam_size', dim: 'suffix_len'}
-                beam_axes[output_name] = {0: 'beam_size', dim: 'concat_len'}
-        torch.onnx.export(
-            KV_CONCAT(num_layers, head_dim, first_beam=True).eval(),
-            tuple(beam_prefix_inputs + beam_suffix_inputs),
-            onnx_model_KV_Concat_FirstBeam,
-            input_names=beam_prefix_names + beam_suffix_names,
-            output_names=beam_output_names,
-            dynamic_axes=beam_axes,
             opset_version=OPSET,
             dynamo=False,
         )
@@ -4658,12 +4450,14 @@ if DO_EXPORT:
                     inputs.append(tensor)
                     input_names.append(input_name)
                     output_names.append(output_name)
-                    axes[input_name] = {
-                        0: 'batch_size', sequence_axis: 'history_len'
-                    }
-                    axes[output_name] = {
-                        0: 'batch_size', sequence_axis: 'history_len'
-                    }
+                    axes[input_name] = {sequence_axis: 'history_len'}
+                    axes[output_name] = {sequence_axis: 'history_len'}
+                    add_batch_dynamic_axes(
+                        axes,
+                        input_name,
+                        output_name,
+                        axis_name='batch_size',
+                    )
             return inputs, input_names, output_names, axes
 
         rope_shift_amount = torch.tensor([5], dtype=torch.int64)
@@ -4732,10 +4526,8 @@ if DO_EXPORT:
             onnx_model_Rotary_Video_Prefill, onnx_model_Rotary_Video_Decode,
             onnx_model_Rotary_Text_Prefill, onnx_model_Rotary_Text_Decode,
             onnx_model_Main, onnx_model_Greedy, onnx_model_Penalty_Greedy,
-            onnx_model_TopKTopP_Sampling, onnx_model_First_Beam,
-            onnx_model_Second_Beam, onnx_model_Penalty, onnx_model_Argmax,
+            onnx_model_TopKTopP_Sampling, onnx_model_Penalty, onnx_model_Argmax,
             onnx_model_KV_Slice, onnx_model_KV_Split2, onnx_model_KV_Concat,
-            onnx_model_KV_Concat_FirstBeam, onnx_model_Gather_FirstBeam,
             onnx_model_Rope_Shift,
         ]
         for metadata_target in metadata_targets:
@@ -4772,10 +4564,6 @@ if DO_EXPORT:
             kv_ins, kv_in_names, kv_out_names, kv_axes,
             cat_a_inputs, cat_a_names, cat_b_inputs, cat_b_names,
             cat_output_names, cat_axes,
-            single_kv_tensors,
-            beam_prefix_inputs, beam_prefix_names,
-            beam_suffix_inputs, beam_suffix_names,
-            beam_output_names, beam_axes,
             rope_specs, rope_inputs, rope_input_names,
             rope_output_names, rope_axes, rope_shift_amount,
             rope_shift_module, metadata_marker,
@@ -5095,11 +4883,9 @@ in_name_Main  = get_in_names(ort_session_Main)
 out_name_Main = get_out_names(ort_session_Main)
 in_meta_Main  = ort_session_Main._inputs_meta
 
-# Derived index offsets for beam/greedy extra inputs
+# Derived index offsets
 num_keys_values_Main        = len(out_name_Main)   - 1
 num_keys_values_Main_plus_1 = num_keys_values_Main + 1
-num_keys_values_Main_plus_2 = num_keys_values_Main + 2
-num_keys_values_Main_plus_3 = num_keys_values_Main + 3
 
 # Main model non-KV input indices
 # Layout: [KV_caches..., hidden_states, deepstack_0..N-1, rotary_cos, rotary_sin, attention_mask]
@@ -5174,19 +4960,6 @@ else:
 past_keys_Main   = create_ort_with_shape((1, in_meta_Main[0].shape[1],                    1, in_meta_Main[0].shape[3],          0), kv_dtype_Main, kv_device, DEVICE_ID)
 past_values_Main = create_ort_with_shape((1, in_meta_Main[num_layers_Main].shape[1], 1, 0, in_meta_Main[num_layers_Main].shape[4]), kv_dtype_Main, kv_device, DEVICE_ID)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# DECODING STRATEGY VALIDATION
-# ══════════════════════════════════════════════════════════════════════════════
-if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
-    TOP_K = BEAM_SIZE
-
-if TOP_K < 2 or BEAM_SIZE < 2:
-    USE_BEAM_SEARCH = False
-    print("\nInappropriate Beam Search setting detected. Falling back to Greedy Search.")
-
-if not USE_BEAM_SEARCH:
-    BEAM_SIZE = 1
 
 USE_PENALTY = (REPEAT_PENALTY != 1.0)
 
@@ -5354,15 +5127,13 @@ for INPUT_MODE, current_query in test_modes:
     input_ids        = onnxruntime.OrtValue.ortvalue_from_numpy(tokens,   device_type, DEVICE_ID)
     ids_len          = create_ort_with_data([num_prefill], np.int64, device_type, DEVICE_ID)
     init_history_len = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
-    topK             = create_ort_with_data([TOP_K],       np.int64, device_type, DEVICE_ID)
-    beam_size        = create_ort_with_data([BEAM_SIZE],   np.int64, device_type, DEVICE_ID)
 
     # --- Decode-phase placeholder buffers (reused every step) ---
     attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                             hidden_dtype_Main, device_type, DEVICE_ID)
     rotary_cos_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[0].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
     rotary_sin_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[1].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
-    hidden_states_buf  = create_ort_with_shape((BEAM_SIZE, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
-    save_id_buf        = create_ort_with_shape((BEAM_SIZE, 0),                                              np.int32,          device_type, DEVICE_ID)
+    hidden_states_buf  = create_ort_with_shape((1, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)
+    save_id_buf        = create_ort_with_shape((1, 0),                                              np.int32,          device_type, DEVICE_ID)
 
     # --- Init deepstack features (zeros for decode and text-only mode) ---
     init_deepstack_features = [create_ort_with_shape((1, 1, ort_session_Vision._outputs_meta[0].shape[2]), vision_dtype, device_type, DEVICE_ID)] * deepstack_features_len  # Same memory address buff
@@ -5372,56 +5143,26 @@ for INPUT_MODE, current_query in test_modes:
 
     # --- Logits & token-index buffers ---
     prefill_logits_buf = create_ort_with_shape((1, vocab_size),         hidden_dtype_Main, device_type, DEVICE_ID)
-    decode_logits_buf  = create_ort_with_shape((BEAM_SIZE, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
+    decode_logits_buf  = create_ort_with_shape((1, vocab_size), hidden_dtype_Main, device_type, DEVICE_ID)
     max_idx_buf        = create_ort_with_shape((1, 1),                  np.int32,          device_type, DEVICE_ID)
 
 
     # ══════════════════════════════════════════════════════════════════════════════
-    # DECODE HEAD SESSIONS (Beam Search OR Greedy/Argmax)
+    # DECODE HEAD SESSIONS
     # ══════════════════════════════════════════════════════════════════════════════
-    if USE_BEAM_SEARCH:
-        print("\nBeam Search does not display immediate decoding results...")
+    # --- Greedy + generated-ID accumulation ---
+    ort_session_Greedy = create_session(onnx_model_Penalty_Greedy, **packed_settings)
+    binding_Greedy     = ort_session_Greedy.io_binding()
+    in_name_Greedy     = get_in_names(ort_session_Greedy)
+    out_name_Greedy    = get_out_names(ort_session_Greedy)
+    binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id_buf)
 
-        # --- First Beam ---
-        ort_session_First_Beam     = create_session(onnx_model_First_Beam, **packed_settings)
-        binding_First_Beam         = ort_session_First_Beam.io_binding()
-        in_name_First_Beam         = get_in_names(ort_session_First_Beam)
-        out_name_First_Beam        = get_out_names(ort_session_First_Beam)
-        in_name_First_Beam_parts   = in_name_First_Beam[:num_keys_values_Main_plus_1]
-        out_name_First_Beam_parts  = out_name_First_Beam[:num_keys_values_Main_plus_1]
-        out_name_First_Beam_others = out_name_First_Beam[num_keys_values_Main_plus_1:]
-
-        # --- Second Beam ---
-        ort_session_Second_Beam     = create_session(onnx_model_Second_Beam, **packed_settings)
-        binding_Second_Beam         = ort_session_Second_Beam.io_binding()
-        in_name_Second_Beam         = get_in_names(ort_session_Second_Beam)
-        out_name_Second_Beam        = get_out_names(ort_session_Second_Beam)
-        in_name_Second_Beam_parts   = in_name_Second_Beam[:num_keys_values_Main_plus_1]
-        out_name_Second_Beam_parts  = out_name_Second_Beam[:num_keys_values_Main_plus_1]
-        out_name_Second_Beam_others = out_name_Second_Beam[num_keys_values_Main_plus_1:]
-
-        # --- Beam-specific buffers ---
-        beam_ids_buf   = create_ort_with_shape((BEAM_SIZE, 1), np.int32,          device_type, DEVICE_ID)
-        beam_score_buf = create_ort_with_shape((BEAM_SIZE, 1), hidden_dtype_Main, device_type, DEVICE_ID)
-
-        # --- Static beam bindings ---
-        bind_ort_in_buf(binding_First_Beam, in_name_First_Beam[num_keys_values_Main_plus_1: num_keys_values_Main_plus_3], [save_id_buf, beam_size])
-        bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam[num_keys_values_Main_plus_3:], [beam_size, topK])
-
-    else:
-        # --- Greedy ---
-        ort_session_Greedy = create_session(onnx_model_Penalty_Greedy, **packed_settings)
-        binding_Greedy     = ort_session_Greedy.io_binding()
-        in_name_Greedy     = get_in_names(ort_session_Greedy)
-        out_name_Greedy    = get_out_names(ort_session_Greedy)
-        binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id_buf)
-
-        # --- Argmax ---
-        ort_session_Argmax = create_session(onnx_model_Argmax, **packed_settings)
-        binding_Argmax     = ort_session_Argmax.io_binding()
-        in_name_Argmax     = get_in_names(ort_session_Argmax)[0]
-        out_name_Argmax    = get_out_names(ort_session_Argmax)[0]
-        save_id_numpy      = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
+    # --- Plain greedy argmax ---
+    ort_session_Argmax = create_session(onnx_model_Argmax, **packed_settings)
+    binding_Argmax     = ort_session_Argmax.io_binding()
+    in_name_Argmax     = get_in_names(ort_session_Argmax)[0]
+    out_name_Argmax    = get_out_names(ort_session_Argmax)[0]
+    save_id_numpy      = np.zeros(MAX_SEQ_LEN, dtype=np.int32)
 
 
     # ══════════════════════════════════════════════════════════════════════════════
@@ -5773,9 +5514,7 @@ for INPUT_MODE, current_query in test_modes:
         binding_Penalty.bind_ortvalue_output(out_name_Penalty,  prefill_logits_buf)
 
     # --- Step 8: Bind decode head inputs/outputs to prefill logits buffer ---
-    if USE_BEAM_SEARCH:
-        binding_First_Beam.bind_ortvalue_input(in_name_First_Beam[num_keys_values_Main], prefill_logits_buf)
-    elif USE_PENALTY:
+    if USE_PENALTY:
         binding_Greedy.bind_ortvalue_input(in_name_Greedy[0],   prefill_logits_buf)
         binding_Greedy.bind_ortvalue_output(out_name_Greedy[0], max_idx_buf)
     else:
@@ -5801,61 +5540,30 @@ for INPUT_MODE, current_query in test_modes:
             binding_Penalty.bind_ortvalue_input(in_name_Penalty[1], save_id)
             run(ort_session_Penalty, binding_Penalty)
 
-        # ── 3. Token Selection ───────────────────────────────────────────────
-        if USE_BEAM_SEARCH:
-            # ── 3a. Beam Search ─────────────────────────────────────────────
-            if is_prefill_step:
-                # First beam step: expand single-beam KV into BEAM_SIZE beams
-                bind_ort_in_buf(binding_First_Beam, in_name_First_Beam_parts, outputs_Main)
-                bind_ort_out(binding_First_Beam, out_name_First_Beam_parts, _ort_device_type)
-                bind_ort_out_buf(binding_First_Beam, out_name_First_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
-                run(ort_session_First_Beam, binding_First_Beam)
-                outputs_Beam = binding_First_Beam.get_outputs()
-            else:
-                # Subsequent beam steps: prune + expand
-                bind_ort_in_buf(binding_Second_Beam, in_name_Second_Beam_parts, outputs_Main)
-                bind_ort_out(binding_Second_Beam, out_name_Second_Beam_parts, _ort_device_type)
-                if num_decode < 2:
-                    binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_2], beam_score_buf)
-                    bind_ort_out_buf(binding_Second_Beam, out_name_Second_Beam_others, [beam_score_buf, beam_ids_buf, max_idx_buf])
-                run(ort_session_Second_Beam, binding_Second_Beam)
-                outputs_Beam = binding_Second_Beam.get_outputs()
-
-            # Stop-token check
-            max_logits_idx = max_idx_buf.numpy().flat[0]
-            if max_logits_idx in STOP_TOKEN_SET:
-                break
-
-            # Feed beam KV + save_id back into Main for next step
-            save_id = outputs_Beam[num_keys_values_Main]
-            bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Beam)
-            binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main_plus_1], save_id)
-
+        # ── 3. Greedy Token Selection ────────────────────────────────────────
+        if USE_PENALTY:
+            binding_Greedy._iobinding.bind_output(out_name_Greedy[1], _ort_device_type)
+            run(ort_session_Greedy, binding_Greedy)
+            save_id = binding_Greedy.get_outputs()[1]
         else:
-            # ── 3b. Greedy / Argmax ─────────────────────────────────────────
-            if USE_PENALTY:
-                binding_Greedy._iobinding.bind_output(out_name_Greedy[1], _ort_device_type)
-                run(ort_session_Greedy, binding_Greedy)
-                save_id = binding_Greedy.get_outputs()[1]
-            else:
-                run(ort_session_Argmax, binding_Argmax)
+            run(ort_session_Argmax, binding_Argmax)
 
-            # Stop-token check
-            max_logits_idx = max_idx_buf.numpy().flat[0]
-            if max_logits_idx in STOP_TOKEN_SET:
-                break
+        # Stop-token check
+        max_logits_idx = max_idx_buf.numpy().flat[0]
+        if max_logits_idx in STOP_TOKEN_SET:
+            break
 
-            # Track generated token IDs
-            if USE_PENALTY:
-                binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id)
-            else:
-                save_id_numpy[num_decode] = max_logits_idx
+        # Track generated token IDs
+        if USE_PENALTY:
+            binding_Greedy.bind_ortvalue_input(in_name_Greedy[1], save_id)
+        else:
+            save_id_numpy[num_decode] = max_logits_idx
 
-            # Feed greedy KV outputs back into Main
-            bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Main)
+        # Feed greedy KV outputs back into Main
+        bind_ort_in_buf(binding_Main, in_name_Main_kv, outputs_Main)
 
-            # Streaming print
-            print(tokenizer.decode(max_logits_idx), end="", flush=True)
+        # Streaming print
+        print(tokenizer.decode(max_logits_idx), end="", flush=True)
 
         # ── 4. Re-bind Main KV outputs (ORT allocates fresh each step) ───────
         bind_ort_out(binding_Main, out_name_Main_kv, _ort_device_type)
@@ -5880,10 +5588,7 @@ for INPUT_MODE, current_query in test_modes:
                 binding_Penalty.bind_ortvalue_output(out_name_Penalty,  decode_logits_buf)
 
             # Switch decode head to decode logits buffer
-            if USE_BEAM_SEARCH:
-                binding_Second_Beam.bind_ortvalue_input(in_name_Second_Beam[num_keys_values_Main], decode_logits_buf)
-                binding_Embed.bind_ortvalue_input(in_name_Embed, beam_ids_buf)
-            elif USE_PENALTY:
+            if USE_PENALTY:
                 binding_Greedy.bind_ortvalue_input(in_name_Greedy[0], decode_logits_buf)
             else:
                 binding_Argmax.bind_ortvalue_input(in_name_Argmax, decode_logits_buf)
@@ -5923,7 +5628,7 @@ for INPUT_MODE, current_query in test_modes:
     # Overall speed
     overall_tokens_per_second = (num_decode + 1) / total_elapsed if total_elapsed > 0 else 0.0
 
-    if USE_PENALTY or USE_BEAM_SEARCH:
+    if USE_PENALTY:
         result = tokenizer.decode(save_id.numpy().flat[:num_decode], skip_special_tokens=True)
     else:
         result = tokenizer.decode(save_id_numpy[:num_decode], skip_special_tokens=True)

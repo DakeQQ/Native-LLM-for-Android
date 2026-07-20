@@ -58,14 +58,12 @@ TEST_VIDEO = str(_SCRIPT_DIR.parent / "test_video_8s.mp4")
 TEST_QUERY = ["Describe this image.", "Describe this video."]
 ENABLE_THINKING = False
 
-USE_BEAM_SEARCH = False
 USE_SAMPLING = False
 TEMPERATURE = 0.8
 TOP_P = 0.95
 REPEAT_PENALTY = 1.0
 PENALTY_RANGE = 20
 TOP_K = 3
-BEAM_SIZE = 3
 
 ORT_LOG = False
 ORT_FP16 = False
@@ -74,14 +72,6 @@ MAX_THREADS = 0
 DEVICE_ID = 0
 
 TOP_K = max(1, TOP_K)
-if USE_SAMPLING:
-    USE_BEAM_SEARCH = False
-if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
-    TOP_K = BEAM_SIZE
-if TOP_K < 2 or BEAM_SIZE < 2:
-    USE_BEAM_SEARCH = False
-if not USE_BEAM_SEARCH:
-    BEAM_SIZE = 1
 USE_PENALTY = (REPEAT_PENALTY != 1.0) and not USE_SAMPLING
 
 
@@ -306,12 +296,9 @@ for _modality in ("text", "image", "video"):
     _DEFAULT_MODEL_FILE_NAMES.update({
         f"{_modality}_prefill_greedy": f"LLM_{_title}PrefillGreedy.onnx",
         f"{_modality}_prefill_penalty_greedy": f"LLM_{_title}PrefillPenaltyGreedy.onnx",
-        f"{_modality}_prefill_beam": f"LLM_{_title}PrefillBeamFirst.onnx",
         f"{_modality}_prefill_sampling": f"LLM_{_title}PrefillSampling.onnx",
         f"{_modality}_decode_greedy": f"LLM_{_title}DecodeGreedy.onnx",
         f"{_modality}_decode_penalty_greedy": f"LLM_{_title}DecodePenaltyGreedy.onnx",
-        f"{_modality}_decode_beam": f"LLM_{_title}DecodeBeamNext.onnx",
-        f"{_modality}_decode_penalty_beam": f"LLM_{_title}DecodePenaltyBeamNext.onnx",
         f"{_modality}_decode_sampling": f"LLM_{_title}DecodeSampling.onnx",
     })
 
@@ -527,10 +514,6 @@ def _save_id_input_names(strategy, is_decode, inputs):
         candidates = []
     elif strategy == "sampling":
         candidates = ["sampling_previous_ids"]
-    elif strategy == "beam" or (strategy == "penalty_beam" and not is_decode):
-        candidates = ["beam_save_id_in"]
-    elif strategy == "penalty_beam":
-        candidates = ["penalty_save_id_in", "beam_save_id_in"]
     elif strategy == "penalty_greedy":
         candidates = ["penalty_greedy_save_id_in"] if not is_decode else ["penalty_save_id_in", "penalty_greedy_save_id_in"]
     else:
@@ -565,21 +548,17 @@ def plan_merged_io(sess, strategy, state_count, is_decode):
     state_out = outputs[:state_count]
     if any(not name.startswith("in_") for name in state_in):
         raise RuntimeError(f"Merged graph state inputs are not leading as expected: {state_in[:3]}")
-    if any(not (name.startswith("out_") or name.startswith("beam_out_")) for name in state_out):
+    if any(not name.startswith("out_") for name in state_out):
         raise RuntimeError(f"Merged graph state outputs are not leading as expected: {state_out[:3]}")
 
     tail = outputs[state_count:]
-    if strategy in ("beam", "penalty_beam"):
-        save_id_out, beam_prob_out, beam_idx_out, max_idx_out, kv_seq_out = tail[:5]
-    elif strategy == "greedy":
+    if strategy == "greedy":
         max_idx_out, kv_seq_out = tail[:2]
-        save_id_out = beam_prob_out = beam_idx_out = None
+        save_id_out = None
     elif strategy == "sampling":
         max_idx_out, save_id_out, kv_seq_out = tail[:3]
-        beam_prob_out = beam_idx_out = None
     else:
         max_idx_out, save_id_out, kv_seq_out = tail[:3]
-        beam_prob_out = beam_idx_out = None
 
     token_in = next((name for name in ("embed_input_ids", "input_ids") if name in inputs), None)
     if token_in is None:
@@ -600,9 +579,6 @@ def plan_merged_io(sess, strategy, state_count, is_decode):
         "kv_seq_in": kv_seq_in,
         "save_id_in": _save_id_input_names(strategy, is_decode, set(inputs)),
         "save_id_out": save_id_out,
-        "beam_idx_out": beam_idx_out,
-        "beam_prob_out": beam_prob_out,
-        "beam_prev_prob_in": "beam_previous_prob" if strategy in ("beam", "penalty_beam") and is_decode else None,
         "vision_inputs": _vision_input_map(inputs),
     }
 
@@ -610,16 +586,12 @@ def plan_merged_io(sess, strategy, state_count, is_decode):
 def _resolve_strategy():
     if USE_SAMPLING:
         return "sampling"
-    if USE_BEAM_SEARCH and TOP_K >= 2 and BEAM_SIZE >= 2:
-        return "penalty_beam" if USE_PENALTY else "beam"
     if USE_PENALTY:
         return "penalty_greedy"
     return "greedy"
 
 
 def _graph_role(modality, phase, strategy):
-    if phase == "prefill" and strategy == "penalty_beam":
-        strategy = "beam"
     return f"{modality}_{phase}_{strategy}"
 
 
@@ -630,17 +602,12 @@ def _generation_limit(prompt_tokens):
     return limit
 
 
-def _decode_static_inputs(strategy, beam_size, input_dtypes):
+def _decode_static_inputs(strategy, input_dtypes):
     static_inputs = []
-    if strategy in ("penalty_greedy", "penalty_beam"):
+    if strategy == "penalty_greedy":
         static_inputs.extend([
             ("penalty_penalty_value", _ov(np.array([REPEAT_PENALTY], input_dtypes["penalty_penalty_value"]))),
             ("penalty_penalty_range", _ov(np.array([PENALTY_RANGE], input_dtypes["penalty_penalty_range"]))),
-        ])
-    if strategy in ("beam", "penalty_beam"):
-        static_inputs.extend([
-            ("beam_beam_size", _ov(np.array([beam_size], input_dtypes["beam_beam_size"]))),
-            ("beam_topK", _ov(np.array([TOP_K], input_dtypes["beam_topK"]))),
         ])
     if strategy == "sampling":
         static_inputs.extend([
@@ -716,7 +683,6 @@ def run_merged_iobinding(mode, query, vision_outputs=None):
     decode_sess = create_merged_session(decode_path, shared_path)
     print(f"Usable Providers: {decode_sess.get_providers()}")
 
-    beam_size = BEAM_SIZE if strategy in ("beam", "penalty_beam") else 1
     state_count = int(model_meta["kv_num_tensors"]) + 2 * int(model_meta["num_linear_attention_layers"])
     prefill_io_plan = plan_merged_io(prefill_sess, strategy, state_count, is_decode=False)
     decode_io_plan = plan_merged_io(decode_sess, strategy, state_count, is_decode=True)
@@ -769,14 +735,9 @@ def run_merged_iobinding(mode, query, vision_outputs=None):
             )
         prefill_binding.bind_ortvalue_input(input_name, vision_outputs[output_name])
     for name in prefill_io_plan["state_in"]:
-        # Prefill always runs a SINGLE hypothesis (batch 1); the beam-first head replicates
-        # the resulting KV/linear state to beam_size on output. Binding the past-state inputs
-        # at beam_size makes Main's KV/conv-state concat mismatch the batch-1 current step.
         bind_prefill_input(name, _zero_from_meta(prefill_input_meta_by_name[name], batch_size=1), kv_device)
     for name in prefill_io_plan["save_id_in"]:
-        bind_prefill_input(name, np.zeros((beam_size, 0)))
-    if "beam_beam_size" in prefill_io_plan["in_names"]:
-        bind_prefill_input("beam_beam_size", np.array([beam_size]))
+        bind_prefill_input(name, np.zeros((1, 0)))
     if strategy == "sampling":
         bind_prefill_input("sampling_temperature", np.array([TEMPERATURE]))
         bind_prefill_input("sampling_top_k", np.array([TOP_K]))
@@ -790,15 +751,12 @@ def run_merged_iobinding(mode, query, vision_outputs=None):
     # Outputs are bound in out_names order, so get_outputs() aligns 1:1 with out_names. Gather
     # positionally (integer index / list slice) instead of rebuilding a name->value dict: the
     # KV + linear-attention state block leads the outputs ([0, state_count)); tails are at fixed offsets.
-    is_beam = strategy in ("beam", "penalty_beam")
     prefill_outputs = prefill_binding.get_outputs()
     prefill_out_names = prefill_io_plan["out_names"]
-    prefill_next_token_output = prefill_io_plan["beam_idx_out"] if is_beam else prefill_io_plan["max_idx_out"]
     prefill_max_idx_pos = prefill_out_names.index(prefill_io_plan["max_idx_out"])
     prefill_kv_seq_pos = prefill_out_names.index(prefill_io_plan["kv_seq_out"])
-    prefill_next_token_pos = prefill_out_names.index(prefill_next_token_output)
+    prefill_next_token_pos = prefill_max_idx_pos
     prefill_save_id_pos = prefill_out_names.index(prefill_io_plan["save_id_out"]) if prefill_io_plan["save_id_out"] else -1
-    prefill_beam_prob_pos = prefill_out_names.index(prefill_io_plan["beam_prob_out"]) if is_beam else -1
 
     # Hoist every decode-graph plan field into a local so the per-token loop touches no dict.
     decode_out_names = decode_io_plan["out_names"]
@@ -806,37 +764,28 @@ def run_merged_iobinding(mode, query, vision_outputs=None):
     decode_kv_seq_in = decode_io_plan["kv_seq_in"]
     decode_state_in = decode_io_plan["state_in"]
     decode_save_id_in = decode_io_plan["save_id_in"]
-    decode_beam_prev_prob_in = decode_io_plan["beam_prev_prob_in"]
-    decode_next_token_output = decode_io_plan["beam_idx_out"] if is_beam else decode_io_plan["max_idx_out"]
     decode_max_idx_pos = decode_out_names.index(decode_io_plan["max_idx_out"])
     decode_kv_seq_pos = decode_out_names.index(decode_io_plan["kv_seq_out"])
-    decode_next_token_pos = decode_out_names.index(decode_next_token_output)
+    decode_next_token_pos = decode_max_idx_pos
     decode_save_id_pos = decode_out_names.index(decode_io_plan["save_id_out"]) if decode_io_plan["save_id_out"] else -1
-    decode_beam_prob_pos = decode_out_names.index(decode_io_plan["beam_prob_out"]) if is_beam else -1
     decode_output_meta_by_name = {item.name: item for item in decode_sess.get_outputs()}
     decode_dynamic_out_names = _decode_dynamic_output_names(decode_io_plan, decode_output_meta_by_name)
 
     generated = []
-    final_saved_token_ids = None
     selected_token_id = prefill_outputs[prefill_max_idx_pos].numpy().flat[0]
     next_token_tensor = prefill_outputs[prefill_next_token_pos]
     cached_state_tensors = prefill_outputs[:state_count]
     kv_sequence_length = prefill_outputs[prefill_kv_seq_pos]
     saved_token_ids = prefill_outputs[prefill_save_id_pos] if prefill_save_id_pos >= 0 else None
-    beam_scores = prefill_outputs[prefill_beam_prob_pos] if is_beam else None
     generated_count = 0
 
     print(f"\nTest Question: {query}\nLLM Answering:")
-    if strategy in ("beam", "penalty_beam"):
-        final_saved_token_ids = saved_token_ids
-        if selected_token_id not in STOP_TOKEN_SET and generated_count < generate_limit:
-            generated_count += 1
-    elif selected_token_id not in STOP_TOKEN_SET and generated_count < generate_limit:
+    if selected_token_id not in STOP_TOKEN_SET and generated_count < generate_limit:
         generated.append(selected_token_id)
         generated_count += 1
         print(tokenizer.decode(selected_token_id), end="", flush=True)
 
-    static_inputs = _decode_static_inputs(strategy, beam_size, decode_input_dtypes)
+    static_inputs = _decode_static_inputs(strategy, decode_input_dtypes)
     decode_bindings = [decode_sess.io_binding(), decode_sess.io_binding()]
     for binding in decode_bindings:
         for name, value in static_inputs:
@@ -846,7 +795,7 @@ def run_merged_iobinding(mode, query, vision_outputs=None):
     # Two-binding ping-pong: each step's device-auto outputs feed the *other* binding on the
     # next step. KV/linear state and saved_token_ids GROW every step, so ORT re-allocates them
     # (fresh handle) and they -- plus their device outputs -- must be rebound every step.
-    # kv_seq_len / next_token / beam_prob are fixed-shape outputs bound once, so each binding
+    # kv_seq_len / next_token are fixed-shape outputs bound once, so each binding
     # keeps reading the *same* peer buffer (overwritten in place); their source only shifts
     # while the ping-pong warms up (prefill -> peer), so bind them on a binding's first two
     # uses and skip the otherwise-redundant per-step rebind afterward.
@@ -861,8 +810,6 @@ def run_merged_iobinding(mode, query, vision_outputs=None):
             control_rebinds_left[binding_index] -= 1
             binding.bind_ortvalue_input(decode_kv_seq_in, kv_sequence_length)
             binding.bind_ortvalue_input(decode_token_in, next_token_tensor)
-            if decode_beam_prev_prob_in is not None:
-                binding.bind_ortvalue_input(decode_beam_prev_prob_in, beam_scores)
         for name, value in zip(decode_state_in, cached_state_tensors):
             binding.bind_ortvalue_input(name, value)
         for name in decode_save_id_in:
@@ -875,32 +822,20 @@ def run_merged_iobinding(mode, query, vision_outputs=None):
         selected_token_id = decode_outputs[decode_max_idx_pos].numpy().flat[0]
         if decode_save_id_pos != -1:
             saved_token_ids = decode_outputs[decode_save_id_pos]
-        # kv_seq_len / next_token / beam_prob feed ONLY the warm-up rebinds at the top of the
+        # kv_seq_len / next_token feed ONLY the warm-up rebinds at the top of the
         # loop; once both bindings lock onto their peer's fixed buffers (overwritten in place)
         # nothing reads a freshly fetched copy again. A step's fetch feeds the NEXT step's
         # rebind, so keep fetching while any binding still has a warm-up rebind pending.
         if any(control_rebinds_left):
             kv_sequence_length = decode_outputs[decode_kv_seq_pos]
             next_token_tensor = decode_outputs[decode_next_token_pos]
-            if is_beam:
-                beam_scores = decode_outputs[decode_beam_prob_pos]
-        if is_beam:
-            final_saved_token_ids = saved_token_ids
-            if selected_token_id not in STOP_TOKEN_SET:
-                generated_count += 1
-        elif selected_token_id not in STOP_TOKEN_SET:
+        if selected_token_id not in STOP_TOKEN_SET:
             generated.append(selected_token_id)
             generated_count += 1
             print(tokenizer.decode(selected_token_id), end="", flush=True)
         decode_step += 1
     decode_elapsed = time.time() - decode_start_time
 
-    if strategy in ("beam", "penalty_beam") and final_saved_token_ids is not None:
-        generated = []
-        for token in final_saved_token_ids.numpy()[0][:generated_count]:
-            if token in STOP_TOKEN_SET:
-                break
-            generated.append(int(token))
     text = tokenizer.decode(generated, skip_special_tokens=True)
     total_elapsed = prefill_elapsed + decode_elapsed
     prefill_tps = num_prefill / prefill_elapsed if prefill_elapsed > 0 else 0.0
