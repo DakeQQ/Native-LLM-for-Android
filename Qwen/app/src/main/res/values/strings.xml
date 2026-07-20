@@ -27,8 +27,6 @@
     <string name="default_memory_tokens" translatable="false">2048</string>
     <string name="default_prefill_tokens" translatable="false">256</string>
     <string name="default_decode_tokens" translatable="false">4095</string>
-    <string name="default_beam_size" translatable="false">3</string>
-    <string name="default_top_k" translatable="false">3</string>
     <string name="default_repeat_penalty" translatable="false">0.80</string>
     <string name="default_penalty_range" translatable="false">20</string>
     <string name="default_sampling_temperature" translatable="false">0.80</string>
@@ -44,9 +42,7 @@
     <string name="think_mode_on">说话过脑子 Brain On</string>
     <string name="decode_title">解码策略 Decode Strategy</string>
     <string name="decode_mode_greedy">Greedy</string>
-    <string name="decode_mode_beam">Beam</string>
     <string name="decode_mode_sampler">Sampler</string>
-    <string name="beam_label">束宽 Beam</string>
     <string name="top_k_label">候选 Top-K</string>
     <string name="penalty_label">重复惩罚 Repeat</string>
     <string name="penalty_range_label">惩罚范围 Window</string>

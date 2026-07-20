@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Animated "typing" placeholder, styled as a server bubble. Shown only while beam search decodes
+    Animated loading placeholder, styled as a server bubble. Shown while deferred work waits
     (it streams nothing until it finishes), so the user sees the model is working instead of a frozen
     screen. The three dots are bounced in sequence by ChatAdapter; the row is removed the moment any
     real reply / result arrives.
