@@ -102,7 +102,7 @@ TEST_QUERY               = [DEFAULT_IMAGE_QUERY, "Describe this video."]        
 
 # Model Config
 DO_EXPORT                = True                                     # Whether to export the ONNX models
-RUN_INFERENCE_AFTER_EXPORT = False                                  # Launch the separate merged-graph self-test after export.
+RUN_INFERENCE_AFTER_EXPORT = True                                   # Launch the separate merged-graph self-test after export.
 USE_BATCH                = False                                    # True = dynamic batch axis; False = fixed batch 1 for CUDA-friendly Reshape nodes.
 COMPUTE_IN_F32           = False                                    # F16 KV only: False keeps attention in float16; True upcasts cached K/V for float32 attention.
 STOP_TOKEN               = [151643, 151645]                         # Qwen stop token ids
@@ -133,11 +133,11 @@ DYNAMIC_VIDEO_SHAPE      = False                                    # Allow dyna
 # KV cache quantization
 KV_QUANT_DTYPE           = "Q8"                                     # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
 KV_QUANT_GROUP_SIZE      = 128                                      # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Smaller = more accurate. Must divide head_dim evenly.
-USE_HADAMARD             = True                                     # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
+USE_HADAMARD             = False                                    # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
 HADAMARD_RANDOM_SEED     = 9527                                     # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
 USE_CLIP                 = False                                    # Clip outliers to mean ± CLIP_SIGMA*std before quantization. Works for Q4 and Q8 modes. For Q8 without hadamard/shuffle, clips per-head; with grouping, clips per-group.
 CLIP_SIGMA               = 3.5                                      # Clip threshold in standard deviations. Lower = more aggressive clipping. 2.5-3.5 recommended. Only used when USE_CLIP=True.
-USE_SHUFFLE              = True                                     # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes.
+USE_SHUFFLE              = False                                    # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes.
 USE_SYM                  = False                                    # True = Less RAM Bandwidth. True: symmetric quantization (no bias, absmax-based); False: asymmetric (min-max with bias). Works for Q4 and Q8 modes.
 USE_FLOAT16_SCALE_BIAS   = True                                     # Whether to use float16 for scale and bias in all quantized KV modes (Q4, Q8, and ROTARY variants).
 USE_QDQ_FRIENDLY_ASYM    = False                                    # Asym only: disable residual bias correction for Q/DQ-friendly blocked rewrites.
@@ -146,7 +146,7 @@ USE_QDQ_FRIENDLY_ASYM    = False                                    # Asym only:
 REORDER_DOWNPROJ_FOR_QUANT     = True
 REORDER_OPROJ_FOR_QUANT        = False
 REORDER_VISION_MLP_FOR_QUANT   = True
-REORDER_VISION_OPROJ_FOR_QUANT = False
+REORDER_VISION_OPROJ_FOR_QUANT = True
 REORDER_KEY                    = "absmean"                          # "absmean" | "L4" | "rms" | "std"
 
 # Decoding strategy
