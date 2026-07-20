@@ -62,16 +62,14 @@ SOURCE_TEXT              = args.text
 SOURCE_LANGUAGE          = args.source_language
 TARGET_LANGUAGE          = args.target_language
 
-USE_BEAM_SEARCH          = False
 USE_SAMPLING             = False
 TEMPERATURE              = 0.7
 TOP_P                    = 0.6
-# Greedy/beam decode: direct repeated-token logit multiplier, 0.0 ~ 1.0; no penalty = 1.0.
+# Greedy decode: direct repeated-token logit multiplier, 0.0 ~ 1.0; no penalty = 1.0.
 # USE_SAMPLING=True: standard repetition penalty, >= 1.0; no penalty = 1.0.
 REPEAT_PENALTY           = 1.0
 PENALTY_RANGE            = 20
 TOP_K                    = 20
-BEAM_SIZE                = 3                       # Must be <= export MAX_BEAM_SIZE.
 
 ORT_LOG                  = False
 ORT_FP16                 = False                   # CPU FP16 requires ARM64-v8.2a+.
@@ -80,18 +78,6 @@ MAX_THREADS              = 0                       # 0 lets ORT choose the threa
 DEVICE_ID                = 0
 
 TOP_K = max(1, TOP_K)
-
-if USE_SAMPLING:
-    USE_BEAM_SEARCH = False
-
-if USE_BEAM_SEARCH and TOP_K < BEAM_SIZE:
-    TOP_K = BEAM_SIZE
-
-if TOP_K < 2 or BEAM_SIZE < 2:
-    USE_BEAM_SEARCH = False
-
-if not USE_BEAM_SEARCH:
-    BEAM_SIZE = 1
 
 USE_PENALTY = REPEAT_PENALTY != 1.0
 
@@ -184,12 +170,9 @@ def build_translation_instruction(text, source_language, target_language):
 _MODEL_FILE_METADATA_KEYS = {
     "prefill_greedy":           ("model_file_name_prefill_greedy", None),
     "prefill_penalty_greedy":   ("model_file_name_prefill_penalty_greedy", None),
-    "prefill_beam":             ("model_file_name_prefill_beam", None),
     "prefill_sampling":         ("model_file_name_prefill_sampling", "LLM_TextPrefillSampling.onnx"),
     "decode_greedy":            ("model_file_name_decode_greedy", None),
     "decode_penalty_greedy":    ("model_file_name_decode_penalty_greedy", None),
-    "decode_beam":              ("model_file_name_decode_beam", None),
-    "decode_penalty_beam":      ("model_file_name_decode_penalty_beam", None),
     "decode_sampling":          ("model_file_name_decode_sampling", "LLM_DecodeSampling.onnx"),
     "shared_initializers":      ("model_file_name_shared_initializers", None),
     "shared_initializers_data": ("model_file_name_shared_initializers_data", None),
@@ -502,10 +485,6 @@ def _save_id_in_names(strategy, is_decode, inputs):
         candidates = []
     elif strategy == 'sampling':
         candidates = ['sampling_previous_ids']
-    elif strategy == 'beam' or (strategy == 'penalty_beam' and not is_decode):
-        candidates = ['beam_save_id_in']
-    elif strategy == 'penalty_beam':
-        candidates = ['penalty_save_id_in', 'beam_save_id_in']
     elif strategy == 'penalty_greedy' and is_decode:
         candidates = ['penalty_save_id_in', 'penalty_greedy_save_id_in']
     else:
@@ -527,7 +506,7 @@ def plan_merged_io(sess, strategy, kv_num_tensors, is_decode):
     state_in = ins[:kv_num_tensors]
     state_out = outs[:kv_num_tensors]
     bad_inputs = [name for name in state_in if not name.startswith('in_')]
-    bad_outputs = [name for name in state_out if not (name.startswith('out_') or name.startswith('beam_out_'))]
+    bad_outputs = [name for name in state_out if not name.startswith('out_')]
     if bad_inputs or bad_outputs:
         raise RuntimeError(
             "Merged graph KV block is not leading/positional as expected: "
@@ -535,25 +514,19 @@ def plan_merged_io(sess, strategy, kv_num_tensors, is_decode):
         )
 
     tail = outs[kv_num_tensors:]
-    if strategy in ('beam', 'penalty_beam'):
-        if len(tail) < 5:
-            raise RuntimeError(f"Beam merged graph output tail is too short: {tail}")
-        save_id_out, beam_prob_out, beam_idx_out, max_idx_out, kv_seq_out = tail[:5]
-    elif strategy == 'greedy':
+    if strategy == 'greedy':
         if len(tail) < 2:
             raise RuntimeError(f"Greedy merged graph output tail is too short: {tail}")
         max_idx_out, kv_seq_out = tail[:2]
-        save_id_out = beam_prob_out = beam_idx_out = None
+        save_id_out = None
     elif strategy == 'sampling':
         if len(tail) < 3:
             raise RuntimeError(f"Sampling merged graph output tail is too short: {tail}")
         max_idx_out, save_id_out, kv_seq_out = tail[:3]
-        beam_prob_out = beam_idx_out = None
     else:
         if len(tail) < 3:
             raise RuntimeError(f"Penalty-greedy merged graph output tail is too short: {tail}")
         max_idx_out, save_id_out, kv_seq_out = tail[:3]
-        beam_prob_out = beam_idx_out = None
 
     kv_seq_in = None
     if is_decode:
@@ -571,23 +544,15 @@ def plan_merged_io(sess, strategy, kv_num_tensors, is_decode):
         'kv_seq_in': kv_seq_in,
         'save_id_in': _save_id_in_names(strategy, is_decode, set(ins)),
         'save_id_out': save_id_out,
-        'beam_idx_out': beam_idx_out,
-        'beam_prob_out': beam_prob_out,
-        'beam_prev_prob_in': 'beam_previous_prob' if strategy in ('beam', 'penalty_beam') and is_decode else None,
     }
 
 
-def _decode_static_inputs(strategy, beam_size, input_dtypes):
+def _decode_static_inputs(strategy, input_dtypes):
     static_inputs = []
-    if strategy in ('penalty_greedy', 'penalty_beam'):
+    if strategy == 'penalty_greedy':
         static_inputs.extend([
             ('penalty_penalty_value', _ov(np.array([REPEAT_PENALTY], input_dtypes['penalty_penalty_value']))),
             ('penalty_penalty_range', _ov(np.array([PENALTY_RANGE], input_dtypes['penalty_penalty_range']))),
-        ])
-    if strategy in ('beam', 'penalty_beam'):
-        static_inputs.extend([
-            ('beam_beam_size', _ov(np.array([beam_size], input_dtypes['beam_beam_size']))),
-            ('beam_topK', _ov(np.array([TOP_K], input_dtypes['beam_topK']))),
         ])
     if strategy == 'sampling':
         static_inputs.extend([
@@ -604,14 +569,11 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
     graph_pair = {
         'greedy':         (model_file_names['prefill_greedy'],         model_file_names['decode_greedy']),
         'penalty_greedy': (model_file_names['prefill_penalty_greedy'], model_file_names['decode_penalty_greedy']),
-        'beam':           (model_file_names['prefill_beam'],           model_file_names['decode_beam']),
-        'penalty_beam':   (model_file_names['prefill_beam'],           model_file_names['decode_penalty_beam']),
         'sampling':       (model_file_names['prefill_sampling'],       model_file_names['decode_sampling']),
     }
     if strategy not in graph_pair:
         raise ValueError(f"Unknown decode strategy {strategy!r}.")
     prefill_name, decode_name = graph_pair[strategy]
-    is_beam = strategy in ('beam', 'penalty_beam')
     is_sampling = strategy == 'sampling'
     shared_path = folder / model_file_names['shared_initializers']
     shared_data_path = folder / model_file_names['shared_initializers_data']
@@ -628,7 +590,6 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
     decode_sess = create_merged_session(folder / decode_name, shared_path)
     print(f"Usable Providers: {decode_sess.get_providers()}")
 
-    beam_size = BEAM_SIZE if is_beam else 1
     kv_num_tensors = _kv_num_tensors(meta)
     prefill_io_plan = plan_merged_io(prefill_sess, strategy, kv_num_tensors, is_decode=False)
     decode_io_plan = plan_merged_io(decode_sess, strategy, kv_num_tensors, is_decode=True)
@@ -636,8 +597,6 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
         raise RuntimeError("Decode graph is missing its decode_kv_seq_len input.")
     if 'attention_mask' in decode_io_plan['in_names']:
         raise RuntimeError("Merged decode graph unexpectedly exposes an attention_mask input.")
-    if decode_io_plan['beam_prev_prob_in'] is not None and decode_io_plan['beam_prev_prob_in'] not in decode_io_plan['in_names']:
-        raise RuntimeError("Beam decode graph is missing beam_previous_prob input.")
 
     tokenizer = AutoTokenizer.from_pretrained(download_path, trust_remote_code=True)
     instruction = build_translation_instruction(SOURCE_TEXT, SOURCE_LANGUAGE, TARGET_LANGUAGE)
@@ -672,9 +631,7 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
     for name in prefill_io_plan['state_in']:
         bind_prefill_input(name, _merged_zero(prefill_input_meta_by_name[name]), kv_device)
     for name in prefill_io_plan['save_id_in']:
-        bind_prefill_input(name, np.zeros((beam_size, 0)))
-    if is_beam:
-        bind_prefill_input('beam_beam_size', np.array([beam_size]))
+        bind_prefill_input(name, np.zeros((1, 0)))
     if is_sampling:
         bind_prefill_input('sampling_temperature', np.array([TEMPERATURE]))
         bind_prefill_input('sampling_top_k', np.array([TOP_K]))
@@ -690,12 +647,10 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
     # the KV state block always leads the outputs, and the tails sit at fixed offsets.
     prefill_outputs = prefill_binding.get_outputs()
     prefill_out_names = prefill_io_plan['out_names']
-    prefill_next_token_output = prefill_io_plan['beam_idx_out'] if is_beam else prefill_io_plan['max_idx_out']
     prefill_max_idx_pos = prefill_out_names.index(prefill_io_plan['max_idx_out'])
     prefill_kv_seq_pos = prefill_out_names.index(prefill_io_plan['kv_seq_out'])
-    prefill_next_token_pos = prefill_out_names.index(prefill_next_token_output)
+    prefill_next_token_pos = prefill_max_idx_pos
     prefill_save_id_pos = prefill_out_names.index(prefill_io_plan['save_id_out']) if prefill_io_plan['save_id_out'] else -1
-    prefill_beam_prob_pos = prefill_out_names.index(prefill_io_plan['beam_prob_out']) if is_beam else -1
 
     # Hoist every decode-graph plan field into a local so the per-token loop touches no dict.
     decode_out_names = decode_io_plan['out_names']
@@ -703,38 +658,29 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
     decode_kv_seq_in = decode_io_plan['kv_seq_in']
     decode_state_in = decode_io_plan['state_in']
     decode_save_id_in = decode_io_plan['save_id_in']
-    decode_beam_prev_prob_in = decode_io_plan['beam_prev_prob_in']
-    decode_next_token_output = decode_io_plan['beam_idx_out'] if is_beam else decode_io_plan['max_idx_out']
     decode_max_idx_pos = decode_out_names.index(decode_io_plan['max_idx_out'])
     decode_kv_seq_pos = decode_out_names.index(decode_io_plan['kv_seq_out'])
-    decode_next_token_pos = decode_out_names.index(decode_next_token_output)
+    decode_next_token_pos = decode_max_idx_pos
     decode_save_id_pos = decode_out_names.index(decode_io_plan['save_id_out']) if decode_io_plan['save_id_out'] else -1
-    decode_beam_prob_pos = decode_out_names.index(decode_io_plan['beam_prob_out']) if is_beam else -1
     decode_dynamic_out_names = _decode_dynamic_output_names(decode_io_plan)
 
     generated = []
-    final_saved_token_ids = None
     selected_token_id = prefill_outputs[prefill_max_idx_pos].numpy().flat[0]
     next_token_tensor = prefill_outputs[prefill_next_token_pos]
     kv_sequence_length = prefill_outputs[prefill_kv_seq_pos]
     cached_state_tensors = prefill_outputs[:kv_num_tensors]
     saved_token_ids = prefill_outputs[prefill_save_id_pos] if prefill_save_id_pos >= 0 else None
-    beam_scores = prefill_outputs[prefill_beam_prob_pos] if is_beam else None
     generated_count = 0
     print(
         f"\nTest Query: Translate the following {SOURCE_LANGUAGE} text into {TARGET_LANGUAGE}: "
         f"{SOURCE_TEXT}\nHunYuan-MT Answering:"
     )
-    if is_beam:
-        final_saved_token_ids = saved_token_ids
-        if selected_token_id not in stop_set and generated_count < generate_limit:
-            generated_count += 1
-    elif selected_token_id not in stop_set and generated_count < generate_limit:
+    if selected_token_id not in stop_set and generated_count < generate_limit:
         generated.append(selected_token_id)
         generated_count += 1
         print(tokenizer.decode(selected_token_id), end="", flush=True)
 
-    static_inputs = _decode_static_inputs(strategy, beam_size, decode_input_dtypes)
+    static_inputs = _decode_static_inputs(strategy, decode_input_dtypes)
     decode_bindings = [decode_sess.io_binding(), decode_sess.io_binding()]
     for binding in decode_bindings:
         for name, value in static_inputs:
@@ -744,7 +690,7 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
     # Two-binding ping-pong: each step's device-auto outputs feed the *other* binding on the
     # next step. KV state and saved_token_ids GROW every step, so ORT re-allocates them (fresh
     # handle) and they -- plus their device outputs -- must be rebound every step. kv_seq_len /
-    # next_token / beam_prob are fixed-shape outputs bound once, so each binding keeps reading
+    # next_token is a fixed-shape output bound once, so each binding keeps reading
     # the *same* peer buffer (overwritten in place); their source only shifts while the ping-
     # pong warms up (prefill -> peer), so bind them on a binding's first two uses and skip the
     # otherwise-redundant per-step rebind afterward.
@@ -759,8 +705,6 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
             control_rebinds_left[binding_index] -= 1
             binding.bind_ortvalue_input(decode_kv_seq_in, kv_sequence_length)
             binding.bind_ortvalue_input(decode_token_in, next_token_tensor)
-            if is_beam:
-                binding.bind_ortvalue_input(decode_beam_prev_prob_in, beam_scores)
         for name, value in zip(decode_state_in, cached_state_tensors):
             binding.bind_ortvalue_input(name, value)
         for name in decode_save_id_in:
@@ -774,33 +718,19 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
         selected_token_id = decode_outputs[decode_max_idx_pos].numpy().flat[0]
         if decode_save_id_pos != -1:
             saved_token_ids = decode_outputs[decode_save_id_pos]
-        # kv_seq_len / next_token / beam_prob feed ONLY the warm-up rebinds at the top of the
+        # kv_seq_len / next_token feed ONLY the warm-up rebinds at the top of the
         # loop; once both bindings lock onto their peer's fixed buffers (overwritten in place)
         # nothing reads a freshly fetched copy again. A step's fetch feeds the NEXT step's
         # rebind, so keep fetching while any binding still has a warm-up rebind pending.
         if any(control_rebinds_left):
             kv_sequence_length = decode_outputs[decode_kv_seq_pos]
             next_token_tensor = decode_outputs[decode_next_token_pos]
-            if is_beam:
-                beam_scores = decode_outputs[decode_beam_prob_pos]
-        if is_beam:
-            final_saved_token_ids = saved_token_ids
-            if selected_token_id not in stop_set:
-                generated_count += 1
-        elif selected_token_id not in stop_set:
+        if selected_token_id not in stop_set:
             generated.append(selected_token_id)
             generated_count += 1
             print(tokenizer.decode(selected_token_id), end="", flush=True)
         decode_step += 1
     decode_elapsed = time.time() - decode_start_time
-
-    if is_beam and final_saved_token_ids is not None:
-        generated = []
-        best_beam_tokens = final_saved_token_ids.numpy()[0]
-        for token in best_beam_tokens[:generated_count]:
-            if token in stop_set:
-                break
-            generated.append(token)
 
     text = tokenizer.decode(generated, skip_special_tokens=True)
     total_elapsed = prefill_elapsed + decode_elapsed
@@ -830,8 +760,6 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
 def _resolve_strategy():
     if USE_SAMPLING:
         return 'sampling'
-    if USE_BEAM_SEARCH and TOP_K >= 2 and BEAM_SIZE >= 2:
-        return 'penalty_beam' if USE_PENALTY else 'beam'
     if USE_PENALTY:
         return 'penalty_greedy'
     return 'greedy'
