@@ -139,7 +139,7 @@ constexpr int   DECODE_MODE_GREEDY       = 0;
 constexpr int   DECODE_MODE_SAMPLING     = 1;
 static_assert(DECODE_MODE_GREEDY == 0 && DECODE_MODE_SAMPLING == 1,
               "Decode mode protocol must contain only Greedy and Sampling");
-constexpr int   DEFAULT_TOP_K           = 3;
+constexpr int   DEFAULT_TOP_K           = 10;
 constexpr float DEFAULT_REPEAT_PENALTY  = 1.0f;
 constexpr int   DEFAULT_PENALTY_RANGE   = 20;
 constexpr float DEFAULT_TEMPERATURE     = 0.8f;
