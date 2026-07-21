@@ -53,7 +53,7 @@ TOP_P                    = 0.95
 # USE_SAMPLING=True: standard repetition penalty, >= 1.0; no penalty = 1.0.
 REPEAT_PENALTY           = 0.9
 PENALTY_RANGE            = 20
-TOP_K                    = 3
+TOP_K                    = 10
 
 ORT_LOG                  = False
 ORT_FP16                 = False                   # CPU FP16 requires ARM64-v8.2a+.

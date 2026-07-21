@@ -69,9 +69,15 @@ MERGED_CONSTITUENT_GRAPHS = (
 
 MODALITIES = ("text", "image", "video")
 STRATEGIES = ("greedy", "penalty_greedy", "sampling")
+_LEGACY_SHARED_ARTIFACTS = (
+    "shared_initializers.npz",
+    "shared_initializers.manifest.json",
+    "shared_initializers.onnx",
+    "shared_initializers.onnx.data",
+)
 
 
-def default_model_file_names() -> dict[str, str]:
+def _build_default_model_file_names() -> dict[str, str]:
     names = {
         "metadata": "LLM_Metadata.onnx",
         "embed": "LLM_Embed.onnx",
@@ -106,13 +112,16 @@ def default_model_file_names() -> dict[str, str]:
     return names
 
 
-def _model_file_name(model_file_names: dict[str, str] | None, key: str, default: str | None = None) -> str:
-    names = default_model_file_names() if model_file_names is None else model_file_names
-    if key in names:
-        return names[key]
-    if default is not None:
-        return default
-    raise KeyError(key)
+_DEFAULT_MODEL_FILE_NAMES = _build_default_model_file_names()
+
+
+def default_model_file_names() -> dict[str, str]:
+    return dict(_DEFAULT_MODEL_FILE_NAMES)
+
+
+def _model_file_name(model_file_names: dict[str, str] | None, key: str) -> str:
+    names = _DEFAULT_MODEL_FILE_NAMES if model_file_names is None else model_file_names
+    return names[key]
 
 
 def load_model(path: Path) -> onnx.ModelProto:
@@ -518,15 +527,20 @@ def _merge_penalty_greedy(source_folder: Path, main: onnx.ModelProto, modality: 
     )
 
 
+_STRATEGY_MERGERS = {
+    "greedy": _merge_greedy,
+    "penalty_greedy": _merge_penalty_greedy,
+    "sampling": _merge_sampling,
+}
+
+
 def _recipe(modality: str, phase: str, strategy: str):
+    merge = _STRATEGY_MERGERS.get(strategy)
+
     def build(source_folder: Path, main: onnx.ModelProto, model_file_names: dict[str, str] | None = None, embed: onnx.ModelProto | None = None):
-        if strategy == "greedy":
-            return _merge_greedy(source_folder, main, modality, phase, model_file_names, embed)
-        if strategy == "penalty_greedy":
-            return _merge_penalty_greedy(source_folder, main, modality, phase, model_file_names, embed)
-        if strategy == "sampling":
-            return _merge_sampling(source_folder, main, modality, phase, model_file_names, embed)
-        raise ValueError(f"Unknown strategy {strategy!r}")
+        if merge is None:
+            raise ValueError(f"Unknown strategy {strategy!r}")
+        return merge(source_folder, main, modality, phase, model_file_names, embed)
 
     build.__name__ = f"merge_{modality}_{phase}_{strategy}"
     return build
@@ -548,14 +562,23 @@ def _deps_for(modality: str, phase: str, strategy: str, model_file_names: dict[s
     return deps
 
 
+_MERGED_BUILD_SPECS = tuple(
+    (modality, phase, strategy, _recipe(modality, phase, strategy))
+    for modality in MODALITIES
+    for phase in ("prefill", "decode")
+    for strategy in STRATEGIES
+)
+
+
 def make_merged_build_plan(model_file_names: dict[str, str] | None = None):
-    plan = []
-    for modality in MODALITIES:
-        for phase in ("prefill", "decode"):
-            for strategy in STRATEGIES:
-                key = f"{modality}_{phase}_{strategy}"
-                plan.append((_model_file_name(model_file_names, key), _recipe(modality, phase, strategy), _deps_for(modality, phase, strategy, model_file_names)))
-    return plan
+    return [
+        (
+            _model_file_name(model_file_names, f"{modality}_{phase}_{strategy}"),
+            recipe,
+            _deps_for(modality, phase, strategy, model_file_names),
+        )
+        for modality, phase, strategy, recipe in _MERGED_BUILD_SPECS
+    ]
 
 
 MERGED_BUILD_PLAN = make_merged_build_plan()
@@ -685,12 +708,12 @@ def transplant_quantized_main(target: onnx.ModelProto, quantized_primary: onnx.M
     inserted = False
     for node in target.graph.node:
         if _node_is_shell(node):
-            new_nodes.append(copy.deepcopy(node))
+            new_nodes.append(node)
         elif not inserted:
-            new_nodes.extend(copy.deepcopy(primary_main_nodes))
+            new_nodes.extend(primary_main_nodes)
             inserted = True
     if not inserted:
-        new_nodes.extend(copy.deepcopy(primary_main_nodes))
+        new_nodes.extend(primary_main_nodes)
 
     primary_inits = {init.name: init for init in quantized_primary.graph.initializer}
     target_inits = {init.name: init for init in target.graph.initializer}
@@ -702,7 +725,7 @@ def transplant_quantized_main(target: onnx.ModelProto, quantized_primary: onnx.M
 
     def add_init(init: TensorProto) -> None:
         if init.name not in seen_inits:
-            new_initializers.append(copy.deepcopy(init))
+            new_initializers.append(init)
             seen_inits.add(init.name)
 
     for init in target.graph.initializer:
@@ -776,23 +799,48 @@ def write_shared_initializers(sources: onnx.ModelProto | list[onnx.ModelProto], 
     return shared_external_data_map(shared_model_path)
 
 
-def extract_and_write_shared(models: dict[str, onnx.ModelProto] | list[onnx.ModelProto], shared_model_path: Path, primary_model: onnx.ModelProto | None = None, min_shared_elements: int = MIN_SHARED_INITIALIZER_ELEMENTS) -> dict[str, dict[str, str]]:
-    model_values = list(models.values()) if isinstance(models, dict) else list(models)
-    if not model_values:
-        raise RuntimeError("No merged models were provided for shared initializer extraction.")
-    source = primary_model or model_values[0]
-    external_by_name = write_shared_initializers(source, shared_model_path, min_shared_elements)
-    for model in model_values:
-        redirect_shared_initializers_to_external(model, external_by_name)
-    return external_by_name
-
-
-def _available_plan(source_folder: Path, model_file_names: dict[str, str] | None):
+def _available_build_plan(source_folder: Path, model_file_names: dict[str, str] | None):
     return [
         (file_name, recipe, deps)
         for file_name, recipe, deps in make_merged_build_plan(model_file_names)
         if all((source_folder / dep).exists() for dep in deps)
     ]
+
+
+def _prepare_shared_language_sources(
+    source_folder: Path,
+    shared_model_path: Path,
+    model_file_names: dict[str, str] | None,
+    min_shared_elements: int,
+) -> tuple[onnx.ModelProto, onnx.ModelProto, dict[str, dict[str, str]]]:
+    main = load_model(source_folder / _model_file_name(model_file_names, "main"))
+    embed = _with_embed(source_folder, model_file_names)
+    external_by_name = write_shared_initializers(
+        [main, embed], shared_model_path, min_shared_elements
+    )
+    redirect_shared_initializers_to_external(main, external_by_name)
+    redirect_shared_initializers_to_external(embed, external_by_name)
+    return main, embed, external_by_name
+
+
+def _build_available_merged_graphs(
+    source_folder: Path,
+    out_folder: Path,
+    available_plan,
+    main: onnx.ModelProto,
+    embed: onnx.ModelProto,
+    model_file_names: dict[str, str] | None,
+    external_by_name: dict[str, dict[str, str]],
+) -> dict[str, Path]:
+    graphs: dict[str, Path] = {}
+    for file_name, recipe, _ in available_plan:
+        model = recipe(source_folder, main, model_file_names, embed=embed)
+        redirect_shared_initializers_to_external(model, external_by_name)
+        out_path = out_folder / file_name
+        save_model(model, out_path)
+        graphs[file_name] = out_path
+        del model
+    return graphs
 
 
 def build_shared_merged_bundle(source_folder: Path, out_folder: Path | None = None, min_shared_elements: int = MIN_SHARED_INITIALIZER_ELEMENTS, model_file_names: dict[str, str] | None = None, delete_constituents: bool = False) -> dict:
@@ -810,38 +858,34 @@ def build_shared_merged_bundle(source_folder: Path, out_folder: Path | None = No
     if shared_data_name != expected_data_name:
         raise RuntimeError(f"Shared initializer data must be {expected_data_name!r}, got {shared_data_name!r}.")
 
-    for legacy in ("shared_initializers.npz", "shared_initializers.manifest.json", "shared_initializers.onnx", "shared_initializers.onnx.data"):
+    for legacy in _LEGACY_SHARED_ARTIFACTS:
         (out_folder / legacy).unlink(missing_ok=True)
 
-    available = _available_plan(source_folder, model_file_names)
+    available = _available_build_plan(source_folder, model_file_names)
     if not available:
-        raise RuntimeError("No complete v3.5 merged graph recipes are available from the exported split graphs.")
+        raise RuntimeError("No complete multimodal merged graph recipes are available from the exported split graphs.")
 
     # Only Main weights and the embedding table are reused verbatim by every strategy graph:
     # write those two into the shared blob and redirect to external refs, then build and save
     # graphs one at a time (low peak memory). Rotary tables stay inline (per-graph data/shape).
-    main = load_model(source_folder / main_name)
-    embed = _with_embed(source_folder, model_file_names)
-
     shared_model_path = out_folder / shared_model_name
-    external_by_name = write_shared_initializers([main, embed], shared_model_path, min_shared_elements)
-    redirect_shared_initializers_to_external(main, external_by_name)
-    redirect_shared_initializers_to_external(embed, external_by_name)
-
-    graphs: dict[str, Path] = {}
-    for file_name, recipe, _ in available:
-        model = recipe(source_folder, main, model_file_names, embed=embed)
-        redirect_shared_initializers_to_external(model, external_by_name)
-        out_path = out_folder / file_name
-        save_model(model, out_path)
-        graphs[file_name] = out_path
-        del model
+    main, embed, external_by_name = _prepare_shared_language_sources(
+        source_folder, shared_model_path, model_file_names, min_shared_elements
+    )
+    graphs = _build_available_merged_graphs(
+        source_folder,
+        out_folder,
+        available,
+        main,
+        embed,
+        model_file_names,
+        external_by_name,
+    )
 
     result: dict = {
         "graphs": graphs,
         "shared_model": shared_model_path,
         "shared_data": out_folder / shared_data_name,
-        "coverage": [Path(name).stem for name in graphs],
     }
     if delete_constituents and out_folder.resolve() == source_folder.resolve():
         result["removed_constituents"] = delete_merged_constituents(

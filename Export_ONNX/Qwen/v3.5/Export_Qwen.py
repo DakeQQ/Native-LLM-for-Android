@@ -133,12 +133,12 @@ DYNAMIC_VIDEO_SHAPE              = False                                        
 # KV cache quantization
 KV_QUANT_DTYPE                   = "Q8"                                                   # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
 KV_QUANT_GROUP_SIZE              = 128                                                    # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Must divide head_dim evenly.
-USE_HADAMARD                     = False                                                   # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
+USE_HADAMARD                     = False                                                  # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
 HADAMARD_RANDOM_SEED             = 9527                                                   # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
 USE_CLIP                         = False                                                  # Clip outliers to mean ± CLIP_SIGMA*std before quantization. Works for Q4 and Q8 modes.
 CLIP_SIGMA                       = 3.0                                                    # Clip threshold in standard deviations. Lower = more aggressive clipping. 2.5-3.5 recommended. Only used when USE_CLIP=True.
-USE_SHUFFLE                      = False                                                   # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes.
-USE_SYM                          = False                                                  # True = Less RAM Bandwidth. True: symmetric quantization (no bias, absmax-based); False: asymmetric (min-max with bias). Works for Q4 and Q8 modes.
+USE_SHUFFLE                      = False                                                  # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes.
+USE_SYM                          = True                                                   # True = Less RAM Bandwidth. True: symmetric quantization (no bias, absmax-based); False: asymmetric (min-max with bias). Works for Q4 and Q8 modes.
 USE_FLOAT16_SCALE_BIAS           = True                                                   # Whether to use float16 for scale and bias in all quantized KV modes (Q4, Q8, and ROTARY variants).
 USE_QDQ_FRIENDLY_ASYM            = False                                                  # Asym only: disables residual bias correction for Q/DQ-friendly blocked rewrites.
 
@@ -3298,98 +3298,182 @@ class LLM_MAIN(torch.nn.Module):
                             attn_output = self.quantizer.inverse_rotate_attn(torch.matmul(attn_output, v_dequant))
 
                 elif self.kv_quantized:
-                    packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, self.num_key_value_heads, self.head_dim_quarter)
-                    key_cache = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
-                    value_cache = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
-                    key_scale = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
-                    key_bias = torch.cat([all_inputs[self.full_key_bias_offset + full_layer_index], bias_k], dim=-1)
-                    value_scale = torch.cat(
-                        [all_inputs[self.full_value_scale_offset + full_layer_index], scale_v],
-                        dim=3 if self.kv_q8_grouped else -2,
-                    )
-                    value_bias = torch.cat(
-                        [all_inputs[self.full_value_bias_offset + full_layer_index], bias_v],
-                        dim=3 if self.kv_q8_grouped else -2,
-                    )
-
-                    save_full_keys.append(key_cache)
-                    save_full_values.append(value_cache)
-                    save_key_scales.append(key_scale)
-                    save_key_biases.append(key_bias)
-                    save_value_scales.append(value_scale)
-                    save_value_biases.append(value_bias)
-
-                    if USE_FLOAT16_SCALE_BIAS:
-                        key_scale = key_scale.float()
-                        key_bias = key_bias.float()
-                        value_scale = value_scale.float()
-                        value_bias = value_bias.float()
-
-                    if self.kv_q8_cuda:
-                        key_cache = self.quantizer.unpack_cuda(key_cache, -2, self.num_key_value_heads, self.head_dim)
-                        value_cache = self.quantizer.unpack_cuda(value_cache, -1, self.num_key_value_heads, self.head_dim)
-
-                    if self.kv_q8_grouped:
-                        q_grouped = query
-                        if self.quantizer.use_shuffle:
-                            q_grouped = q_grouped.index_select(-1, self.quantizer.shuffle_idx)
-                        q_grouped = onnx_reshape_batch(
-                            q_grouped,
-                            (
-                                self.num_key_value_heads,
-                                self.num_key_value_groups,
-                                -1,
-                                self.quantizer.kv_quant_num_groups,
-                                self.quantizer.kv_quant_group_size,
-                            ),
+                    if self.kv_sym:
+                        packed_k, scale_k, packed_v, scale_v = self.quantizer(
+                            key, value, self.num_key_value_heads, self.head_dim_quarter
                         )
-                        q_grouped = q_grouped.transpose(-2, -3)
-                        if self.quantizer.use_hadamard:
-                            q_grouped = self.quantizer.hadamard_q(q_grouped)
+                        key_cache = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
+                        value_cache = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
+                        key_scale = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
+                        value_scale = torch.cat(
+                            [all_inputs[self.full_value_scale_offset + full_layer_index], scale_v],
+                            dim=-3 if self.kv_q8_grouped else -2,
+                        )
 
-                        k_grouped = onnx_reshape_batch(
-                            key_cache.float(),
-                            (
-                                self.num_key_value_heads,
-                                1,
-                                self.quantizer.kv_quant_num_groups,
-                                self.quantizer.kv_quant_group_size,
-                                -1,
-                            ),
-                        )
-                        attn_raw_grouped = torch.matmul(q_grouped, k_grouped)
-                        q_sum_grouped = q_grouped.sum(dim=-1, keepdim=True)
-                        attn_output = (
-                            attn_raw_grouped * key_scale + q_sum_grouped * key_bias
-                        ).sum(dim=-3) + attention_mask
-                        attn_output = torch.softmax(attn_output, dim=-1)
+                        save_full_keys.append(key_cache)
+                        save_full_values.append(value_cache)
+                        save_key_scales.append(key_scale)
+                        save_value_scales.append(value_scale)
 
-                        v_grouped = onnx_reshape_batch(
-                            value_cache.float(),
-                            (
-                                self.num_key_value_heads,
-                                1,
-                                -1,
-                                self.quantizer.kv_quant_num_groups,
-                                self.quantizer.kv_quant_group_size,
-                            ),
-                        )
-                        value_dequant = onnx_reshape_batch(
-                            v_grouped * value_scale + value_bias,
-                            (self.num_key_value_heads, 1, -1, self.head_dim),
-                        )
-                        attn_output = torch.matmul(attn_output, value_dequant)
-                        if self.quantizer.use_hadamard:
-                            attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
-                        if self.quantizer.use_shuffle:
-                            attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
+                        if USE_FLOAT16_SCALE_BIAS:
+                            key_scale = key_scale.float()
+                            value_scale = value_scale.float()
+
+                        if self.kv_q8_cuda:
+                            key_cache = self.quantizer.unpack_cuda(key_cache, -2, self.num_key_value_heads, self.head_dim)
+                            value_cache = self.quantizer.unpack_cuda(value_cache, -1, self.num_key_value_heads, self.head_dim)
+                        key_signed = self.quantizer._decode_signed_q8_storage(key_cache).float()
+                        value_signed = self.quantizer._decode_signed_q8_storage(value_cache).float()
+
+                        if self.kv_q8_grouped:
+                            q_grouped = query
+                            if self.quantizer.use_shuffle:
+                                q_grouped = q_grouped.index_select(-1, self.quantizer.shuffle_idx)
+                            q_grouped = onnx_reshape_batch(
+                                q_grouped,
+                                (
+                                    self.num_key_value_heads,
+                                    self.num_key_value_groups,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
+                            q_grouped = q_grouped.transpose(-2, -3)
+                            if self.quantizer.use_hadamard:
+                                q_grouped = self.quantizer.hadamard_q(q_grouped)
+
+                            k_grouped = onnx_reshape_batch(
+                                key_signed,
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                    -1,
+                                ),
+                            )
+                            attn_raw_grouped = torch.matmul(q_grouped, k_grouped)
+                            attn_output = (attn_raw_grouped * key_scale).sum(dim=-3) + attention_mask
+                            attn_output = torch.softmax(attn_output, dim=-1)
+
+                            v_grouped = onnx_reshape_batch(
+                                value_signed,
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
+                            value_dequant = onnx_reshape_batch(
+                                v_grouped * value_scale,
+                                (self.num_key_value_heads, 1, -1, self.head_dim),
+                            )
+                            attn_output = torch.matmul(attn_output, value_dequant)
+                            if self.quantizer.use_hadamard:
+                                attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
+                            if self.quantizer.use_shuffle:
+                                attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
+                        else:
+                            attn_raw = torch.matmul(query, key_signed)
+                            attn_output = attn_raw * key_scale + attention_mask
+                            attn_output = torch.softmax(attn_output, dim=-1)
+                            attn_output = torch.matmul(attn_output, value_signed * value_scale)
                     else:
-                        attn_raw = torch.matmul(query, key_cache.float())
-                        attn_bias = query.sum(dim=-1, keepdim=True) * key_bias + attention_mask
-                        attn_output = torch.addcmul(attn_bias, attn_raw, key_scale)
-                        attn_output = torch.softmax(attn_output, dim=-1)
-                        value_dequant = torch.addcmul(value_bias, value_cache.float(), value_scale)
-                        attn_output = torch.matmul(attn_output, value_dequant)
+                        packed_k, scale_k, bias_k, packed_v, scale_v, bias_v = self.quantizer(key, value, self.num_key_value_heads, self.head_dim_quarter)
+                        key_cache = torch.cat([all_inputs[self.full_key_offset + full_layer_index], packed_k], dim=-1)
+                        value_cache = torch.cat([all_inputs[self.full_value_offset + full_layer_index], packed_v], dim=-2)
+                        key_scale = torch.cat([all_inputs[self.full_key_scale_offset + full_layer_index], scale_k], dim=-1)
+                        key_bias = torch.cat([all_inputs[self.full_key_bias_offset + full_layer_index], bias_k], dim=-1)
+                        value_scale = torch.cat(
+                            [all_inputs[self.full_value_scale_offset + full_layer_index], scale_v],
+                            dim=3 if self.kv_q8_grouped else -2,
+                        )
+                        value_bias = torch.cat(
+                            [all_inputs[self.full_value_bias_offset + full_layer_index], bias_v],
+                            dim=3 if self.kv_q8_grouped else -2,
+                        )
+
+                        save_full_keys.append(key_cache)
+                        save_full_values.append(value_cache)
+                        save_key_scales.append(key_scale)
+                        save_key_biases.append(key_bias)
+                        save_value_scales.append(value_scale)
+                        save_value_biases.append(value_bias)
+
+                        if USE_FLOAT16_SCALE_BIAS:
+                            key_scale = key_scale.float()
+                            key_bias = key_bias.float()
+                            value_scale = value_scale.float()
+                            value_bias = value_bias.float()
+
+                        if self.kv_q8_cuda:
+                            key_cache = self.quantizer.unpack_cuda(key_cache, -2, self.num_key_value_heads, self.head_dim)
+                            value_cache = self.quantizer.unpack_cuda(value_cache, -1, self.num_key_value_heads, self.head_dim)
+
+                        if self.kv_q8_grouped:
+                            q_grouped = query
+                            if self.quantizer.use_shuffle:
+                                q_grouped = q_grouped.index_select(-1, self.quantizer.shuffle_idx)
+                            q_grouped = onnx_reshape_batch(
+                                q_grouped,
+                                (
+                                    self.num_key_value_heads,
+                                    self.num_key_value_groups,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
+                            q_grouped = q_grouped.transpose(-2, -3)
+                            if self.quantizer.use_hadamard:
+                                q_grouped = self.quantizer.hadamard_q(q_grouped)
+
+                            k_grouped = onnx_reshape_batch(
+                                key_cache.float(),
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                    -1,
+                                ),
+                            )
+                            attn_raw_grouped = torch.matmul(q_grouped, k_grouped)
+                            q_sum_grouped = q_grouped.sum(dim=-1, keepdim=True)
+                            attn_output = (
+                                attn_raw_grouped * key_scale + q_sum_grouped * key_bias
+                            ).sum(dim=-3) + attention_mask
+                            attn_output = torch.softmax(attn_output, dim=-1)
+
+                            v_grouped = onnx_reshape_batch(
+                                value_cache.float(),
+                                (
+                                    self.num_key_value_heads,
+                                    1,
+                                    -1,
+                                    self.quantizer.kv_quant_num_groups,
+                                    self.quantizer.kv_quant_group_size,
+                                ),
+                            )
+                            value_dequant = onnx_reshape_batch(
+                                v_grouped * value_scale + value_bias,
+                                (self.num_key_value_heads, 1, -1, self.head_dim),
+                            )
+                            attn_output = torch.matmul(attn_output, value_dequant)
+                            if self.quantizer.use_hadamard:
+                                attn_output = self.quantizer.inverse_hadamard_attn(attn_output)
+                            if self.quantizer.use_shuffle:
+                                attn_output = attn_output.index_select(-1, self.quantizer.unshuffle_idx)
+                        else:
+                            attn_raw = torch.matmul(query, key_cache.float())
+                            attn_bias = query.sum(dim=-1, keepdim=True) * key_bias + attention_mask
+                            attn_output = torch.addcmul(attn_bias, attn_raw, key_scale)
+                            attn_output = torch.softmax(attn_output, dim=-1)
+                            value_dequant = torch.addcmul(value_bias, value_cache.float(), value_scale)
+                            attn_output = torch.matmul(attn_output, value_dequant)
                 else:
                     key_cache = torch.cat([all_inputs[self.full_key_offset + full_layer_index], key], dim=-1)
                     value_cache = torch.cat([all_inputs[self.full_value_offset + full_layer_index], value], dim=-2)
