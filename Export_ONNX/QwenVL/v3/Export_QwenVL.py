@@ -20,6 +20,74 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ONNX_DIR = SCRIPT_DIR / "Qwen_ONNX"
 ONNX_DIR.mkdir(parents=True, exist_ok=True)
 
+# Test Input
+TEST_IMAGE               = ["../psyduck.png"]                                   # List of test images for the exported onnx model. Supports multi-image: [r"img1.png", r"img2.png"]
+TEST_VIDEO               = r"../test_video_8s.mp4"                              # Test video path. Set non-empty to enable video mode.
+DEFAULT_IMAGE_QUERY      = "Describe this image."
+DEFAULT_MULTI_IMAGE_QUERY = "Treat each image as a separate photo and describe them one by one."
+TEST_QUERY               = [DEFAULT_IMAGE_QUERY, "Describe this video."]        # Test query for the exported onnx model.
+
+# Model Config
+DO_EXPORT                = True                                     # Whether to export the ONNX models
+USE_BATCH                = False                                    # True = dynamic batch axis; False = fixed batch 1 for CUDA-friendly Reshape nodes.
+COMPUTE_IN_F32           = False                                    # F16 KV only: False keeps attention in float16; True upcasts cached K/V for float32 attention.
+STOP_TOKEN               = [151643, 151645]                         # Qwen stop token ids
+MAX_SEQ_LEN              = 4096                                     # Max context length. Can not edit after export.
+
+# Vision Config
+VISION_INPUT_SIDE        = 960                                      # Image/video raw inputs are square-only.
+HEIGHT_FACTOR            = 20                                       # Adjust this value to determine the resize shape and vision resolution.
+WIDTH_FACTOR             = 20                                       # Adjust this value to determine the resize shape and vision resolution.
+IMAGE_RESIZE             = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]  # 32 = self.patch_size * self.merge_size
+INPUT_IMAGE_SIZE         = [VISION_INPUT_SIDE, VISION_INPUT_SIDE]   # Static square image input [height, width].
+VISION_BATCH_SIZE        = 1                                        # Fixed at export time. Number of images in multi-image mode. Set >1 for multi-image support. Each image uses HEIGHT_FACTOR * WIDTH_FACTOR vision tokens.
+DYNAMIC_IMAGE_SHAPE      = False                                    # Allow for a dynamic number of image inputs (1..VISION_BATCH_SIZE). When False, exactly VISION_BATCH_SIZE images required.
+INPUT_IMAGE_DIM          = 5                                        # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
+
+# Video Config
+VIDEO_FPS                = 2.0                                      # Frames per second to sample from video.
+VIDEO_MAX_FRAMES         = 768                                      # Maximum total frames before temporal patching.
+VIDEO_MIN_FRAMES         = 4                                        # Minimum total frames.
+VIDEO_NUM_FRAMES         = 8                                        # Actual number of frames used for export (determines rotary table shape). Must be even (divisible by temporal_patch_size=2).
+VIDEO_HEIGHT_FACTOR      = 20                                       # Video spatial height factor. grid_h = factor * 2
+VIDEO_WIDTH_FACTOR       = 20                                       # Video spatial width factor. grid_w = factor * 2
+TEMPORAL_PATCH_SIZE      = 2                                        # From model config.vision_config.temporal_patch_size. Do not edit.
+VIDEO_RESIZE             = [VIDEO_HEIGHT_FACTOR * 32, VIDEO_WIDTH_FACTOR * 32]  # Square vision grid input.
+INPUT_VIDEO_SIZE         = [VISION_INPUT_SIDE, VISION_INPUT_SIDE]   # Static square video-frame input [height, width].
+DYNAMIC_VIDEO_SHAPE      = False                                    # Allow dynamic video frame count and spatial size. Set False for static shape (faster on some backends).
+
+# KV cache quantization
+KV_QUANT_DTYPE           = "Q8"                                     # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
+KV_QUANT_GROUP_SIZE      = 128                                      # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Smaller = more accurate. Must divide head_dim evenly.
+USE_HADAMARD             = False                                    # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
+HADAMARD_RANDOM_SEED     = 9527                                     # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
+USE_CLIP                 = False                                    # Clip outliers to mean ± CLIP_SIGMA*std before quantization. Works for Q4 and Q8 modes. For Q8 without hadamard/shuffle, clips per-head; with grouping, clips per-group.
+CLIP_SIGMA               = 3.0                                      # Clip threshold in standard deviations. Lower = more aggressive clipping. 2.5-3.5 recommended. Only used when USE_CLIP=True.
+USE_SHUFFLE              = False                                    # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes.
+USE_SYM                  = True                                     # True = Less RAM Bandwidth. True: symmetric quantization (no bias, absmax-based); False: asymmetric (min-max with bias). Works for Q4 and Q8 modes.
+USE_FLOAT16_SCALE_BIAS   = True                                     # Whether to use float16 for scale and bias in all quantized KV modes (Q4, Q8, and ROTARY variants).
+USE_QDQ_FRIENDLY_ASYM    = False                                    # Asym only: disable residual bias correction for Q/DQ-friendly blocked rewrites.
+
+# Exact channel reorders copied from the Qwen v3.5 quantization path.
+REORDER_DOWNPROJ_FOR_QUANT     = True
+REORDER_OPROJ_FOR_QUANT        = False
+REORDER_VISION_MLP_FOR_QUANT   = True
+REORDER_VISION_OPROJ_FOR_QUANT = False
+REORDER_KEY                    = "absmean"                          # "absmean" | "L4" | "rms" | "std"
+
+# Decoding strategy
+REPEAT_PENALTY           = 1.0                                      # 0.0 ~ 1.0; No penalty = 1.0
+PENALTY_RANGE            = 20                                       # Recent-token window to apply penalty
+
+# Runtime config
+ORT_LOG                  = False                                    # Enable ONNX Runtime logging for debugging. Set to False for best performance.
+ORT_FP16                 = False                                    # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
+ORT_Accelerate_Providers = []                                       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+MAX_THREADS              = 0                                        # 0 = auto
+DEVICE_ID                = 0                                        # Device ID for GPU
+OPSET                    = 20                                       # ONNX opset version
+
+
 MODEL_FILE_NAMES = {
     "metadata": "LLM_Metadata.onnx",
     "embed": "LLM_Embed.onnx",
@@ -69,6 +137,7 @@ MODEL_FILE_NAME_METADATA = {
     f"model_file_name_{key}": value for key, value in MODEL_FILE_NAMES.items()
 }
 
+
 onnx_model_Metadata = str(ONNX_DIR / MODEL_FILE_NAMES["metadata"])
 onnx_model_Embed = str(ONNX_DIR / MODEL_FILE_NAMES["embed"])
 onnx_model_Vision = str(ONNX_DIR / MODEL_FILE_NAMES["vision"])
@@ -93,73 +162,6 @@ onnx_model_KV_Split2 = str(ONNX_DIR / MODEL_FILE_NAMES["kv_split2"])
 onnx_model_KV_Concat = str(ONNX_DIR / MODEL_FILE_NAMES["kv_concat"])
 onnx_model_Rope_Shift = str(ONNX_DIR / MODEL_FILE_NAMES["rope_shift"])
 
-# Test Input
-TEST_IMAGE               = ["../psyduck.png"]                                   # List of test images for the exported onnx model. Supports multi-image: [r"img1.png", r"img2.png"]
-TEST_VIDEO               = r"../test_video_8s.mp4"                              # Test video path. Set non-empty to enable video mode.
-DEFAULT_IMAGE_QUERY      = "Describe this image."
-DEFAULT_MULTI_IMAGE_QUERY = "Treat each image as a separate photo and describe them one by one."
-TEST_QUERY               = [DEFAULT_IMAGE_QUERY, "Describe this video."]        # Test query for the exported onnx model.
-
-# Model Config
-DO_EXPORT                = True                                     # Whether to export the ONNX models
-RUN_INFERENCE_AFTER_EXPORT = True                                   # Launch the separate merged-graph self-test after export.
-USE_BATCH                = False                                    # True = dynamic batch axis; False = fixed batch 1 for CUDA-friendly Reshape nodes.
-COMPUTE_IN_F32           = False                                    # F16 KV only: False keeps attention in float16; True upcasts cached K/V for float32 attention.
-STOP_TOKEN               = [151643, 151645]                         # Qwen stop token ids
-MAX_SEQ_LEN              = 4096                                     # Max context length. Can not edit after export.
-
-# Vision Config
-VISION_INPUT_SIDE        = 960                                      # Image/video raw inputs are square-only.
-HEIGHT_FACTOR            = 20                                       # Adjust this value to determine the resize shape and vision resolution.
-WIDTH_FACTOR             = 20                                       # Adjust this value to determine the resize shape and vision resolution.
-IMAGE_RESIZE             = [HEIGHT_FACTOR * 32, WIDTH_FACTOR * 32]  # 32 = self.patch_size * self.merge_size
-INPUT_IMAGE_SIZE         = [VISION_INPUT_SIDE, VISION_INPUT_SIDE]   # Static square image input [height, width].
-VISION_BATCH_SIZE        = 1                                        # Fixed at export time. Number of images in multi-image mode. Set >1 for multi-image support. Each image uses HEIGHT_FACTOR * WIDTH_FACTOR vision tokens.
-DYNAMIC_IMAGE_SHAPE      = False                                    # Allow for a dynamic number of image inputs (1..VISION_BATCH_SIZE). When False, exactly VISION_BATCH_SIZE images required.
-INPUT_IMAGE_DIM          = 5                                        # 4 for [batch, 3, height, width]; 5 for [batch, 1, 3, height, width]
-
-# Video Config
-VIDEO_FPS                = 2.0                                      # Frames per second to sample from video.
-VIDEO_MAX_FRAMES         = 768                                      # Maximum total frames before temporal patching.
-VIDEO_MIN_FRAMES         = 4                                        # Minimum total frames.
-VIDEO_NUM_FRAMES         = 8                                        # Actual number of frames used for export (determines rotary table shape). Must be even (divisible by temporal_patch_size=2).
-VIDEO_HEIGHT_FACTOR      = 20                                       # Video spatial height factor. grid_h = factor * 2
-VIDEO_WIDTH_FACTOR       = 20                                       # Video spatial width factor. grid_w = factor * 2
-TEMPORAL_PATCH_SIZE      = 2                                        # From model config.vision_config.temporal_patch_size. Do not edit.
-VIDEO_RESIZE             = [VIDEO_HEIGHT_FACTOR * 32, VIDEO_WIDTH_FACTOR * 32]  # Square vision grid input.
-INPUT_VIDEO_SIZE         = [VISION_INPUT_SIDE, VISION_INPUT_SIDE]   # Static square video-frame input [height, width].
-DYNAMIC_VIDEO_SHAPE      = False                                    # Allow dynamic video frame count and spatial size. Set False for static shape (faster on some backends).
-
-# KV cache quantization
-KV_QUANT_DTYPE           = "Q8"                                     # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
-KV_QUANT_GROUP_SIZE      = 128                                      # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Smaller = more accurate. Must divide head_dim evenly.
-USE_HADAMARD             = False                                    # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
-HADAMARD_RANDOM_SEED     = 9527                                     # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
-USE_CLIP                 = False                                    # Clip outliers to mean ± CLIP_SIGMA*std before quantization. Works for Q4 and Q8 modes. For Q8 without hadamard/shuffle, clips per-head; with grouping, clips per-group.
-CLIP_SIGMA               = 3.5                                      # Clip threshold in standard deviations. Lower = more aggressive clipping. 2.5-3.5 recommended. Only used when USE_CLIP=True.
-USE_SHUFFLE              = False                                    # True = More Accuracy. Interleave channels across groups so that high-variance channels are evenly distributed. Works for Q4 and Q8 modes.
-USE_SYM                  = False                                    # True = Less RAM Bandwidth. True: symmetric quantization (no bias, absmax-based); False: asymmetric (min-max with bias). Works for Q4 and Q8 modes.
-USE_FLOAT16_SCALE_BIAS   = True                                     # Whether to use float16 for scale and bias in all quantized KV modes (Q4, Q8, and ROTARY variants).
-USE_QDQ_FRIENDLY_ASYM    = False                                    # Asym only: disable residual bias correction for Q/DQ-friendly blocked rewrites.
-
-# Exact channel reorders copied from the Qwen v3.5 quantization path.
-REORDER_DOWNPROJ_FOR_QUANT     = True
-REORDER_OPROJ_FOR_QUANT        = False
-REORDER_VISION_MLP_FOR_QUANT   = True
-REORDER_VISION_OPROJ_FOR_QUANT = True
-REORDER_KEY                    = "absmean"                          # "absmean" | "L4" | "rms" | "std"
-
-# Decoding strategy
-REPEAT_PENALTY           = 1.0                                      # 0.0 ~ 1.0; No penalty = 1.0
-PENALTY_RANGE            = 20                                       # Recent-token window to apply penalty
-
-# Runtime config
-ORT_LOG                  = False                                    # Enable ONNX Runtime logging for debugging. Set to False for best performance.
-ORT_FP16                 = False                                    # Set to True for FP16 ONNX Runtime settings. For CPUs, this requires ARM64-v8.2a or newer.
-ORT_Accelerate_Providers = []                                       # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
-MAX_THREADS              = 0                                        # 0 = auto
-DEVICE_ID                = 0                                        # Device ID for GPU
-OPSET                    = 20                                       # ONNX opset version
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4573,18 +4575,17 @@ if DO_EXPORT:
         gc.collect()
 
     print(f'\nExport done: {ONNX_DIR}')
-    if RUN_INFERENCE_AFTER_EXPORT:
-        subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPT_DIR / 'Inference_Qwen_ONNX.py'),
-                '--model-folder',
-                str(ONNX_DIR),
-                '--tokenizer-folder',
-                str(Path(download_path).expanduser().resolve()),
-            ],
-            check=True,
-        )
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / 'Inference_Qwen_ONNX.py'),
+            '--model-folder',
+            str(ONNX_DIR),
+            '--tokenizer-folder',
+            str(Path(download_path).expanduser().resolve()),
+        ],
+        check=True,
+    )
     raise SystemExit(0)
 
 

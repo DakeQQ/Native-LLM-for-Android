@@ -30,7 +30,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-import Shared_Merged
+import Shared_Merged  # noqa: E402 - local sibling import follows the script-directory path setup
 
 
 # ============================== USER CONFIG ==============================
@@ -314,15 +314,19 @@ def read_onnx_metadata(model_path: str) -> dict:
         return {}
 
 
-def write_onnx_metadata(model_path: str, metadata: dict) -> None:
-    # Rewrite only the graph proto so external weight sidecars stay untouched.
-    model = onnx.load(model_path, load_external_data=False)
+def _update_onnx_metadata(model: onnx.ModelProto, metadata: dict) -> None:
     existing = {prop.key: prop for prop in model.metadata_props}
     for key, value in metadata.items():
         if key in existing:
             existing[key].value = value
         else:
             model.metadata_props.add(key=key, value=value)
+
+
+def write_onnx_metadata(model_path: str, metadata: dict) -> None:
+    # Rewrite only the graph proto so external weight sidecars stay untouched.
+    model = onnx.load(model_path, load_external_data=False)
+    _update_onnx_metadata(model, metadata)
     onnx.save(model, model_path)
     del model
     gc.collect()
@@ -627,9 +631,8 @@ def upgrade_opset_version(model_path: str, version: int, external: bool) -> None
         _save_model(model, model_path, external)
         del model
         gc.collect()
-    except Exception as e:
-        print(f"  Opset upgrade failed: {e}. Keeping current version.")
-        resave(model_path, model_path, external)
+    except Exception as exc:
+        print(f"  Opset upgrade failed: {exc}. Keeping current version.")
 
 
 @lru_cache(maxsize=1)
@@ -1316,9 +1319,8 @@ def _share_dynamic_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: i
 def unify_embed_lmhead_graph(model: onnx.ModelProto, method: str, block_size: int = 32, quiet: bool = False) -> dict | None:
     """Share Main's tied embedding with the lm_head weight in place (no disk I/O).
 
-    Used by both unify_embed_lmhead (file-based) and the merged-bundle builder, which
-    unifies every transplanted strategy graph on the fly before redirecting its weights
-    into the shared-initializer blob.
+    The merged-bundle builder unifies every transplanted strategy graph on the fly
+    before redirecting its weights into the shared-initializer blob.
     """
     graph = model.graph
     try:
@@ -1345,18 +1347,6 @@ def unify_embed_lmhead_graph(model: onnx.ModelProto, method: str, block_size: in
 
     _dead_code_elimination(graph)
     _deduplicate_node_names(graph)
-    return info
-
-
-def unify_embed_lmhead(model_path: str, method: str, block_size: int = 32, external: bool | None = None, quiet: bool = False) -> dict | None:
-    if external is None:
-        external = os.path.exists(model_path + ".data")
-    model = onnx.load(model_path)
-    info = unify_embed_lmhead_graph(model, method, block_size=block_size, quiet=quiet)
-    if info is not None:
-        _save_model(model, model_path, external)
-    del model
-    gc.collect()
     return info
 
 
@@ -1912,22 +1902,114 @@ def _cleanup_merged_outputs(out_folder: Path, model_file_names: dict[str, str]) 
     _remove_external_files(str(out_folder / shared_name))
 
 
-def _available_merged_plan(source_folder: Path, model_file_names: dict[str, str]):
+def _available_merged_files(source_folder: Path, model_file_names: dict[str, str]) -> list[str]:
     # Availability is keyed on the merged file itself: the exporter emits merged graphs
     # directly and deletes the split constituents.
     return [
-        (file_name, recipe, deps)
-        for file_name, recipe, deps in Shared_Merged.make_merged_build_plan(model_file_names)
+        file_name
+        for file_name, _, _ in Shared_Merged.make_merged_build_plan(model_file_names)
         if (source_folder / file_name).exists()
     ]
+
+
+def _merged_metadata(primary_path: Path, model_file_names: dict[str, str]) -> dict:
+    metadata = read_onnx_metadata(str(primary_path))
+    if metadata and model_file_names:
+        metadata.update({f"model_file_name_{key}": value for key, value in model_file_names.items()})
+    return metadata
+
+
+def _save_merged_model(
+    out_folder: Path,
+    file_name: str,
+    model: onnx.ModelProto,
+    metadata: dict,
+) -> None:
+    out_path = out_folder / file_name
+    _validate_graph_references(model, file_name)
+    if metadata:
+        _update_onnx_metadata(model, metadata)
+    Shared_Merged.save_model(model, out_path)
+    print(f"  {file_name} ({out_path.stat().st_size} bytes)")
+
+
+def _load_transplant_donor(primary_path: Path) -> onnx.ModelProto:
+    # Keep an un-unified donor so embedding reconstruction nodes cannot leak
+    # into the Main block copied across modality and strategy shells.
+    donor = onnx.load(str(primary_path), load_external_data=False)
+    if _restore_embed_shell_boundary(donor):
+        print("  Restored optimized donor Embed/Main boundary before transplantation.")
+    if _restore_prefill_mask_shell_boundary(donor):
+        print("  Restored optimized donor prefill-mask/Main boundary before transplantation.")
+    return donor
+
+
+def _load_unified_primary(
+    primary_path: Path,
+    method_kind: str,
+    block_size: int,
+) -> tuple[onnx.ModelProto, dict | None]:
+    # Drop the duplicate fp32 embedding before loading external data to bound
+    # peak memory to the surviving quantized language weights.
+    model = onnx.load(str(primary_path), load_external_data=False)
+    info = unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+    if info is not None:
+        print(
+            f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
+            f"embedding now reuses {info['shared_weight']!r} ({info['lmhead_op']})."
+        )
+    _drop_unused_initializers(model.graph)
+    load_external_data_for_model(model, str(primary_path.parent))
+    return model, info
+
+
+def _materialize_transplant_donor(
+    donor: onnx.ModelProto,
+    primary_path: Path,
+    unify_info: dict | None,
+    external_by_name: dict[str, dict[str, str]],
+) -> None:
+    # The optimized primary is about to replace its private sidecar. Materialize
+    # the donor first, then redirect its shared weights to the new shared blob.
+    if unify_info is not None and unify_info["dropped"] != unify_info["shared_weight"]:
+        _drop_initializers(donor.graph, {unify_info["dropped"]})
+    load_external_data_for_model(donor, str(primary_path.parent))
+    Shared_Merged.redirect_shared_initializers_to_external(donor, external_by_name)
+
+
+def _transplant_merged_strategies(
+    source_folder: Path,
+    out_folder: Path,
+    available_files: list[str],
+    primary_file: str,
+    donor: onnx.ModelProto,
+    method_kind: str,
+    block_size: int,
+    external_by_name: dict[str, dict[str, str]],
+    metadata: dict,
+) -> None:
+    for file_name in available_files:
+        if file_name == primary_file:
+            continue
+        # Load structure only: transplantation replaces the target's multi-GB
+        # Main, and shared initializers are redirected before the graph is saved.
+        target = onnx.load(str(source_folder / file_name), load_external_data=False)
+        model = Shared_Merged.transplant_quantized_main(target, donor)
+        del target
+        unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+        _drop_unused_initializers(model.graph)
+        Shared_Merged.redirect_shared_initializers_to_external(model, external_by_name)
+        _save_merged_model(out_folder, file_name, model, metadata)
+        del model
+        gc.collect()
 
 
 def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
     source_folder = Path(ORIGINAL_FOLDER_PATH)
     out_folder = Path(QUANTED_FOLDER_PATH)
     model_file_names = _metadata_model_file_names(source_folder) or Shared_Merged.default_model_file_names()
-    available = _available_merged_plan(source_folder, model_file_names)
-    if not available:
+    available_files = _available_merged_files(source_folder, model_file_names)
+    if not available_files:
         print("\nExported merged strategy graphs not found; skipping merged bundle optimization.")
         return
 
@@ -1935,16 +2017,14 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
 
     # Quantize the canonical primary once, then transplant its Main into every other
     # strategy graph so the whole family keeps sharing one weight bundle.
-    primary_file = model_file_names.get(_PRIMARY_MERGED_KEY, available[0][0])
+    primary_file = model_file_names.get(_PRIMARY_MERGED_KEY, available_files[0])
     if not (source_folder / primary_file).exists():
-        primary_file = available[0][0]
+        primary_file = available_files[0]
     primary_stem = Path(primary_file).stem
     primary_plan = resolved.get(primary_stem) or resolved.get(_PRIMARY_MERGED_MODEL)
     if primary_plan is None:
         raise RuntimeError(f"No plan is configured for the primary merged graph {primary_stem!r}.")
 
-    # Whole-graph optimization stays off (Plan.optimize=False) so the shell/Main tensor
-    # boundary survives verbatim for transplanting.
     _print_process_header(primary_stem, primary_plan)
     process_model(primary_stem, primary_plan)
 
@@ -1955,78 +2035,37 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
     method_kind = _unify_method_kind(primary_plan)
     shared_model_name = model_file_names.get("shared_initializers", Shared_Merged.SHARED_MODEL_NAME)
     shared_data_name = model_file_names.get("shared_initializers_data", shared_model_name + ".data")
-
-    source_metadata = read_onnx_metadata(str(primary_path))
-    if source_metadata and model_file_names:
-        source_metadata.update({f"model_file_name_{key}": value for key, value in model_file_names.items()})
-
-    def _persist(file_name: str, model: onnx.ModelProto) -> None:
-        out_path = out_folder / file_name
-        _validate_graph_references(model, file_name)
-        Shared_Merged.save_model(model, out_path)
-        if source_metadata:
-            write_onnx_metadata(str(out_path), source_metadata)
-        print(f"  {file_name} ({out_path.stat().st_size} bytes)")
+    source_metadata = _merged_metadata(primary_path, model_file_names)
 
     print(f"\n{'=' * 60}\nTransplanting quantized Main into multimodal merged graphs\n{'=' * 60}")
 
-    # Un-unified donor for the transplant loop: transplant copies its Main node block into each
-    # shell and unification runs per graph AFTERWARDS (so the donor must stay un-unified, or its
-    # reconstruction nodes would leak into every graph). It is loaded structure-only and made
-    # self-contained below, so its multi-GB Main/embedding weights never enter memory.
-    # Captured before _persist overwrites primary_path with the unified primary graph.
-    clean_primary = onnx.load(str(primary_path), load_external_data=False)
-
-    # Primary's final form: unify the tied embedding with the quantized lm_head, then seed the
-    # shared-initializer blob. The graph is unified structure-only first, so the large fp32
-    # embedding that unification discards is never materialized; only the surviving Main tensors
-    # that actually feed the shared blob are loaded from disk.
-    if _restore_embed_shell_boundary(clean_primary):
-        print("  Restored optimized donor Embed/Main boundary before transplantation.")
-    if _restore_prefill_mask_shell_boundary(clean_primary):
-        print("  Restored optimized donor prefill-mask/Main boundary before transplantation.")
-    primary_model = onnx.load(str(primary_path), load_external_data=False)
-    info = unify_embed_lmhead_graph(primary_model, method_kind, block_size=primary_plan.block_size, quiet=True)
-    if info is not None:
-        print(
-            f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
-            f"embedding now reuses {info['shared_weight']!r} ({info['lmhead_op']})."
-        )
-    _drop_unused_initializers(primary_model.graph)
-    load_external_data_for_model(primary_model, str(primary_path.parent))
+    donor = _load_transplant_donor(primary_path)
+    primary_model, unify_info = _load_unified_primary(
+        primary_path, method_kind, primary_plan.block_size
+    )
     external_by_name = Shared_Merged.write_shared_initializers(primary_model, out_folder / shared_model_name)
 
-    # Make the donor self-contained BEFORE the primary's own .data sidecar is deleted by the
-    # persist below. Inlining its remaining initializers mirrors a full onnx.load, so the
-    # transplanted graphs stay byte-for-byte identical to the un-optimized pipeline; the large
-    # shared weights are then repointed at the blob (their inlined bytes are released), leaving
-    # only the few small non-shared Main initializers (e.g. qk_norm_scale) inline in each graph.
-    if info is not None and info["dropped"] != info["shared_weight"]:
-        _drop_initializers(clean_primary.graph, {info["dropped"]})
-    load_external_data_for_model(clean_primary, str(primary_path.parent))
-    Shared_Merged.redirect_shared_initializers_to_external(clean_primary, external_by_name)
+    _materialize_transplant_donor(donor, primary_path, unify_info, external_by_name)
 
     # Finalize the primary output (this deletes its .data sidecar; the donor no longer needs it).
     Shared_Merged.redirect_shared_initializers_to_external(primary_model, external_by_name)
-    _persist(primary_file, primary_model)
+    _save_merged_model(out_folder, primary_file, primary_model, source_metadata)
     del primary_model
     gc.collect()
 
-    for file_name, _, _ in available:
-        if file_name == primary_file:
-            continue
-        # Structure-only load: the target's Main/embedding weights live in the multi-GB exporter
-        # blob and are never needed here — transplant swaps in the donor's quantized Main, unify
-        # drops the tied embedding, and redirect repoints every shared initializer at the blob.
-        target = onnx.load(str(source_folder / file_name), load_external_data=False)
-        model = Shared_Merged.transplant_quantized_main(target, clean_primary)
-        del target
-        unify_embed_lmhead_graph(model, method_kind, block_size=primary_plan.block_size, quiet=True)
-        _drop_unused_initializers(model.graph)
-        Shared_Merged.redirect_shared_initializers_to_external(model, external_by_name)
-        _persist(file_name, model)
-        del model
-        gc.collect()
+    _transplant_merged_strategies(
+        source_folder,
+        out_folder,
+        available_files,
+        primary_file,
+        donor,
+        method_kind,
+        primary_plan.block_size,
+        external_by_name,
+        source_metadata,
+    )
+    del donor
+    gc.collect()
 
     shared_data = out_folder / shared_data_name
     if shared_data.exists():
