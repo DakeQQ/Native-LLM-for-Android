@@ -32,24 +32,49 @@ SHELL_PREFIXES = (
     "sampling_",
 )
 
-PREFILL_GREEDY_MODEL_NAME         = "LLM_TextPrefillGreedy.onnx"
-PREFILL_PENALTY_GREEDY_MODEL_NAME = "LLM_TextPrefillPenaltyGreedy.onnx"
-PREFILL_SAMPLING_MODEL_NAME       = "LLM_TextPrefillSampling.onnx"
-DECODE_GREEDY_MODEL_NAME          = "LLM_DecodeGreedy.onnx"
-DECODE_PENALTY_GREEDY_MODEL_NAME  = "LLM_DecodePenaltyGreedy.onnx"
-DECODE_SAMPLING_MODEL_NAME        = "LLM_DecodeSampling.onnx"
-SHARED_MODEL_NAME                 = "LLM_SharedInitializers.onnx"
+_DEFAULT_MODEL_FILE_NAMES = {
+    "main": "LLM_Main.onnx",
+    "rotary_prefill": "LLM_RotaryPrefill.onnx",
+    "rotary_decode": "LLM_RotaryDecode.onnx",
+    "greedy": "LLM_Greedy.onnx",
+    "sampling": "LLM_TopKTopPSampling.onnx",
+    "penalty_greedy": "LLM_PenaltyGreedy.onnx",
+    "penalty": "LLM_Penalty.onnx",
+    "argmax": "LLM_Argmax.onnx",
+    "prefill_greedy": "LLM_TextPrefillGreedy.onnx",
+    "prefill_penalty_greedy": "LLM_TextPrefillPenaltyGreedy.onnx",
+    "prefill_sampling": "LLM_TextPrefillSampling.onnx",
+    "decode_greedy": "LLM_DecodeGreedy.onnx",
+    "decode_penalty_greedy": "LLM_DecodePenaltyGreedy.onnx",
+    "decode_sampling": "LLM_DecodeSampling.onnx",
+    "shared_initializers": "LLM_SharedInitializers.onnx",
+}
+
+PREFILL_GREEDY_MODEL_NAME         = _DEFAULT_MODEL_FILE_NAMES["prefill_greedy"]
+PREFILL_PENALTY_GREEDY_MODEL_NAME = _DEFAULT_MODEL_FILE_NAMES["prefill_penalty_greedy"]
+PREFILL_SAMPLING_MODEL_NAME       = _DEFAULT_MODEL_FILE_NAMES["prefill_sampling"]
+DECODE_GREEDY_MODEL_NAME          = _DEFAULT_MODEL_FILE_NAMES["decode_greedy"]
+DECODE_PENALTY_GREEDY_MODEL_NAME  = _DEFAULT_MODEL_FILE_NAMES["decode_penalty_greedy"]
+DECODE_SAMPLING_MODEL_NAME        = _DEFAULT_MODEL_FILE_NAMES["decode_sampling"]
+SHARED_MODEL_NAME                 = _DEFAULT_MODEL_FILE_NAMES["shared_initializers"]
 SHARED_DATA_NAME                  = SHARED_MODEL_NAME + ".data"
 
-MERGED_CONSTITUENT_GRAPHS = (
-    "LLM_Main.onnx",
-    "LLM_RotaryPrefill.onnx",
-    "LLM_RotaryDecode.onnx",
-    "LLM_Greedy.onnx",
-    "LLM_TopKTopPSampling.onnx",
-    "LLM_PenaltyGreedy.onnx",
-    "LLM_Penalty.onnx",
-    "LLM_Argmax.onnx",
+_MERGED_CONSTITUENT_ROLES = (
+    "main",
+    "rotary_prefill",
+    "rotary_decode",
+    "greedy",
+    "sampling",
+    "penalty_greedy",
+    "penalty",
+    "argmax",
+)
+MERGED_CONSTITUENT_GRAPHS = tuple(_DEFAULT_MODEL_FILE_NAMES[role] for role in _MERGED_CONSTITUENT_ROLES)
+_LEGACY_SHARED_ARTIFACTS = (
+    "shared_initializers.npz",
+    "shared_initializers.manifest.json",
+    "shared_initializers.onnx",
+    "shared_initializers.onnx.data",
 )
 
 
@@ -118,6 +143,13 @@ def save_shared_initializers_from_tensors(shared: dict[str, TensorProto], path: 
 def shared_external_data_map(shared_model_path: Path) -> dict[str, dict[str, str]]:
     model = onnx.load(str(shared_model_path), load_external_data=False)
     return {init.name: _external_data_map(init) for init in model.graph.initializer}
+
+
+def _write_shared_initializer_bundle(
+    shared: dict[str, TensorProto], shared_model_path: Path
+) -> dict[str, dict[str, str]]:
+    save_shared_initializers_from_tensors(shared, shared_model_path)
+    return shared_external_data_map(shared_model_path)
 
 
 def make_external_initializer_ref(init: TensorProto, external_data: dict[str, str]) -> TensorProto:
@@ -276,7 +308,7 @@ def load_main_with_shared_initializers(
     The shared dict holds *references* into ``main`` (no copy), so it must be
     consumed (streamed to disk) before ``main`` is redirected to external refs.
     """
-    main = load_model(source_folder / _model_file_name(model_file_names, "main", "LLM_Main.onnx"))
+    main = load_model(source_folder / _model_file_name(model_file_names, "main"))
     shared: dict[str, TensorProto] = {}
     for init in main.graph.initializer:
         if _is_shareable_initializer(init, min_elements):
@@ -312,7 +344,7 @@ def _merge_rotary_into_main(
     """Fuse RotaryPrefill/RotaryDecode into Main. Returns (merged, kv_seq_len_output, rotary_model)."""
     if kind == "prefill":
         rotary = prefixed(
-            load_model(source_folder / _model_file_name(model_file_names, "rotary_prefill", "LLM_RotaryPrefill.onnx")),
+            load_model(source_folder / _model_file_name(model_file_names, "rotary_prefill")),
             "prefill_",
         )
         merged = merge_models_no_check(
@@ -326,7 +358,7 @@ def _merge_rotary_into_main(
         return merged, "prefill_kv_seq_len", rotary
 
     rotary = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "rotary_decode", "LLM_RotaryDecode.onnx")),
+        load_model(source_folder / _model_file_name(model_file_names, "rotary_decode")),
         "decode_",
     )
     mask_info = next(item for item in main.graph.input if item.name == "attention_mask")
@@ -363,7 +395,7 @@ def _order_kv_inputs_first(model: onnx.ModelProto) -> None:
 def _merge_greedy(source_folder, main, kind, model_file_names=None):
     merged, kv_seq_len, rotary = _merge_rotary_into_main(source_folder, main, kind, model_file_names)
     greedy = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "greedy", "LLM_Greedy.onnx")),
+        load_model(source_folder / _model_file_name(model_file_names, "greedy")),
         "greedy_",
     )
     merged = merge_models_no_check(merged, greedy, io_map=[("logits", "greedy_logits")])
@@ -374,7 +406,7 @@ def _merge_greedy(source_folder, main, kind, model_file_names=None):
 def _merge_sampling(source_folder, main, kind, model_file_names=None):
     merged, kv_seq_len, rotary = _merge_rotary_into_main(source_folder, main, kind, model_file_names)
     sampling = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "sampling", "LLM_TopKTopPSampling.onnx")),
+        load_model(source_folder / _model_file_name(model_file_names, "sampling")),
         "sampling_",
     )
     merged = merge_models_no_check(merged, sampling, io_map=[("logits", "sampling_logits")])
@@ -385,7 +417,7 @@ def _merge_sampling(source_folder, main, kind, model_file_names=None):
 def _merge_penalty_greedy_prefill(source_folder, main, kind, model_file_names=None):
     merged, kv_seq_len, rotary = _merge_rotary_into_main(source_folder, main, kind, model_file_names)
     penalty_greedy = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "penalty_greedy", "LLM_PenaltyGreedy.onnx")),
+        load_model(source_folder / _model_file_name(model_file_names, "penalty_greedy")),
         "penalty_greedy_",
     )
     merged = merge_models_no_check(merged, penalty_greedy, io_map=[("logits", "penalty_greedy_logits")])
@@ -418,11 +450,11 @@ def merge_decode_penalty_greedy(
 ) -> onnx.ModelProto:
     merged, kv_seq_len, rotary = _merge_rotary_into_main(source_folder, main, "decode", model_file_names)
     penalty = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "penalty", "LLM_Penalty.onnx")),
+        load_model(source_folder / _model_file_name(model_file_names, "penalty")),
         "penalty_",
     )
     penalty_greedy = prefixed(
-        load_model(source_folder / _model_file_name(model_file_names, "penalty_greedy", "LLM_PenaltyGreedy.onnx")),
+        load_model(source_folder / _model_file_name(model_file_names, "penalty_greedy")),
         "penalty_greedy_",
     )
     merged = merge_models_no_check(merged, penalty, io_map=[("logits", "penalty_logits_in")])
@@ -449,10 +481,10 @@ def merge_decode_sampling(
 # Top-level production entry points
 # --------------------------------------------------------------------------- #
 # Each entry: (output file name, recipe, [split graphs the recipe needs besides Main]).
-def _model_file_name(model_file_names: dict[str, str] | None, key: str, default: str) -> str:
+def _model_file_name(model_file_names: dict[str, str] | None, role: str) -> str:
     if model_file_names is None:
-        return default
-    return model_file_names.get(key, default)
+        return _DEFAULT_MODEL_FILE_NAMES[role]
+    return model_file_names.get(role, _DEFAULT_MODEL_FILE_NAMES[role])
 
 
 def _recipe_with_names(recipe, model_file_names: dict[str, str] | None):
@@ -466,26 +498,25 @@ def _recipe_with_names(recipe, model_file_names: dict[str, str] | None):
     return wrapped
 
 
+_MERGED_BUILD_SPECS = (
+    ("prefill_greedy", merge_prefill_greedy, ("rotary_prefill", "greedy")),
+    ("prefill_penalty_greedy", merge_prefill_penalty_greedy, ("rotary_prefill", "penalty_greedy")),
+    ("prefill_sampling", merge_prefill_sampling, ("rotary_prefill", "sampling")),
+    ("decode_greedy", merge_decode_greedy, ("rotary_decode", "greedy")),
+    ("decode_penalty_greedy", merge_decode_penalty_greedy,
+     ("rotary_decode", "penalty", "penalty_greedy")),
+    ("decode_sampling", merge_decode_sampling, ("rotary_decode", "sampling")),
+)
+
+
 def make_merged_build_plan(model_file_names: dict[str, str] | None = None):
-    rotary_prefill = _model_file_name(model_file_names, "rotary_prefill", "LLM_RotaryPrefill.onnx")
-    rotary_decode = _model_file_name(model_file_names, "rotary_decode", "LLM_RotaryDecode.onnx")
-    greedy = _model_file_name(model_file_names, "greedy", "LLM_Greedy.onnx")
-    sampling = _model_file_name(model_file_names, "sampling", "LLM_TopKTopPSampling.onnx")
-    penalty_greedy = _model_file_name(model_file_names, "penalty_greedy", "LLM_PenaltyGreedy.onnx")
-    penalty = _model_file_name(model_file_names, "penalty", "LLM_Penalty.onnx")
     return [
-        (_model_file_name(model_file_names, "prefill_greedy", PREFILL_GREEDY_MODEL_NAME),
-         _recipe_with_names(merge_prefill_greedy, model_file_names), [rotary_prefill, greedy]),
-        (_model_file_name(model_file_names, "prefill_penalty_greedy", PREFILL_PENALTY_GREEDY_MODEL_NAME),
-         _recipe_with_names(merge_prefill_penalty_greedy, model_file_names), [rotary_prefill, penalty_greedy]),
-        (_model_file_name(model_file_names, "prefill_sampling", PREFILL_SAMPLING_MODEL_NAME),
-         _recipe_with_names(merge_prefill_sampling, model_file_names), [rotary_prefill, sampling]),
-        (_model_file_name(model_file_names, "decode_greedy", DECODE_GREEDY_MODEL_NAME),
-         _recipe_with_names(merge_decode_greedy, model_file_names), [rotary_decode, greedy]),
-        (_model_file_name(model_file_names, "decode_penalty_greedy", DECODE_PENALTY_GREEDY_MODEL_NAME),
-         _recipe_with_names(merge_decode_penalty_greedy, model_file_names), [rotary_decode, penalty, penalty_greedy]),
-        (_model_file_name(model_file_names, "decode_sampling", DECODE_SAMPLING_MODEL_NAME),
-         _recipe_with_names(merge_decode_sampling, model_file_names), [rotary_decode, sampling]),
+        (
+            _model_file_name(model_file_names, output_role),
+            _recipe_with_names(recipe, model_file_names),
+            [_model_file_name(model_file_names, dependency_role) for dependency_role in dependency_roles],
+        )
+        for output_role, recipe, dependency_roles in _MERGED_BUILD_SPECS
     ]
 
 
@@ -557,12 +588,12 @@ def transplant_quantized_main(target: onnx.ModelProto, quantized_primary: onnx.M
     inserted = False
     for node in target.graph.node:
         if _node_is_shell(node):
-            new_nodes.append(copy.deepcopy(node))
+            new_nodes.append(node)
         elif not inserted:
-            new_nodes.extend(copy.deepcopy(primary_main_nodes))
+            new_nodes.extend(primary_main_nodes)
             inserted = True
     if not inserted:
-        new_nodes.extend(copy.deepcopy(primary_main_nodes))
+        new_nodes.extend(primary_main_nodes)
 
     primary_inits = {init.name: init for init in quantized_primary.graph.initializer}
     target_inits = {init.name: init for init in target.graph.initializer}
@@ -575,7 +606,7 @@ def transplant_quantized_main(target: onnx.ModelProto, quantized_primary: onnx.M
     def add_init(init: TensorProto) -> None:
         if init.name in seen_inits:
             return
-        new_initializers.append(copy.deepcopy(init))
+        new_initializers.append(init)
         seen_inits.add(init.name)
 
     for init in target.graph.initializer:
@@ -641,12 +672,31 @@ def extract_and_write_shared(
     if not shared:
         raise RuntimeError("Quantized primary Main has no initializer to share.")
 
-    save_shared_initializers_from_tensors(shared, shared_model_path)
+    external_by_name = _write_shared_initializer_bundle(shared, shared_model_path)
     del shared
-    external_by_name = shared_external_data_map(shared_model_path)
     for model in model_values:
         redirect_shared_initializers_to_external(model, external_by_name)
     return external_by_name
+
+
+def _build_available_merged_graphs(
+    source_folder: Path,
+    out_folder: Path,
+    build_plan,
+    main: onnx.ModelProto,
+    external_by_name: dict[str, dict[str, str]],
+) -> dict[str, Path]:
+    graphs: dict[str, Path] = {}
+    for name, recipe, dependencies in build_plan:
+        if not all((source_folder / dependency).exists() for dependency in dependencies):
+            continue
+        merged = recipe(source_folder, main)
+        redirect_shared_initializers_to_external(merged, external_by_name)
+        out_path = out_folder / name
+        save_model(merged, out_path)
+        graphs[name] = out_path
+        del merged
+    return graphs
 
 
 def build_shared_merged_bundle(
@@ -675,9 +725,12 @@ def build_shared_merged_bundle(
     out_folder.mkdir(parents=True, exist_ok=True)
 
     build_plan = make_merged_build_plan(model_file_names)
-    main_name = _model_file_name(model_file_names, "main", "LLM_Main.onnx")
-    shared_model_name = _model_file_name(model_file_names, "shared_initializers", SHARED_MODEL_NAME)
-    shared_data_name = _model_file_name(model_file_names, "shared_initializers_data", shared_model_name + ".data")
+    main_name = _model_file_name(model_file_names, "main")
+    shared_model_name = _model_file_name(model_file_names, "shared_initializers")
+    shared_data_name = (
+        model_file_names.get("shared_initializers_data", shared_model_name + ".data")
+        if model_file_names is not None else shared_model_name + ".data"
+    )
     if shared_data_name != shared_model_name + ".data":
         raise RuntimeError(
             "Shared initializer data file must be named after the shared ONNX model: "
@@ -691,30 +744,20 @@ def build_shared_merged_bundle(
     shared_data_path = out_folder / shared_data_name
 
     # Remove any legacy forbidden artifacts from older prototypes.
-    (out_folder / "shared_initializers.npz").unlink(missing_ok=True)
-    (out_folder / "shared_initializers.manifest.json").unlink(missing_ok=True)
-    (out_folder / "shared_initializers.onnx").unlink(missing_ok=True)
-    (out_folder / "shared_initializers.onnx.data").unlink(missing_ok=True)
+    for artifact in _LEGACY_SHARED_ARTIFACTS:
+        (out_folder / artifact).unlink(missing_ok=True)
 
     # Stream Main's shareable weights once into the shared blob, then strip Main to external refs so
     # every merged graph is built from a light-weight (data-less) Main. `shared` holds references into
     # Main, so it is released before the redirect frees Main's in-memory weights.
     main_for_merge, shared = load_main_with_shared_initializers(source_folder, min_shared_elements, model_file_names)
-    save_shared_initializers_from_tensors(shared, shared_model_path)
+    external_by_name = _write_shared_initializer_bundle(shared, shared_model_path)
     del shared
-    external_by_name = shared_external_data_map(shared_model_path)
     redirect_shared_initializers_to_external(main_for_merge, external_by_name)
 
-    graphs: dict[str, Path] = {}
-    for name, recipe, deps in build_plan:
-        if not all((source_folder / dep).exists() for dep in deps):
-            continue
-        merged = recipe(source_folder, main_for_merge)
-        redirect_shared_initializers_to_external(merged, external_by_name)
-        out_path = out_folder / name
-        save_model(merged, out_path)
-        graphs[name] = out_path
-        del merged
+    graphs = _build_available_merged_graphs(
+        source_folder, out_folder, build_plan, main_for_merge, external_by_name
+    )
 
     result: dict = {
         "graphs": graphs,
