@@ -1,6 +1,6 @@
 # Native-LLM-for-Android
 
-Quick Try: [Qwen3.5-0.8B-Android](https://drive.google.com/file/d/19dendHRrKxtNzQFPQsNX5AQcZDOxFfQO/view?usp=sharing)
+Quick Try: [Qwen3.5-0.8B-Android](https://drive.google.com/file/d/1O7Pz_MWXMTt6sKRMa9wwrmk5k1PmVjPK/view?usp=sharing)
 
 ### Qwen3.5-0.8B / 4096 Context
 ![Demo Animation](https://github.com/DakeQQ/Native-LLM-for-Android/blob/main/LLM_Qwen3.5.gif)
@@ -11,9 +11,7 @@ Demonstration of running a native Large Language Model (LLM) on Android devices.
 - **Qwen3.5**: 0.8B, 2B, 4B...
 - **Qwen3**: 0.6B, 1.7B, 4B...
 - **Qwen3-VL**: 2B, 4B...
-- **Qwen2.5-Instruct**: 0.5B, 1.5B, 3B...
 - **Qwen2.5-VL**: 3B
-- **DeepSeek-R1-Distill-Qwen**: 1.5B
 - **MiniCPM-DPO/SFT**: 1B, 2.7B
 - **Gemma-3-it**: 1B, 4B...
 - **Phi-4-mini-Instruct**: 3.8B
