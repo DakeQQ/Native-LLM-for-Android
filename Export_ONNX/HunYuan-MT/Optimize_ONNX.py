@@ -75,6 +75,11 @@ F16_OP_BLOCK_LIST              = [                                   # Op types 
 ]
 
 KV_ATTENTION_SURGERY           = "auto"                              # "auto" (enable when quantized KV detected) | True | False.
+# ORT 1.27's CUDA EP rejects ONNX blocked QuantizeLinear/DequantizeLinear at
+# execution time ("Unsupported quantization type"). Keep the original
+# Div -> Round -> Clip -> Cast KV write/rope-shift tails for portable CPU/CUDA
+# graphs. Enable only for a CPU-only runtime known to support blocked Q/DQ.
+KV_BLOCKED_QDQ_SURGERY         = False
 
 
 @dataclass
@@ -1745,11 +1750,15 @@ def apply_kv_surgery(model) -> None:
     applicable, _ = inspect_kv_surgery(model.graph)
     if applicable:
         n_qk, n_pv = rewire_attention_to_matmulintegertofloat(model)
-        n_q = rewire_kv_quantize_to_quantizelinear(model)
+        n_q = rewire_kv_quantize_to_quantizelinear(model) if KV_BLOCKED_QDQ_SURGERY else 0
         message = f"    surgery: {n_qk} Q@K + {n_pv} attn@V -> MatMulIntegerToFloat"
         if n_q:
             message += f"; {n_q} KV write tails -> QuantizeLinear (blocked int8)"
+        elif not KV_BLOCKED_QDQ_SURGERY:
+            message += "; preserved arithmetic KV write tails (CUDA-compatible)"
         print(message)
+        return
+    if not KV_BLOCKED_QDQ_SURGERY:
         return
     applicable, _ = inspect_rope_shift_surgery(model.graph)
     if applicable:
@@ -1762,9 +1771,16 @@ def plan_kv_surgery(src_path: str) -> tuple[bool, str]:
     try:
         applicable, reason = inspect_kv_surgery(meta.graph)
         if applicable:
-            return True, f"applying ({reason}) -> MatMulIntegerToFloat, in-memory"
+            tail_note = (
+                " + blocked Q/DQ write tails"
+                if KV_BLOCKED_QDQ_SURGERY
+                else "; arithmetic write tails retained for CUDA"
+            )
+            return True, f"applying ({reason}) -> MatMulIntegerToFloat{tail_note}, in-memory"
         rope_ok, rope_reason = inspect_rope_shift_surgery(meta.graph)
         if rope_ok:
+            if not KV_BLOCKED_QDQ_SURGERY:
+                return False, f"{rope_reason}; blocked Q/DQ disabled for CUDA compatibility"
             return True, f"applying ({rope_reason}) -> DequantizeLinear/QuantizeLinear, in-memory"
         for r in (reason, rope_reason):
             if "not an attention module" not in r and "not a rope-shift module" not in r:
