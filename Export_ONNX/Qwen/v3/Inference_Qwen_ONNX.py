@@ -30,6 +30,22 @@ def parse_args():
         default=None,
         help="Optional cap for generated tokens.",
     )
+    parser.add_argument(
+        "--provider",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help="Execution provider used for the merged prefill/decode sessions.",
+    )
+    parser.add_argument(
+        "--prompt",
+        default="地球最高的山峰是什么？",
+        help="User prompt to run through the deterministic merged graph.",
+    )
+    parser.add_argument(
+        "--think-mode",
+        action="store_true",
+        help="Use the model's thinking chat-template branch.",
+    )
     return parser.parse_args()
 
 
@@ -43,8 +59,8 @@ onnx_folder              = args.model_folder.expanduser().resolve()
 onnx_model_Metadata      = str(onnx_folder / METADATA_MODEL_NAME)
 MAX_NEW_TOKENS           = args.max_new_tokens
 
-TEST_THINK_MODE          = False
-TEST_QUERY               = "地球最高的山峰是什么？"
+TEST_THINK_MODE          = args.think_mode
+TEST_QUERY               = args.prompt
 
 USE_SAMPLING             = False
 TEMPERATURE              = 0.8
@@ -57,7 +73,11 @@ TOP_K                    = 10
 
 ORT_LOG                  = False
 ORT_FP16                 = False                   # CPU FP16 requires ARM64-v8.2a+.
-ORT_Accelerate_Providers = []                      # ORT execution providers; ['CUDAExecutionProvider', 'DmlExecutionProvider', 'OpenVINOExecutionProvider']
+ORT_Accelerate_Providers = (
+    ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    if args.provider == 'cuda'
+    else ['CPUExecutionProvider']
+)
 MAX_THREADS              = 0                       # 0 lets ORT choose the thread count.
 DEVICE_ID                = 0
 
@@ -219,28 +239,29 @@ def resolve_execution_provider():
         )
 
     if "CUDAExecutionProvider" in ORT_Accelerate_Providers:
+        cuda_options = {
+            'device_id':                          DEVICE_ID,
+            'gpu_mem_limit':                      24 * (1024 ** 3),
+            'arena_extend_strategy':              'kNextPowerOfTwo',
+            'cudnn_conv_algo_search':             'EXHAUSTIVE',
+            'sdpa_kernel':                        '2',
+            'use_tf32':                           '1',
+            'fuse_conv_bias':                     '1',
+            'cudnn_conv_use_max_workspace':       '1',
+            'cudnn_conv1d_pad_to_nc1d':           '0',
+            'tunable_op_enable':                  '0',
+            'tunable_op_tuning_enable':           '0',
+            'tunable_op_max_tuning_duration_ms':  10,
+            'do_copy_in_default_stream':          '0',
+            'enable_cuda_graph':                  '0',
+            'prefer_nhwc':                        '0',
+            'enable_skip_layer_norm_strict_mode': '0',
+            'use_ep_level_unified_stream':        '0'
+        }
         return (
             'cuda',
             C.OrtDevice.cuda(),
-            [{
-                'device_id':                          DEVICE_ID,
-                'gpu_mem_limit':                      24 * (1024 ** 3),
-                'arena_extend_strategy':              'kNextPowerOfTwo',
-                'cudnn_conv_algo_search':             'EXHAUSTIVE',
-                'sdpa_kernel':                        '2',
-                'use_tf32':                           '1',
-                'fuse_conv_bias':                     '1',
-                'cudnn_conv_use_max_workspace':       '1',
-                'cudnn_conv1d_pad_to_nc1d':           '0',
-                'tunable_op_enable':                  '0',
-                'tunable_op_tuning_enable':           '0',
-                'tunable_op_max_tuning_duration_ms':  10,
-                'do_copy_in_default_stream':          '0',
-                'enable_cuda_graph':                  '0',
-                'prefer_nhwc':                        '0',
-                'enable_skip_layer_norm_strict_mode': '0',
-                'use_ep_level_unified_stream':        '0'
-            }],
+            [cuda_options, {}],
         )
 
     if "DmlExecutionProvider" in ORT_Accelerate_Providers:
@@ -652,7 +673,6 @@ def run_merged_iobinding(folder, meta, strategy, model_file_names):
         f"  {'Overall':<12} {overall_tokens_per_second:>10.2f} t/s {generated_count:>8d} {total_elapsed:>8.3f}s\n"
         "--------------------------------------------------------\n"
     )
-    return text
 
 
 def _resolve_strategy():

@@ -43,6 +43,7 @@ QUANTED_FOLDER_PATH            = str(_SCRIPT_DIR / "Qwen_Optimized")        # De
 DOWNLOAD_PATH                  = str(Path.home() / "Downloads" / "Qwen3.5-0.8B")  # Model dir (attention fusion); "NONE" to skip.
 
 # --- Weight-only quantization defaults (Q2 / Q4 / Q8 -> MatMulNBits) -----------
+QUANT_METHOD                   = "Q4"                                # "Q2" | "Q4" | "Q8" | "F16" | "F32" | "DYNAMIC".
 WEIGHT_ONLY_ALGORITHM          = "AFFINE_REFINE_V2"                  # "AFFINE_REFINE_V2" | "k_quant" | "DEFAULT" | "RTN" | "HQQ". AFFINE_REFINE_V2 supports Q4/Q8; k_quant/RTN are Q4-only.
 BLOCK_SIZE                     = 32                                  # Power of two, [16..256].
 ACCURACY_LEVEL                 = 4                                   # MatMulNBits compute: 1=FP32 (best accuracy), 2=FP16, 3=BF16, 4=INT8 (fastest), 0=Default.
@@ -166,9 +167,9 @@ _MERGED_MODEL_NAMES = tuple(Path(name).stem for name, _, _ in Shared_Merged.MERG
 MODEL_PLANS: dict[str, Plan] = {
     "LLM_Metadata":             Plan(method="F32", optimize=False),
     # # Primary merged donor: quantized once, then transplanted into every strategy graph.
-    _PRIMARY_MERGED_MODEL:      Plan(method="Q4", external=True, optimize=True),
+    _PRIMARY_MERGED_MODEL:      Plan(method="QUANT_METHOD", external=True, optimize=True),
     # Standalone vision front-end (kept out of the fused language path).
-    "LLM_Vision":               Plan(method="Q4", external=True, optimize=True),
+    "LLM_Vision":               Plan(method="QUANT_METHOD", external=True, optimize=True),
     "LLM_Image_Preprocess":     Plan(method="F32", optimize=True),
     "LLM_Video_Preprocess":     Plan(method="F32", optimize=True),
     # KV-cache maintenance / rope-shift (no learnable weights).
@@ -280,8 +281,14 @@ def validate_plan(name: str, rp: ResolvedPlan) -> None:
                 f"[{name}] QDQ format supports only algo='DEFAULT' with 4-bit (got {rp.algo!r}, {bits}-bit)."
             )
 
-    if rp.method == "DYNAMIC" and rp.dynamic_weight_type not in _DYNAMIC_WEIGHT_TYPES:
-        raise ValueError(f"[{name}] unknown dynamic_weight_type; choose 'QUInt8' or 'QInt8'.")
+    if rp.method == "DYNAMIC":
+        if rp.dynamic_weight_type not in _DYNAMIC_WEIGHT_TYPES:
+            raise ValueError(f"[{name}] unknown dynamic_weight_type; choose 'QUInt8' or 'QInt8'.")
+        if rp.algo == "AFFINE_REFINE_V2" and any(op_type != "MatMul" for op_type in rp.op_types):
+            raise ValueError(
+                f"[{name}] AFFINE_REFINE_V2 dynamic quantization supports MatMul only "
+                f"(got {rp.op_types})."
+            )
 
 
 @dataclass
@@ -602,12 +609,15 @@ def _affine_v2_seed_refine_q4_rows(
     block_size: int,
     symmetric: bool = False,
     bits: int = 4,
+    allow_arbitrary_block_size: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Q4RefineStats]:
     """Build AFFINE_REFINE_V2's magnitude-weighted integer Q4/Q8 seed."""
     values = np.asarray(data)
     if values.ndim != 2:
         raise ValueError(f"AFFINE_REFINE_V2 seed expects a 2-D row matrix, got shape {values.shape}.")
-    if block_size < 16 or block_size > 256 or block_size & (block_size - 1):
+    if not allow_arbitrary_block_size and (
+        block_size < 16 or block_size > 256 or block_size & (block_size - 1)
+    ):
         raise ValueError(
             f"AFFINE_REFINE_V2 seed block_size must be a power of two in [16, 256], got {block_size}."
         )
@@ -896,8 +906,9 @@ def _affine_refine_v2_q4_rows(
     block_size: int,
     symmetric: bool = False,
     bits: int = 4,
+    allow_arbitrary_block_size: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Q4RefineStats]:
-    """Minimize the plain (unweighted) block MSE with a magnitude-weighted Pareto guard.
+    """Minimize plain block MSE for 4/8-bit NBits or 7/8-bit dynamic weights.
 
     Plain Frobenius error is the exact data-free projection-error proxy for
     white or diagonal-covariance activations. A candidate replaces the running
@@ -924,10 +935,12 @@ def _affine_refine_v2_q4_rows(
     if clip_ratios.ndim != 1 or not clip_ratios.size or np.any((clip_ratios <= 0.0) | (clip_ratios > 1.0)):
         raise ValueError("AFFINE_REFINE_V2 clip ratios must be a non-empty sequence in (0, 1].")
 
-    if block_size < 16 or block_size > 256 or block_size & (block_size - 1):
+    if not allow_arbitrary_block_size and (
+        block_size < 16 or block_size > 256 or block_size & (block_size - 1)
+    ):
         raise ValueError(f"AFFINE_REFINE_V2 block_size must be a power of two in [16, 256], got {block_size}.")
-    if bits not in (4, 8):
-        raise ValueError(f"AFFINE_REFINE_V2 supports 4- or 8-bit weights, got {bits}-bit.")
+    if bits not in (4, 7, 8):
+        raise ValueError(f"AFFINE_REFINE_V2 supports 4-, 7-, or 8-bit weights, got {bits}-bit.")
     maxq = float((1 << bits) - 1)
     midpoint = int(1 << (bits - 1))
     rows, columns = values.shape
@@ -1003,7 +1016,7 @@ def _affine_refine_v2_q4_rows(
         )
 
     best_q, best_scales, best_zero_points, _ = _affine_v2_seed_refine_q4_rows(
-        values, block_size, symmetric, bits
+        values, block_size, symmetric, bits, allow_arbitrary_block_size
     )
     best_q = best_q.reshape(-1, block_size)
     best_scales = best_scales.reshape(-1)
@@ -1760,10 +1773,8 @@ def _constant_int_values(name: str, producer: dict, init_map: dict) -> tuple[int
     return tuple(int(value) for value in values.reshape(-1))
 
 
-def fuse_consecutive_reshapes(model_path: str) -> int:
+def fuse_consecutive_reshapes_graph(graph) -> int:
     """Fuse constant-shape Reshape pairs only when their composed semantics are provable."""
-    model = onnx.load(model_path, load_external_data=False)
-    graph = model.graph
     graph_outputs = {value.name for value in graph.output}
     make_name = _make_name_factory(graph, "reshape_fusion_")
     removed_values, fused = set(), 0
@@ -1823,6 +1834,13 @@ def fuse_consecutive_reshapes(model_path: str) -> int:
         keep_info = [value for value in graph.value_info if value.name not in removed_values]
         graph.ClearField("value_info")
         graph.value_info.extend(keep_info)
+    return fused
+
+
+def fuse_consecutive_reshapes(model_path: str) -> int:
+    model = onnx.load(model_path, load_external_data=False)
+    fused = fuse_consecutive_reshapes_graph(model.graph)
+    if fused:
         onnx.save(model, model_path)
     del model
     gc.collect()
@@ -2066,8 +2084,155 @@ def quantize_weight_only(src_path: str, dst_path: str, rp: ResolvedPlan, bits: i
     gc.collect()
 
 
+def _quantize_affine_v2_dynamic_matmul(
+    graph,
+    node,
+    weight: TensorProto,
+    rp: ResolvedPlan,
+    make_name,
+):
+    weight_array = numpy_helper.to_array(weight)
+    if weight_array.ndim != 2 or weight_array.dtype.kind != "f":
+        print(
+            f"  AFFINE_REFINE_V2 dynamic: skipping {node.name or weight.name!r}; "
+            "MatMul weight must be a floating-point matrix."
+        )
+        return None, None
+
+    bits = 7 if rp.reduce_range else 8
+    if rp.per_channel:
+        rows = np.ascontiguousarray(weight_array.T, dtype=np.float32)
+        block_size = weight_array.shape[0]
+    else:
+        rows = np.ascontiguousarray(weight_array.reshape(1, -1), dtype=np.float32)
+        block_size = weight_array.size
+    quantized, scales, zero_points, stats = _affine_refine_v2_q4_rows(
+        rows,
+        block_size,
+        rp.symmetric,
+        bits,
+        allow_arbitrary_block_size=True,
+    )
+    quantized = quantized.reshape(rows.shape)
+    scales = scales.reshape(-1)
+    zero_points = zero_points.reshape(-1)
+    if rp.per_channel:
+        quantized = quantized.T
+    else:
+        quantized = quantized.reshape(weight_array.shape)
+
+    if rp.dynamic_weight_type == "QINT8":
+        offset = 1 << (bits - 1)
+        quantized = (quantized.astype(np.int16) - offset).astype(np.int8)
+        zero_points = (zero_points.astype(np.int16) - offset).astype(np.int8)
+    else:
+        quantized = quantized.astype(np.uint8)
+        zero_points = zero_points.astype(np.uint8)
+
+    weight_name = make_name(f"{weight.name}_quantized")
+    scale_name = make_name(f"{weight.name}_scale")
+    zero_point_name = make_name(f"{weight.name}_zero_point")
+    if not rp.per_channel:
+        scales = scales[0]
+        zero_points = zero_points[0]
+    graph.initializer.extend([
+        _make_quant_initializer(weight_name, quantized),
+        _make_quant_initializer(scale_name, scales.astype(np.float32, copy=False)),
+        _make_quant_initializer(zero_point_name, zero_points),
+    ])
+
+    replacement = [helper.make_node(
+        "DynamicQuantizeMatMul",
+        [node.input[0], weight_name, scale_name, zero_point_name],
+        list(node.output),
+        name=make_name(f"{node.name or 'matmul'}_dynamic_quantize_matmul"),
+        domain="com.microsoft",
+    )]
+    return replacement, stats
+
+
+def quantize_affine_v2_dynamic_model(
+    model: onnx.ModelProto,
+    rp: ResolvedPlan,
+) -> Q4RefineStats:
+    """Replace selected constant MatMuls with V2-refined dynamic INT8/UINT8 ops."""
+    total = Q4RefineStats()
+    quantized_matmuls = 0
+
+    def rewrite_graph(graph) -> None:
+        nonlocal quantized_matmuls
+        init_map = _init_map(graph)
+        make_name = _make_name_factory(graph, "affine_refine_v2_dynamic_")
+        replaced_initializers: set[str] = set()
+        new_nodes = []
+        for node in graph.node:
+            for attribute in node.attribute:
+                if attribute.HasField("g"):
+                    rewrite_graph(attribute.g)
+                for subgraph in attribute.graphs:
+                    rewrite_graph(subgraph)
+
+            selected = node.op_type == "MatMul" and "MatMul" in rp.op_types
+            if rp.nodes_to_include is not None:
+                selected = selected and node.name in rp.nodes_to_include
+            if rp.nodes_to_exclude is not None and node.name in rp.nodes_to_exclude:
+                selected = False
+
+            replacement = None
+            stats = None
+            if selected and len(node.input) >= 2:
+                weight = init_map.get(node.input[1])
+                if weight is not None:
+                    replacement, stats = _quantize_affine_v2_dynamic_matmul(
+                        graph, node, weight, rp, make_name
+                    )
+                    if replacement is not None:
+                        quantized_matmuls += 1
+                        replaced_initializers.add(weight.name)
+            new_nodes.extend(replacement or [node])
+            if stats is not None:
+                total.add(stats)
+
+        graph.ClearField("node")
+        graph.node.extend(new_nodes)
+        _drop_unused_initializers(graph)
+        remaining_initializers = {initializer.name for initializer in graph.initializer}
+        obsolete_inputs = replaced_initializers - remaining_initializers
+        if obsolete_inputs:
+            graph_inputs = [value for value in graph.input if value.name not in obsolete_inputs]
+            graph.ClearField("input")
+            graph.input.extend(graph_inputs)
+
+    rewrite_graph(model.graph)
+    if quantized_matmuls:
+        _ensure_ms_domain_opset(model)
+    _deduplicate_node_names(model.graph)
+    ratio = total.refined_error / total.seed_error if total.seed_error else 1.0
+    print(
+        f"  AFFINE_REFINE_V2 dynamic surgery: {quantized_matmuls} MatMul -> "
+        f"DynamicQuantizeMatMul; improved {total.improved_blocks}/{total.blocks} channels/tensors "
+        f"over its internal seed, plain MSE ratio={ratio:.6f}."
+    )
+    return total
+
+
 def quantize_dynamic_int8(src_path: str, dst_path: str, rp: ResolvedPlan, external: bool,
                           do_surgery: bool = False) -> None:
+    if rp.algo == "AFFINE_REFINE_V2":
+        print(
+            f"  Quantizing weights ({rp.algo}, dynamic {rp.dynamic_weight_type}, "
+            f"per_channel={rp.per_channel}, reduce_range={rp.reduce_range}, "
+            f"symmetric={rp.symmetric})..."
+        )
+        model = quant_utils.load_model_with_shape_infer(Path(src_path))
+        if do_surgery:
+            apply_kv_surgery(model)
+        quantize_affine_v2_dynamic_model(model, rp)
+        _save_model(model, dst_path, external)
+        del model
+        gc.collect()
+        return
+
     weight_type = _DYNAMIC_WEIGHT_TYPES[rp.dynamic_weight_type]
     print(f"  Quantizing weights (dynamic INT8, {rp.dynamic_weight_type}, "
           f"per_channel={rp.per_channel}, reduce_range={rp.reduce_range})...")
@@ -2342,7 +2507,16 @@ def _find_embed_gather(graph):
 def _restore_embed_shell_boundary(model: onnx.ModelProto) -> bool:
     """Restore the canonical Embed-to-Main edge after whole-graph optimization."""
     graph = model.graph
-    gather, _, _, _ = _find_embed_gather(graph)
+    try:
+        gather, _, _, _ = _find_embed_gather(graph)
+    except RuntimeError:
+        candidates = [node for node in graph.node if node.op_type == "GatherBlockQuantized"]
+        if len(candidates) != 1:
+            raise RuntimeError(
+                "Cannot restore Embed shell boundary: expected one quantized embedding "
+                f"GatherBlockQuantized node, found {len(candidates)}."
+            )
+        gather = candidates[0]
     old_name = gather.output[0]
     new_name = "embed_text_hidden_states"
     if old_name == new_name:
@@ -2423,7 +2597,7 @@ def _find_lmhead(graph, vocab: int, hidden: int):
             return node.op_type, node
 
     expected = {(hidden, vocab), (vocab, hidden)}
-    for op_type in ("MatMul", "Gemm", "MatMulInteger"):
+    for op_type in ("MatMul", "Gemm", "MatMulInteger", "DynamicQuantizeMatMul"):
         for node in graph.node:
             if node.op_type != op_type or len(node.input) < 2:
                 continue
@@ -2431,6 +2605,58 @@ def _find_lmhead(graph, vocab: int, hidden: int):
             if init is not None and _tensor_dims(init) in expected:
                 return node.op_type, node
     raise RuntimeError(f"lm_head op with vocab={vocab}, hidden={hidden} was not found")
+
+
+def _source_embed_lmhead_equal(model_path: Path, chunk_rows: int = 256) -> bool:
+    """Compare exported float embedding and LM-head values before quantization."""
+    model = onnx.load(str(model_path), load_external_data=False)
+    try:
+        _, embed_name, vocab, hidden = _find_embed_gather(model.graph)
+        lmhead_type, lmhead = _find_lmhead(model.graph, vocab, hidden)
+        if lmhead_type not in ("MatMul", "Gemm") or len(lmhead.input) < 2:
+            return False
+        inits = _init_map(model.graph)
+        embed = inits.get(embed_name)
+        lmhead_weight = inits.get(lmhead.input[1])
+        if embed is None or lmhead_weight is None:
+            return False
+        def tensor_values(tensor: TensorProto):
+            external = {entry.key: entry.value for entry in tensor.external_data}
+            if tensor.data_location == TensorProto.EXTERNAL and "location" in external:
+                return np.memmap(
+                    model_path.parent / external["location"],
+                    mode="r",
+                    dtype=helper.tensor_dtype_to_np_dtype(tensor.data_type),
+                    offset=int(external.get("offset", 0)),
+                    shape=_tensor_dims(tensor),
+                )
+            return numpy_helper.to_array(tensor)
+
+        embed_values = tensor_values(embed)
+        lmhead_values = tensor_values(lmhead_weight)
+        if lmhead_values.shape == (hidden, vocab):
+            lmhead_values = lmhead_values.T
+        elif lmhead_values.shape != (vocab, hidden):
+            return False
+        if embed_values.shape != lmhead_values.shape or embed_values.dtype != lmhead_values.dtype:
+            return False
+        return all(
+            np.array_equal(embed_values[start:start + chunk_rows], lmhead_values[start:start + chunk_rows])
+            for start in range(0, vocab, chunk_rows)
+        )
+    finally:
+        del model
+        gc.collect()
+
+
+def _configure_embedding_quantization(rp: ResolvedPlan, share_embed_lmhead: bool) -> None:
+    if rp.algo != "AFFINE_REFINE_V2" or rp.method not in ("Q4", "Q8"):
+        return
+    pairs = [(op_type, axis) for op_type, axis in zip(rp.op_types, rp.axes) if op_type != "Gather"]
+    if not share_embed_lmhead:
+        pairs.append(("Gather", 1))
+    rp.op_types = tuple(op_type for op_type, _ in pairs)
+    rp.axes = tuple(axis for _, axis in pairs)
 
 
 def _make_scalar_initializer(graph, name: str, array: np.ndarray) -> str:
@@ -2597,6 +2823,11 @@ def _find_dynamic_weight_scale(graph, lmhead, vocab: int) -> str | None:
     inits = _init_map(graph)
     consumers = _graph_consumers(graph)
     producer = {out: node for node in graph.node for out in node.output}
+
+    if lmhead.op_type == "DynamicQuantizeMatMul" and len(lmhead.input) > 2:
+        scale = inits.get(lmhead.input[2])
+        if scale is not None and _is_dynamic_weight_scale_init(scale, vocab):
+            return scale.name
     bq = lmhead.input[1]
     candidates = []
     if bq.endswith("_quantized"):
@@ -2744,8 +2975,11 @@ def unify_embed_lmhead_graph(model: onnx.ModelProto, method: str, block_size: in
             raise RuntimeError(f"NBITS share_embed_lmhead expected MatMulNBits lm_head, got {lmhead.op_type}")
         info = _share_nbits_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden, block_size)
     elif method == "DYNAMIC":
-        if lmhead.op_type != "MatMulInteger":
-            raise RuntimeError(f"DYNAMIC share_embed_lmhead expected MatMulInteger lm_head, got {lmhead.op_type}")
+        if lmhead.op_type not in ("MatMulInteger", "DynamicQuantizeMatMul"):
+            raise RuntimeError(
+                "DYNAMIC share_embed_lmhead expected MatMulInteger or "
+                f"DynamicQuantizeMatMul lm_head, got {lmhead.op_type}"
+            )
         info = _share_dynamic_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden)
     else:
         raise ValueError(f"unknown share_embed_lmhead method {method!r}")
@@ -2848,7 +3082,7 @@ def inspect_kv_quantize_surgery(graph) -> tuple[bool, str]:
     return True, f"per-head {'asymmetric uint8+bias' if is_asym else 'symmetric int8'} write tail"
 
 
-def rewire_attention_to_matmulintegertofloat(model) -> tuple[int, int]:
+def rewire_attention_to_dynamic_quantize_matmul(model) -> tuple[int, int]:
     graph = model.graph
     inits = {i.name for i in graph.initializer}
     producer = {o: n for n in graph.node for o in n.output}
@@ -2922,13 +3156,14 @@ def rewire_attention_to_matmulintegertofloat(model) -> tuple[int, int]:
             else:
                 k_in, casts = prep_b(_src_through_casts(b, producer), pfx, "qk")
                 qk_bzp = target_bzp
-            qu8, qs, qzp = f"{pfx}_qk_qu8", f"{pfx}_qk_qs", f"{pfx}_qk_qzp"
             new_nodes.extend(casts)
-            new_nodes.extend([
-                helper.make_node("DynamicQuantizeLinear", [a], [qu8, qs, qzp], name=f"{pfx}_qk_dql"),
-                helper.make_node("MatMulIntegerToFloat", [qu8, k_in, qs, one_f32(f"{pfx}_qk_one_f32"), qzp, qk_bzp], [out],
-                                 name=f"{pfx}_qk_mmitf", domain="com.microsoft"),
-            ])
+            new_nodes.append(helper.make_node(
+                "DynamicQuantizeMatMul",
+                [a, k_in, one_f32(f"{pfx}_qk_one_f32"), qk_bzp],
+                [out],
+                name=f"{pfx}_qk_dqmm",
+                domain="com.microsoft",
+            ))
             n_qk += 1
         else:
             bp = producer.get(b)
@@ -2957,15 +3192,18 @@ def rewire_attention_to_matmulintegertofloat(model) -> tuple[int, int]:
                 v_bias = None
             v_in, casts = prep_b(_src_through_casts(v_traced, producer), pfx, "pv")
             vst, ps = f"{pfx}_pv_vst", f"{pfx}_pv_ps"
-            pu8, psc, pzp = f"{pfx}_pv_pu8", f"{pfx}_pv_psc", f"{pfx}_pv_pzp"
             main = out if v_bias is None else f"{pfx}_pv_main"
             new_nodes.extend(casts)
             new_nodes.extend([
                 helper.make_node("Transpose", [v_scale_f], [vst], perm=[0, 1, 2, 4, 3], name=f"{pfx}_pv_tr"),
                 helper.make_node("Mul", [a, vst], [ps], name=f"{pfx}_pv_mul"),
-                helper.make_node("DynamicQuantizeLinear", [ps], [pu8, psc, pzp], name=f"{pfx}_pv_dql"),
-                helper.make_node("MatMulIntegerToFloat", [pu8, v_in, psc, one_f32(f"{pfx}_pv_one_f32"), pzp, target_bzp], [main],
-                                 name=f"{pfx}_pv_mmitf", domain="com.microsoft"),
+                helper.make_node(
+                    "DynamicQuantizeMatMul",
+                    [ps, v_in, one_f32(f"{pfx}_pv_one_f32"), target_bzp],
+                    [main],
+                    name=f"{pfx}_pv_dqmm",
+                    domain="com.microsoft",
+                ),
             ])
             if v_bias is not None:
                 biasmm = f"{pfx}_pv_biasmm"
@@ -3187,9 +3425,9 @@ def rewire_kv_quantize_to_quantizelinear(model) -> int:
 def apply_kv_surgery(model) -> None:
     applicable, _ = inspect_kv_surgery(model.graph)
     if applicable:
-        n_qk, n_pv = rewire_attention_to_matmulintegertofloat(model)
+        n_qk, n_pv = rewire_attention_to_dynamic_quantize_matmul(model)
         n_q = rewire_kv_quantize_to_quantizelinear(model) if KV_BLOCKED_QDQ_SURGERY else 0
-        message = f"    surgery: {n_qk} Q@K + {n_pv} attn@V -> MatMulIntegerToFloat"
+        message = f"    surgery: {n_qk} Q@K + {n_pv} attn@V -> DynamicQuantizeMatMul"
         if n_q:
             message += f"; {n_q} KV write tails -> QuantizeLinear (blocked int8)"
         elif not KV_BLOCKED_QDQ_SURGERY:
@@ -3214,7 +3452,7 @@ def plan_kv_surgery(src_path: str) -> tuple[bool, str]:
                 if KV_BLOCKED_QDQ_SURGERY
                 else "; arithmetic write tails retained for CUDA"
             )
-            return True, f"applying ({reason}) -> MatMulIntegerToFloat{tail_note}, in-memory"
+            return True, f"applying ({reason}) -> DynamicQuantizeMatMul{tail_note}, in-memory"
         rope_ok, rope_reason = inspect_rope_shift_surgery(meta.graph)
         if rope_ok:
             if not KV_BLOCKED_QDQ_SURGERY:
@@ -3361,15 +3599,34 @@ def _load_transplant_donor(primary_path: Path) -> onnx.ModelProto:
     return donor
 
 
+def _validate_quantized_embedding(primary_path: Path, primary_plan: ResolvedPlan) -> None:
+    if primary_plan.algo != "AFFINE_REFINE_V2" or "Gather" not in primary_plan.op_types:
+        return
+    model = onnx.load(str(primary_path), load_external_data=False)
+    count = sum(node.op_type == "GatherBlockQuantized" for node in model.graph.node)
+    del model
+    if count == 0:
+        raise RuntimeError(
+            f"{primary_path.name} requested embedding Gather quantization but the final "
+            "graph has no GatherBlockQuantized node."
+        )
+    print(f"  Verified {count} quantized embedding GatherBlockQuantized node(s).")
+
+
 def _load_unified_primary(
     primary_path: Path,
     method_kind: str,
     block_size: int,
+    share_embed_lmhead: bool,
 ) -> tuple[onnx.ModelProto, dict | None]:
     # Drop the duplicate fp32 embedding before loading external data to bound
     # peak memory to the surviving quantized language weights.
     model = onnx.load(str(primary_path), load_external_data=False)
-    info = unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+    info = (
+        unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+        if share_embed_lmhead
+        else None
+    )
     if info is not None:
         print(
             f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
@@ -3402,6 +3659,7 @@ def _transplant_merged_strategies(
     donor: onnx.ModelProto,
     method_kind: str,
     block_size: int,
+    share_embed_lmhead: bool,
     external_by_name: dict[str, dict[str, str]],
     metadata: dict,
 ) -> None:
@@ -3413,7 +3671,11 @@ def _transplant_merged_strategies(
         target = onnx.load(str(source_folder / file_name), load_external_data=False)
         model = Shared_Merged.transplant_quantized_main(target, donor)
         del target
-        unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+        if share_embed_lmhead:
+            unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+        fused_reshapes = fuse_consecutive_reshapes_graph(model.graph)
+        if fused_reshapes:
+            print(f"  {file_name}: fused {fused_reshapes} semantics-safe consecutive Reshape pairs.")
         _drop_unused_initializers(model.graph)
         Shared_Merged.redirect_shared_initializers_to_external(model, external_by_name)
         _save_merged_model(out_folder, file_name, model, metadata)
@@ -3441,6 +3703,15 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
     primary_plan = resolved.get(primary_stem) or resolved.get(_PRIMARY_MERGED_MODEL)
     if primary_plan is None:
         raise RuntimeError(f"No plan is configured for the primary merged graph {primary_stem!r}.")
+    share_embed_lmhead = _source_embed_lmhead_equal(source_folder / primary_file)
+    _configure_embedding_quantization(primary_plan, share_embed_lmhead)
+    print(
+        "  Embed/lm_head check: "
+        + ("identical; sharing enabled." if share_embed_lmhead else
+            "different; sharing disabled and embedding Gather quantization enabled."
+            if "Gather" in primary_plan.op_types else
+            "different; sharing disabled.")
+    )
 
     _print_process_header(primary_stem, primary_plan)
     process_model(primary_stem, primary_plan)
@@ -3448,6 +3719,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
     primary_path = out_folder / primary_file
     if not primary_path.exists():
         raise FileNotFoundError(primary_path)
+    _validate_quantized_embedding(primary_path, primary_plan)
 
     method_kind = _unify_method_kind(primary_plan)
     shared_model_name = model_file_names.get("shared_initializers", Shared_Merged.SHARED_MODEL_NAME)
@@ -3458,7 +3730,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
 
     donor = _load_transplant_donor(primary_path)
     primary_model, unify_info = _load_unified_primary(
-        primary_path, method_kind, primary_plan.block_size
+        primary_path, method_kind, primary_plan.block_size, share_embed_lmhead
     )
     external_by_name = Shared_Merged.write_shared_initializers(primary_model, out_folder / shared_model_name)
 
@@ -3478,6 +3750,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
         donor,
         method_kind,
         primary_plan.block_size,
+        share_embed_lmhead,
         external_by_name,
         source_metadata,
     )
