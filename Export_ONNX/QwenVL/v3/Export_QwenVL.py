@@ -303,19 +303,18 @@ class ARGMAX(torch.nn.Module):
 
 
 class TOPK_TOPP_SAMPLING(torch.nn.Module):
-    """Apply repetition penalty, temperature, top-k/top-p, then sample."""
+    """Top-K/Top-P categorical sampling with sign-aware repetition penalty."""
 
-    def __init__(self):
-        super().__init__()
-        self.register_buffer(
-            "neg_inf", torch.tensor(float("-inf"), dtype=torch.float32), persistent=False
-        )
-        self.register_buffer(
-            "gumbel_min", torch.tensor(1.0e-7, dtype=torch.float32), persistent=False
-        )
-        self.register_buffer(
-            "gumbel_max", torch.tensor(1.0 - 1.0e-7, dtype=torch.float32), persistent=False
-        )
+    def sample(self, scores, temperature, top_k, top_p):
+        sorted_scores, sorted_indices = torch.topk(scores, k=top_k, dim=-1, largest=True, sorted=True)
+        sorted_probabilities = torch.softmax(sorted_scores / temperature, dim=-1)
+        cumulative_probabilities = torch.cumsum(sorted_probabilities, dim=-1)
+        keep = (cumulative_probabilities - sorted_probabilities) <= top_p
+
+        kept_mass = torch.where(keep, cumulative_probabilities, 0.0).amax(dim=-1, keepdim=True)
+        threshold = torch.rand_like(kept_mass) * kept_mass
+        winner = torch.argmax((cumulative_probabilities >= threshold).int(), dim=-1, keepdim=True)
+        return torch.gather(sorted_indices, 1, winner).int()
 
     def forward(
         self,
@@ -334,24 +333,7 @@ class TOPK_TOPP_SAMPLING(torch.nn.Module):
             previous_logits * inverse_penalty,
         )
         scores = torch.scatter(logits, 1, previous_ids, previous_scores)
-        scores = scores * torch.reciprocal(temperature)
-
-        sorted_scores, sorted_indices = torch.topk(
-            scores, k=top_k, dim=-1, largest=True, sorted=True
-        )
-        sorted_probabilities = torch.softmax(sorted_scores, dim=-1)
-        cumulative_probabilities = torch.cumsum(sorted_probabilities, dim=-1)
-        keep_top_p = (
-            cumulative_probabilities - sorted_probabilities
-        ) <= top_p
-        sorted_scores = torch.where(keep_top_p, sorted_scores, self.neg_inf)
-
-        noise = torch.clamp(
-            torch.rand_like(sorted_scores), self.gumbel_min, self.gumbel_max
-        )
-        gumbel = -torch.log(-torch.log(noise))
-        winner = torch.argmax(sorted_scores + gumbel, dim=-1, keepdim=True)
-        sampled_id = torch.gather(sorted_indices, 1, winner).int()
+        sampled_id = self.sample(scores, temperature, top_k, top_p)
         save_id = torch.cat([previous_ids, sampled_id], dim=-1)
         return sampled_id, save_id
 
