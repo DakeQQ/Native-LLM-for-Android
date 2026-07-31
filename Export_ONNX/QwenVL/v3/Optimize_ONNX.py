@@ -11,6 +11,7 @@ from pathlib import Path
 from fractions import Fraction
 from functools import lru_cache
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import onnx
@@ -42,11 +43,36 @@ QUANTED_FOLDER_PATH            = str(_SCRIPT_DIR / "Qwen_Optimized")        # De
 DOWNLOAD_PATH                  = str(Path.home() / "Downloads" / "Qwen3-VL-2B-Instruct")  # Model dir (attention fusion); "NONE" to skip.
 
 # --- Weight-only quantization defaults (Q2 / Q4 / Q8 -> MatMulNBits) -----------
-WEIGHT_ONLY_ALGORITHM          = "k_quant"                           # "k_quant" | "DEFAULT" | "RTN" | "HQQ". k_quant/RTN are Q4-only; use DEFAULT/HQQ for Q2/Q8.
+QUANT_METHOD                   = "Q4"                                # "Q2" | "Q4" | "Q8" | "F16" | "F32" | "DYNAMIC".
+WEIGHT_ONLY_ALGORITHM          = "AFFINE_REFINE_V2"                  # "AFFINE_REFINE_V2" | "k_quant" | "DEFAULT" | "RTN" | "HQQ". AFFINE_REFINE_V2 supports Q4/Q8; k_quant/RTN are Q4-only.
 BLOCK_SIZE                     = 32                                  # Power of two, [16..256].
-ACCURACY_LEVEL                 = 4                                   # MatMulNBits accuracy level 0-4 (DEFAULT algo only).
+ACCURACY_LEVEL                 = 4                                   # MatMulNBits compute: 1=FP32 (best accuracy), 2=FP16, 3=BF16, 4=INT8 (fastest), 0=Default.
 QUANT_SYMMETRIC                = False                               # False = asymmetric (accuracy), True = symmetric (speed).
 QUANT_FORMAT                   = "QOperator"                         # "QOperator" (MatMulNBits op) | "QDQ" (DEFAULT algo + 4-bit only).
+
+# --- AFFINE_REFINE_V2 custom CPU quantizer (data-free plain-MSE refinement) ----
+AFFINE_V2_SEED_ITERATIONS      = 4                                   # Magnitude-weighted seed coordinate-descent passes.
+AFFINE_V2_SEED_ZP_RADIUS       = 2                                   # Search the ORT k-quant zero point +/- this radius.
+AFFINE_V2_SEED_CHUNK_BLOCKS    = 65536                               # Peak-memory bound for seed construction.
+AFFINE_V2_SEED_BLOCKS_PER_JOB  = 1024                                # Keep small seeds single-threaded to avoid dispatch overhead.
+AFFINE_V2_SEED_WORKERS         = 4
+AFFINE_V2_NUMBA_THREADS        = 4
+
+# AFFINE_REFINE_V2 minimizes plain (unweighted) block MSE. For the data-free
+# maximum-entropy prior of white/diagonal-covariance activations, the expected
+# projection error equals the Frobenius weight error. A per-block Pareto guard
+# keeps magnitude-weighted error within a bounded fraction of the internal seed
+# so no block's largest weights degrade badly.
+AFFINE_V2_ITERATIONS           = 6                                   # Plain-MSE scale/code alternating passes per start.
+AFFINE_V2_CLIP_RATIOS          = (1.0, 0.94, 0.82, 0.70, 0.55)       # Deterministic range starts for every integer zero point.
+AFFINE_V2_CHUNK_BLOCKS         = 8192                                # Bounds temporary fitting arrays independently of model size.
+AFFINE_V2_WEIGHTED_TOLERANCE   = 0.15                                # Pareto guard: max fractional magnitude-weighted regression vs the internal seed.
+# The asymmetric main-refine sweep evaluates every integer zero point. That is 16
+# candidates at Q4 but 256 at Q8, which is intractable across a full model. When
+# the candidate count exceeds this limit (Q8 only), sweep a window of this many
+# zero points centered on each block's near-optimal k-quant seed instead of the
+# whole range. Must be >= 16 so Q2/Q4 always sweep fully and stay byte-identical.
+AFFINE_V2_ASYM_ZP_SWEEP_LIMIT  = 32
 
 # --- Dynamic INT8 quantization defaults (DYNAMIC -> quantize_dynamic) ----------
 DYNAMIC_WEIGHT_TYPE            = "QInt8"                             # "QUInt8" | "QInt8".
@@ -107,7 +133,7 @@ class Plan:
     """Per-module recipe. None inherits the USER CONFIG default."""
     method:              str                    = "Q4"     # Q2 | Q4 | Q8 | DYNAMIC | F16 | F32
     # weight-only (Q2/Q4/Q8)
-    algo:                str  | None            = None     # DEFAULT | RTN | HQQ | k_quant (k_quant/RTN: Q4 only)
+    algo:                str  | None            = None     # AFFINE_REFINE_V2 | DEFAULT | RTN | HQQ | k_quant (AFFINE_REFINE_V2: Q4/Q8; k_quant/RTN: Q4 only)
     op_types:            tuple[str, ...] | None = None     # e.g. ("MatMul",) or ("Gather",)
     axes:                tuple[int, ...] | None = None     # quant axis per op type
     block_size:          int  | None            = None
@@ -141,9 +167,9 @@ _MERGED_MODEL_NAMES = tuple(Path(name).stem for name, _, _ in Shared_Merged.MERG
 MODEL_PLANS: dict[str, Plan] = {
     "LLM_Metadata":             Plan(method="F32", optimize=False),
     # # Primary merged donor: quantized once, then transplanted into every strategy graph.
-    _PRIMARY_MERGED_MODEL:      Plan(method="Q4", external=True, optimize=True),
+    _PRIMARY_MERGED_MODEL:      Plan(method="QUANT_METHOD", external=True, optimize=True),
     # Standalone vision front-end (kept out of the fused language path).
-    "LLM_Vision":               Plan(method="Q4", external=True),
+    "LLM_Vision":               Plan(method="QUANT_METHOD", external=True),
     "LLM_Image_Preprocess":     Plan(method="F32"),
     "LLM_Video_Preprocess":     Plan(method="F32"),
     # KV-cache maintenance / rope-shift (no learnable weights).
@@ -166,6 +192,7 @@ _WEIGHT_ONLY_ALGO_BITS = {
     "DEFAULT": frozenset(_WEIGHT_ONLY_BITS.values()),
     "HQQ": frozenset(_WEIGHT_ONLY_BITS.values()),
     # ORT routes RTN and k_quant through _generate_q4_node_config(), which hard-codes bits=4.
+    "AFFINE_REFINE_V2": frozenset({4, 8}),
     "RTN": frozenset({4}),
     "k_quant": frozenset({4}),
 }
@@ -244,15 +271,1313 @@ def validate_plan(name: str, rp: ResolvedPlan) -> None:
             raise ValueError(f"[{name}] unknown quant_format; choose 'QOperator' or 'QDQ'.")
         if len(rp.op_types) != len(rp.axes):
             raise ValueError(f"[{name}] op_types {rp.op_types} and axes {rp.axes} must have equal length.")
-        if "Gather" in rp.op_types and rp.algo != "DEFAULT":
-            raise ValueError(f"[{name}] Gather quantization requires algo='DEFAULT' (got {rp.algo!r}).")
+        if "Gather" in rp.op_types and rp.algo not in ("DEFAULT", "AFFINE_REFINE_V2"):
+            raise ValueError(
+                f"[{name}] Gather quantization requires algo='DEFAULT' or "
+                f"'AFFINE_REFINE_V2' (got {rp.algo!r})."
+            )
         if rp.quant_format == "QDQ" and (rp.algo != "DEFAULT" or bits != 4):
             raise ValueError(
                 f"[{name}] QDQ format supports only algo='DEFAULT' with 4-bit (got {rp.algo!r}, {bits}-bit)."
             )
 
-    if rp.method == "DYNAMIC" and rp.dynamic_weight_type not in _DYNAMIC_WEIGHT_TYPES:
-        raise ValueError(f"[{name}] unknown dynamic_weight_type; choose 'QUInt8' or 'QInt8'.")
+    if rp.method == "DYNAMIC":
+        if rp.dynamic_weight_type not in _DYNAMIC_WEIGHT_TYPES:
+            raise ValueError(f"[{name}] unknown dynamic_weight_type; choose 'QUInt8' or 'QInt8'.")
+        if rp.algo == "AFFINE_REFINE_V2" and any(op_type != "MatMul" for op_type in rp.op_types):
+            raise ValueError(
+                f"[{name}] AFFINE_REFINE_V2 dynamic quantization supports MatMul only "
+                f"(got {rp.op_types})."
+            )
+
+
+@dataclass
+class Q4RefineStats:
+    blocks: int = 0
+    improved_blocks: int = 0
+    seed_error: float = 0.0
+    refined_error: float = 0.0
+
+    def add(self, other: "Q4RefineStats") -> None:
+        self.blocks += other.blocks
+        self.improved_blocks += other.improved_blocks
+        self.seed_error += other.seed_error
+        self.refined_error += other.refined_error
+
+
+_K_QUANT_SEARCH_OFFSETS = np.asarray(
+    tuple(-1.0 + 0.1 * index for index in range(20)), dtype=np.float32
+)
+_K_QUANT_FINAL_CHUNK_VALUES = 262144
+
+
+def quant_tensor_k_quant_cpu(
+    data: np.ndarray,
+    num_bits: int = 4,
+    group_size: int = 32,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Quantize rows with ORT's k-quant objective using reusable float32 buffers."""
+    if num_bits < 1:
+        raise ValueError(f"num_bits must be positive, got {num_bits}.")
+    if group_size < 1:
+        raise ValueError(f"group_size must be positive, got {group_size}.")
+
+    values = np.asarray(data)
+    values = np.ascontiguousarray(values.reshape(-1, group_size), dtype=np.float32)
+    block_count = values.shape[0]
+    maxq = (1 << num_bits) - 1
+    maxq_float = np.float32(maxq)
+
+    quantized = np.empty_like(values)
+    scratch = np.empty_like(values)
+    weighted_quantized = np.empty_like(values)
+
+    np.multiply(values, values, out=scratch)
+    rms = np.sqrt(
+        np.sum(scratch, axis=1, dtype=np.float32) / np.float32(group_size)
+    )
+    weights = np.empty_like(values)
+    np.abs(values, out=weights)
+    np.add(weights, rms[:, None], out=weights)
+
+    minimum = np.min(values, axis=1)
+    maximum = np.max(values, axis=1)
+    span = maximum - minimum
+    sum_weights = np.sum(weights, axis=1, dtype=np.float32)
+    np.multiply(weights, values, out=scratch)
+    sum_weighted_values = np.sum(scratch, axis=1, dtype=np.float32)
+
+    inverse_scale = np.ones(block_count, dtype=np.float32)
+    varying = span != 0.0
+    np.divide(maxq_float, span, out=inverse_scale, where=varying)
+    best_scale = np.reciprocal(inverse_scale)
+    best_minimum = minimum.copy()
+
+    np.subtract(values, best_minimum[:, None], out=scratch)
+    np.multiply(scratch, inverse_scale[:, None], out=scratch)
+    np.rint(scratch, out=quantized)
+    np.clip(quantized, 0.0, maxq_float, out=quantized)
+    np.multiply(quantized, best_scale[:, None], out=scratch)
+    np.add(scratch, best_minimum[:, None], out=scratch)
+    np.subtract(scratch, values, out=scratch)
+    np.square(scratch, out=scratch)
+    np.multiply(scratch, weights, out=scratch)
+    best_error = np.sum(scratch, axis=1, dtype=np.float32)
+
+    candidate_inverse_scale = np.empty(block_count, dtype=np.float32)
+    sum_l = np.empty(block_count, dtype=np.float32)
+    sum_l2 = np.empty(block_count, dtype=np.float32)
+    sum_xl = np.empty(block_count, dtype=np.float32)
+    determinant = np.empty(block_count, dtype=np.float32)
+    numerator = np.empty(block_count, dtype=np.float32)
+    row_scratch = np.empty(block_count, dtype=np.float32)
+    candidate_scale = np.empty(block_count, dtype=np.float32)
+    candidate_minimum = np.empty(block_count, dtype=np.float32)
+    candidate_error = np.empty(block_count, dtype=np.float32)
+    valid = np.empty(block_count, dtype=bool)
+    improved = np.empty(block_count, dtype=bool)
+
+    # The upstream helper stores winning codes but discards them during its final
+    # requantization. Track only the winning affine parameters here.
+    for offset in _K_QUANT_SEARCH_OFFSETS:
+        np.subtract(maximum, best_minimum, out=span)
+        np.not_equal(span, 0.0, out=valid)
+        candidate_inverse_scale.fill(1.0)
+        np.divide(
+            maxq_float + offset,
+            span,
+            out=candidate_inverse_scale,
+            where=valid,
+        )
+
+        np.subtract(values, best_minimum[:, None], out=scratch)
+        np.multiply(scratch, candidate_inverse_scale[:, None], out=scratch)
+        np.rint(scratch, out=quantized)
+        np.clip(quantized, 0.0, maxq_float, out=quantized)
+
+        np.multiply(weights, quantized, out=weighted_quantized)
+        np.sum(weighted_quantized, axis=1, dtype=np.float32, out=sum_l)
+        np.multiply(weighted_quantized, quantized, out=scratch)
+        np.sum(scratch, axis=1, dtype=np.float32, out=sum_l2)
+        np.multiply(weighted_quantized, values, out=scratch)
+        np.sum(scratch, axis=1, dtype=np.float32, out=sum_xl)
+
+        np.multiply(sum_weights, sum_l2, out=determinant)
+        np.multiply(sum_l, sum_l, out=row_scratch)
+        np.subtract(determinant, row_scratch, out=determinant)
+        np.not_equal(determinant, 0.0, out=valid)
+        np.logical_and(valid, np.isfinite(determinant), out=valid)
+
+        np.multiply(sum_weights, sum_xl, out=numerator)
+        np.multiply(sum_weighted_values, sum_l, out=row_scratch)
+        np.subtract(numerator, row_scratch, out=numerator)
+        candidate_scale.fill(0.0)
+        np.divide(numerator, determinant, out=candidate_scale, where=valid)
+
+        np.multiply(sum_l2, sum_weighted_values, out=numerator)
+        np.multiply(sum_l, sum_xl, out=row_scratch)
+        np.subtract(numerator, row_scratch, out=numerator)
+        candidate_minimum.fill(0.0)
+        np.divide(numerator, determinant, out=candidate_minimum, where=valid)
+        np.logical_and(valid, np.isfinite(candidate_scale), out=valid)
+        np.logical_and(valid, candidate_scale > 0.0, out=valid)
+        np.logical_and(valid, np.isfinite(candidate_minimum), out=valid)
+
+        np.multiply(quantized, candidate_scale[:, None], out=scratch)
+        np.add(scratch, candidate_minimum[:, None], out=scratch)
+        np.subtract(scratch, values, out=scratch)
+        np.square(scratch, out=scratch)
+        np.multiply(scratch, weights, out=scratch)
+        np.sum(scratch, axis=1, dtype=np.float32, out=candidate_error)
+        np.less(candidate_error, best_error, out=improved)
+        np.logical_and(improved, valid, out=improved)
+        np.copyto(best_error, candidate_error, where=improved)
+        np.copyto(best_scale, candidate_scale, where=improved)
+        np.copyto(best_minimum, candidate_minimum, where=improved)
+
+    zero_point_float = np.empty(block_count, dtype=np.float32)
+    np.negative(best_minimum, out=zero_point_float)
+    np.divide(zero_point_float, best_scale, out=zero_point_float)
+    np.rint(zero_point_float, out=zero_point_float)
+    np.clip(zero_point_float, 0.0, maxq_float, out=zero_point_float)
+    zero_point = zero_point_float.astype(np.uint8).reshape(-1, 1)
+
+    del scratch, weighted_quantized, weights
+    rows_per_chunk = max(1, _K_QUANT_FINAL_CHUNK_VALUES // group_size)
+    final_buffer = np.empty(
+        (min(block_count, rows_per_chunk), group_size), dtype=np.float64
+    )
+    for start in range(0, block_count, rows_per_chunk):
+        end = min(start + rows_per_chunk, block_count)
+        final = final_buffer[: end - start]
+        np.divide(values[start:end], best_scale[start:end, None], out=final)
+        np.add(final, zero_point[start:end], out=final)
+        np.rint(final, out=final)
+        np.clip(final, 0.0, float(maxq), out=final)
+        quantized[start:end] = final
+    return quantized, best_scale.reshape(-1, 1), zero_point
+
+
+@lru_cache(maxsize=1)
+def _affine_v2_seed_quantizer():
+    # V2 is deliberately CPU-only so quantization is reproducible across hosts
+    # and never changes implementation based on accelerator availability.
+    return quant_tensor_k_quant_cpu
+
+
+@lru_cache(maxsize=1)
+def _affine_v2_seed_executor():
+    return ThreadPoolExecutor(
+        max_workers=AFFINE_V2_SEED_WORKERS,
+        thread_name_prefix="q4-seed",
+    )
+
+
+@lru_cache(maxsize=1)
+def _affine_v2_seed_pipeline_executor():
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="q4-v2-pipeline")
+
+
+def _quantize_affine_v2_seed_partition(weight: np.ndarray, block_size: int, bits: int = 4):
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return quant_tensor_k_quant_cpu(weight, bits, block_size)
+
+
+def _quantize_affine_v2_seed_blocks(
+    weight: np.ndarray,
+    block_size: int,
+    bits: int = 4,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if AFFINE_V2_SEED_WORKERS < 1:
+        raise ValueError("AFFINE_REFINE_V2 seed worker count must be positive.")
+    maxq = float((1 << bits) - 1)
+    quantizer = _affine_v2_seed_quantizer()
+    max_workers = max(1, min(AFFINE_V2_SEED_WORKERS, os.cpu_count() or 1))
+    worker_count = min(max_workers, max(1, weight.shape[0] // AFFINE_V2_SEED_BLOCKS_PER_JOB))
+    if quantizer is not quant_tensor_k_quant_cpu or worker_count == 1:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            varying_q, varying_scale, varying_zp = quantizer(weight, bits, block_size)
+        return (
+            np.clip(np.asarray(varying_q, dtype=np.float32), 0.0, maxq),
+            np.asarray(varying_scale, dtype=np.float32).reshape(-1, 1),
+            np.clip(np.asarray(varying_zp, dtype=np.int16).reshape(-1, 1), 0, int(maxq)).astype(np.uint8),
+        )
+
+    partitions = np.array_split(weight, worker_count, axis=0)
+    futures = [
+        _affine_v2_seed_executor().submit(
+            _quantize_affine_v2_seed_partition, partition, block_size, bits
+        )
+        for partition in partitions
+    ]
+    seed_q = np.empty(weight.shape, dtype=np.float32)
+    seed_scale = np.empty((weight.shape[0], 1), dtype=np.float32)
+    seed_zp = np.empty((weight.shape[0], 1), dtype=np.uint8)
+    offset = 0
+    for partition, future in zip(partitions, futures):
+        varying_q, varying_scale, varying_zp = future.result()
+        end = offset + partition.shape[0]
+        seed_q[offset:end] = np.clip(np.asarray(varying_q, dtype=np.float32), 0.0, maxq)
+        seed_scale[offset:end] = np.asarray(varying_scale, dtype=np.float32).reshape(-1, 1)
+        seed_zp[offset:end] = np.clip(
+            np.asarray(varying_zp, dtype=np.int16).reshape(-1, 1), 0, int(maxq)
+        ).astype(np.uint8)
+        offset = end
+    return seed_q, seed_scale, seed_zp
+
+
+def _iter_q4_row_chunks(values: np.ndarray, block_size: int, max_blocks: int):
+    rows, columns = values.shape
+    block_count = (columns + block_size - 1) // block_size
+    padded_columns = block_count * block_size
+    rows_per_chunk = max(1, max_blocks // block_count)
+    for row_start in range(0, rows, rows_per_chunk):
+        row_end = min(row_start + rows_per_chunk, rows)
+        chunk = np.ascontiguousarray(values[row_start:row_end], dtype=np.float32)
+        if padded_columns != columns:
+            chunk = np.pad(chunk, ((0, 0), (0, padded_columns - columns)), mode="constant")
+        block_start = row_start * block_count
+        block_end = row_end * block_count
+        yield block_start, block_end, chunk.reshape(-1, block_size)
+
+
+def _affine_v2_seed_blocks(
+    weight: np.ndarray,
+    block_size: int,
+    symmetric: bool = False,
+    bits: int = 4,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create the raw k-quant seed, including deterministic constant-block handling."""
+    maxq = float((1 << bits) - 1)
+    midpoint = float(1 << (bits - 1))
+    if symmetric:
+        # Symmetric seed: pin the zero point at the integer midpoint so codes span
+        # [-midpoint, maxq - midpoint]; cover the positive range with /(maxq - midpoint)
+        # and the negative range with /midpoint. The refinement then only fits the
+        # scale -- the zero point never moves.
+        tiny = np.finfo(np.float32).tiny
+        positive_max = np.maximum(weight.max(axis=1, keepdims=True), np.float32(0.0))
+        negative_max = np.maximum(-weight.min(axis=1, keepdims=True), np.float32(0.0))
+        seed_scale = np.maximum(
+            positive_max / np.float32(maxq - midpoint), negative_max / np.float32(midpoint)
+        )
+        seed_scale = np.where(seed_scale > tiny, seed_scale, np.float32(1.0)).astype(np.float32)
+        seed_q = np.clip(
+            np.rint(weight / seed_scale + np.float32(midpoint)), 0.0, maxq
+        ).astype(np.float32)
+        seed_zp = np.full((weight.shape[0], 1), int(midpoint), dtype=np.uint8)
+        return seed_q, seed_scale, seed_zp
+
+    constant = np.ptp(weight, axis=1) == 0.0
+    has_constant = np.any(constant)
+    if not has_constant:
+        seed_q, seed_scale, seed_zp = _quantize_affine_v2_seed_blocks(weight, block_size, bits)
+    else:
+        seed_q = np.empty(weight.shape, dtype=np.float32)
+        seed_scale = np.empty((weight.shape[0], 1), dtype=np.float32)
+        seed_zp = np.empty((weight.shape[0], 1), dtype=np.uint8)
+        varying = ~constant
+        if np.any(varying):
+            varying_q, varying_scale, varying_zp = _quantize_affine_v2_seed_blocks(
+                weight[varying], block_size, bits
+            )
+            seed_q[varying] = varying_q
+            seed_scale[varying] = varying_scale
+            seed_zp[varying] = varying_zp
+        constant_value = weight[constant, :1]
+        positive = constant_value > 0.0
+        negative = constant_value < 0.0
+        seed_q[constant] = np.where(positive, np.float32(maxq), np.float32(0.0))
+        seed_scale[constant] = np.where(
+            positive,
+            constant_value / np.float32(maxq),
+            np.where(negative, -constant_value / np.float32(maxq), np.float32(1.0)),
+        )
+        seed_zp[constant] = np.where(negative, np.uint8(int(maxq)), np.uint8(0))
+
+    tiny = np.finfo(np.float32).tiny
+    valid_scale = np.isfinite(seed_scale) & (seed_scale > tiny)
+    if not np.all(valid_scale):
+        fallback_scale = (weight.max(axis=1, keepdims=True) - weight.min(axis=1, keepdims=True)) / np.float32(maxq)
+        fallback_scale = np.where(fallback_scale > tiny, fallback_scale, np.float32(1.0))
+        seed_scale = np.where(valid_scale, seed_scale, fallback_scale)
+    return seed_q, seed_scale, seed_zp
+
+
+def _affine_v2_seed_refine_q4_rows(
+    data: np.ndarray,
+    block_size: int,
+    symmetric: bool = False,
+    bits: int = 4,
+    allow_arbitrary_block_size: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, Q4RefineStats]:
+    """Build AFFINE_REFINE_V2's magnitude-weighted integer Q4/Q8 seed."""
+    values = np.asarray(data)
+    if values.ndim != 2:
+        raise ValueError(f"AFFINE_REFINE_V2 seed expects a 2-D row matrix, got shape {values.shape}.")
+    if not allow_arbitrary_block_size and (
+        block_size < 16 or block_size > 256 or block_size & (block_size - 1)
+    ):
+        raise ValueError(
+            f"AFFINE_REFINE_V2 seed block_size must be a power of two in [16, 256], got {block_size}."
+        )
+    if AFFINE_V2_SEED_ITERATIONS < 1 or AFFINE_V2_SEED_ZP_RADIUS < 0 or AFFINE_V2_SEED_CHUNK_BLOCKS < 1:
+        raise ValueError(
+            "AFFINE_REFINE_V2 seed iterations/chunk size must be positive and "
+            "zero-point radius nonnegative."
+        )
+    if not np.isfinite(values).all():
+        raise ValueError("AFFINE_REFINE_V2 seed refuses weights containing NaN or Inf.")
+
+    maxq = float((1 << bits) - 1)
+    midpoint = int(1 << (bits - 1))
+    rows, columns = values.shape
+    block_count = (columns + block_size - 1) // block_size
+    total_blocks = rows * block_count
+    quantized = np.empty((total_blocks, block_size), dtype=np.uint8)
+    scales = np.empty((total_blocks, 1), dtype=np.float32)
+    zero_points = np.empty((total_blocks, 1), dtype=np.uint8)
+    stats = Q4RefineStats(blocks=total_blocks)
+    tiny = np.finfo(np.float32).tiny
+
+    for start, end, weight in _iter_q4_row_chunks(
+        values, block_size, AFFINE_V2_SEED_CHUNK_BLOCKS
+    ):
+        seed_q, seed_scale, seed_zp = _affine_v2_seed_blocks(weight, block_size, symmetric, bits)
+
+        importance = np.sqrt(np.mean(weight * weight, axis=1, keepdims=True)) + np.abs(weight)
+        importance = np.where(importance.sum(axis=1, keepdims=True) > 0.0, importance, np.float32(1.0))
+        seed_dequant = seed_scale * (seed_q - seed_zp.astype(np.float32))
+        seed_error = np.sum(importance * (weight - seed_dequant) ** 2, axis=1, keepdims=True)
+
+        best_q = seed_q.copy()
+        best_scale = seed_scale.copy()
+        best_zp = seed_zp.copy()
+        best_error = seed_error.copy()
+
+        for delta in ((0,) if symmetric else range(-AFFINE_V2_SEED_ZP_RADIUS, AFFINE_V2_SEED_ZP_RADIUS + 1)):
+            candidate_zp = np.clip(seed_zp.astype(np.int16) + delta, 0, int(maxq)).astype(np.float32)
+            candidate_scale = seed_scale.copy()
+            for _ in range(AFFINE_V2_SEED_ITERATIONS):
+                candidate_q = np.clip(np.rint(weight / candidate_scale + candidate_zp), 0.0, maxq)
+                centered_q = candidate_q - candidate_zp
+                denominator = np.sum(importance * centered_q * centered_q, axis=1, keepdims=True)
+                numerator = np.sum(importance * centered_q * weight, axis=1, keepdims=True)
+                fitted_scale = np.divide(
+                    numerator,
+                    denominator,
+                    out=candidate_scale.copy(),
+                    where=denominator > tiny,
+                )
+                candidate_scale = np.where(
+                    np.isfinite(fitted_scale) & (fitted_scale > tiny), fitted_scale, candidate_scale
+                )
+
+            candidate_q = np.clip(np.rint(weight / candidate_scale + candidate_zp), 0.0, maxq)
+            candidate_error = np.sum(
+                importance * (weight - candidate_scale * (candidate_q - candidate_zp)) ** 2,
+                axis=1,
+                keepdims=True,
+            )
+            take = candidate_error[:, 0] < best_error[:, 0]
+            best_q[take] = candidate_q[take]
+            best_scale[take] = candidate_scale[take]
+            best_zp[take] = candidate_zp[take].astype(np.uint8)
+            best_error[take] = candidate_error[take]
+
+        quantized[start:end] = best_q.astype(np.uint8)
+        scales[start:end] = best_scale
+        zero_points[start:end] = best_zp
+        stats.improved_blocks += int(np.count_nonzero(best_error[:, 0] < seed_error[:, 0]))
+        stats.seed_error += float(seed_error.sum(dtype=np.float64))
+        stats.refined_error += float(best_error.sum(dtype=np.float64))
+
+    return (
+        quantized.reshape(rows, block_count, block_size),
+        scales.reshape(rows, block_count),
+        zero_points.reshape(rows, block_count),
+        stats,
+    )
+
+
+@lru_cache(maxsize=1)
+def _affine_v2_numba_kernel():
+    """Build the optional fused CPU kernel lazily so ORT paths pay no import cost."""
+    try:
+        from numba import njit, prange, set_num_threads
+    except ImportError:
+        return None
+    set_num_threads(AFFINE_V2_NUMBA_THREADS)
+
+    @njit(parallel=True, nogil=True, cache=True)
+    def refine_blocks(
+        weight,
+        quantized,
+        scales,
+        zero_points,
+        clip_ratios,
+        seed_iterations,
+        seed_zp_radius,
+        affine_iterations,
+        tolerance,
+        tiny,
+        symmetric,
+        maxq,
+        midpoint,
+        zp_sweep_limit,
+    ):
+        max_code = np.float32(maxq)
+        max_code_int = int(maxq)
+        block_count, width = weight.shape
+        baseline_errors = np.empty(block_count, dtype=np.float32)
+        refined_errors = np.empty(block_count, dtype=np.float32)
+        improved = np.zeros(block_count, dtype=np.bool_)
+        candidate_codes = np.empty((block_count, width), dtype=np.uint8)
+
+        for block_index in prange(block_count):
+            sum_squares = np.float32(0.0)
+            positive_max = np.float32(0.0)
+            negative_max = np.float32(0.0)
+            for column in range(width):
+                value = np.float32(weight[block_index, column])
+                sum_squares += value * value
+                if value > positive_max:
+                    positive_max = value
+                if -value > negative_max:
+                    negative_max = -value
+            rms = np.float32(np.sqrt(sum_squares / np.float32(width)))
+
+            raw_scale = np.float32(scales[block_index])
+            raw_zero_point_int = int(zero_points[block_index])
+            raw_zero_point = np.float32(raw_zero_point_int)
+            best_seed_error = np.float32(0.0)
+            for column in range(width):
+                value = np.float32(weight[block_index, column])
+                centered = np.float32(quantized[block_index, column]) - raw_zero_point
+                residual = value - raw_scale * centered
+                importance = np.float32(1.0) if sum_squares == 0.0 else rms + np.abs(value)
+                best_seed_error += importance * residual * residual
+
+            for delta in range(0 if symmetric else -seed_zp_radius,
+                               1 if symmetric else seed_zp_radius + 1):
+                candidate_zero_point_int = min(max_code_int, max(0, raw_zero_point_int + delta))
+                candidate_zero_point = np.float32(candidate_zero_point_int)
+                candidate_scale = raw_scale
+                for _ in range(seed_iterations):
+                    denominator = np.float32(0.0)
+                    numerator = np.float32(0.0)
+                    for column in range(width):
+                        value = np.float32(weight[block_index, column])
+                        candidate_q = np.rint(value / candidate_scale + candidate_zero_point)
+                        candidate_q = min(max_code, max(np.float32(0.0), candidate_q))
+                        centered = candidate_q - candidate_zero_point
+                        importance = np.float32(1.0) if sum_squares == 0.0 else rms + np.abs(value)
+                        denominator += importance * centered * centered
+                        numerator += importance * centered * value
+                    if denominator <= tiny:
+                        break
+                    fitted_scale = numerator / denominator
+                    if not np.isfinite(fitted_scale) or fitted_scale <= tiny:
+                        break
+                    if fitted_scale == candidate_scale:
+                        break
+                    candidate_scale = fitted_scale
+
+                candidate_seed_error = np.float32(0.0)
+                for column in range(width):
+                    value = np.float32(weight[block_index, column])
+                    candidate_q = np.rint(value / candidate_scale + candidate_zero_point)
+                    candidate_q = min(max_code, max(np.float32(0.0), candidate_q))
+                    candidate_codes[block_index, column] = np.uint8(candidate_q)
+                    centered = candidate_q - candidate_zero_point
+                    residual = value - candidate_scale * centered
+                    importance = np.float32(1.0) if sum_squares == 0.0 else rms + np.abs(value)
+                    candidate_seed_error += importance * residual * residual
+                if candidate_seed_error < best_seed_error:
+                    best_seed_error = candidate_seed_error
+                    scales[block_index] = candidate_scale
+                    zero_points[block_index] = np.uint8(candidate_zero_point_int)
+                    for column in range(width):
+                        quantized[block_index, column] = candidate_codes[block_index, column]
+
+            seed_scale = np.float32(scales[block_index])
+            seed_zero_point = np.float32(zero_points[block_index])
+            seed_zero_point_int = int(zero_points[block_index])
+            baseline_plain = np.float32(0.0)
+            baseline_weighted = np.float32(0.0)
+            for column in range(width):
+                value = np.float32(weight[block_index, column])
+                centered = np.float32(quantized[block_index, column]) - seed_zero_point
+                residual = value - seed_scale * centered
+                squared = residual * residual
+                baseline_plain += squared
+                baseline_weighted += (rms + np.abs(value)) * residual * residual
+
+            local_plain = baseline_plain
+            weighted_bound = tolerance * baseline_weighted
+
+            # Q4/Q2 (<= zp_sweep_limit candidates) sweep every zero point; Q8 sweeps
+            # a window of zp_sweep_limit points centered on the block's k-quant seed.
+            if symmetric:
+                zp_lo = midpoint
+                zp_hi = midpoint
+            elif max_code_int + 1 <= zp_sweep_limit:
+                zp_lo = 0
+                zp_hi = max_code_int
+            else:
+                zp_lo = seed_zero_point_int - zp_sweep_limit // 2
+                if zp_lo < 0:
+                    zp_lo = 0
+                zp_hi = zp_lo + zp_sweep_limit - 1
+                if zp_hi > max_code_int:
+                    zp_hi = max_code_int
+                    zp_lo = zp_hi - zp_sweep_limit + 1
+                    if zp_lo < 0:
+                        zp_lo = 0
+
+            for zero_point_int in range(zp_lo, zp_hi + 1):
+                zero_point = np.float32(zero_point_int)
+                positive_scale = np.float32(0.0)
+                negative_scale = np.float32(0.0)
+                if zero_point_int < max_code_int:
+                    positive_scale = positive_max / np.float32(max_code_int - zero_point_int)
+                if zero_point_int > 0:
+                    negative_scale = negative_max / np.float32(zero_point_int)
+                coverage_scale = max(positive_scale, negative_scale)
+                if coverage_scale <= tiny:
+                    coverage_scale = np.float32(1.0)
+
+                for start_index in range(clip_ratios.size + 1):
+                    if start_index == 0:
+                        candidate_scale = seed_scale
+                    else:
+                        candidate_scale = coverage_scale * clip_ratios[start_index - 1]
+
+                    for _ in range(affine_iterations):
+                        denominator = np.float32(0.0)
+                        numerator = np.float32(0.0)
+                        for column in range(width):
+                            value = np.float32(weight[block_index, column])
+                            candidate_q = np.rint(value / candidate_scale + zero_point)
+                            candidate_q = min(max_code, max(np.float32(0.0), candidate_q))
+                            centered = candidate_q - zero_point
+                            denominator += centered * centered
+                            numerator += centered * value
+                        if denominator <= tiny:
+                            break
+                        fitted_scale = numerator / denominator
+                        if not np.isfinite(fitted_scale) or fitted_scale <= tiny:
+                            break
+                        if fitted_scale == candidate_scale:
+                            break
+                        candidate_scale = fitted_scale
+
+                    candidate_plain = np.float32(0.0)
+                    candidate_weighted = np.float32(0.0)
+                    for column in range(width):
+                        value = np.float32(weight[block_index, column])
+                        candidate_q = np.rint(value / candidate_scale + zero_point)
+                        candidate_q = min(max_code, max(np.float32(0.0), candidate_q))
+                        candidate_codes[block_index, column] = np.uint8(candidate_q)
+                        centered = candidate_q - zero_point
+                        residual = value - candidate_scale * centered
+                        squared = residual * residual
+                        candidate_plain += squared
+                        candidate_weighted += (rms + np.abs(value)) * residual * residual
+
+                    if candidate_plain < local_plain and candidate_weighted <= weighted_bound:
+                        local_plain = candidate_plain
+                        scales[block_index] = candidate_scale
+                        zero_points[block_index] = np.uint8(zero_point_int)
+                        for column in range(width):
+                            quantized[block_index, column] = candidate_codes[block_index, column]
+
+            baseline_errors[block_index] = baseline_plain
+            refined_errors[block_index] = local_plain
+            improved[block_index] = local_plain < baseline_plain
+
+        return baseline_errors, refined_errors, improved
+
+    return refine_blocks
+
+
+def _affine_refine_v2_q4_rows(
+    data: np.ndarray,
+    block_size: int,
+    symmetric: bool = False,
+    bits: int = 4,
+    allow_arbitrary_block_size: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, Q4RefineStats]:
+    """Minimize plain block MSE for 4/8-bit NBits or 7/8-bit dynamic weights.
+
+    Plain Frobenius error is the exact data-free projection-error proxy for
+    white or diagonal-covariance activations. A candidate replaces the running
+    best only when it strictly lowers plain MSE and keeps magnitude-weighted
+    error within ``(1 + AFFINE_V2_WEIGHTED_TOLERANCE)`` of the internal seed.
+    """
+    values = np.asarray(data)
+    if values.ndim != 2:
+        raise ValueError(f"AFFINE_REFINE_V2 expects a 2-D row matrix, got shape {values.shape}.")
+    if not np.isfinite(values).all():
+        raise ValueError("AFFINE_REFINE_V2 refuses weights containing NaN or Inf.")
+    if AFFINE_V2_ITERATIONS < 1 or AFFINE_V2_CHUNK_BLOCKS < 1:
+        raise ValueError("AFFINE_REFINE_V2 iterations and chunk size must be positive.")
+    if AFFINE_V2_WEIGHTED_TOLERANCE < 0.0:
+        raise ValueError("AFFINE_REFINE_V2 weighted tolerance must be nonnegative.")
+    if AFFINE_V2_NUMBA_THREADS < 1:
+        raise ValueError("AFFINE_REFINE_V2 Numba thread count must be positive.")
+    if AFFINE_V2_ASYM_ZP_SWEEP_LIMIT < 16:
+        raise ValueError(
+            "AFFINE_REFINE_V2 asymmetric zero-point sweep limit must be >= 16 so Q2/Q4 "
+            f"sweep every zero point; got {AFFINE_V2_ASYM_ZP_SWEEP_LIMIT}."
+        )
+    clip_ratios = np.asarray(AFFINE_V2_CLIP_RATIOS, dtype=np.float32)
+    if clip_ratios.ndim != 1 or not clip_ratios.size or np.any((clip_ratios <= 0.0) | (clip_ratios > 1.0)):
+        raise ValueError("AFFINE_REFINE_V2 clip ratios must be a non-empty sequence in (0, 1].")
+
+    if not allow_arbitrary_block_size and (
+        block_size < 16 or block_size > 256 or block_size & (block_size - 1)
+    ):
+        raise ValueError(f"AFFINE_REFINE_V2 block_size must be a power of two in [16, 256], got {block_size}.")
+    if bits not in (4, 7, 8):
+        raise ValueError(f"AFFINE_REFINE_V2 supports 4-, 7-, or 8-bit weights, got {bits}-bit.")
+    maxq = float((1 << bits) - 1)
+    midpoint = int(1 << (bits - 1))
+    rows, columns = values.shape
+    block_count = (columns + block_size - 1) // block_size
+    total_blocks = rows * block_count
+    tiny = np.finfo(np.float32).tiny
+    tolerance = np.float32(1.0 + AFFINE_V2_WEIGHTED_TOLERANCE)
+    stats = Q4RefineStats(blocks=total_blocks)
+    numba_kernel = _affine_v2_numba_kernel()
+
+    if numba_kernel is not None:
+        best_q = np.empty((total_blocks, block_size), dtype=np.uint8)
+        best_scales = np.empty(total_blocks, dtype=np.float32)
+        best_zero_points = np.empty(total_blocks, dtype=np.uint8)
+        chunks = iter(_iter_q4_row_chunks(values, block_size, AFFINE_V2_CHUNK_BLOCKS))
+        try:
+            current_chunk = next(chunks)
+        except StopIteration:
+            current_chunk = None
+        seed_future = (
+            _affine_v2_seed_pipeline_executor().submit(
+                _affine_v2_seed_blocks, current_chunk[2], block_size, symmetric, bits
+            )
+            if current_chunk is not None
+            else None
+        )
+        while current_chunk is not None:
+            start, end, weight = current_chunk
+            seed_q, seed_scales, seed_zero_points = seed_future.result()
+            try:
+                next_chunk = next(chunks)
+            except StopIteration:
+                next_chunk = None
+            next_seed_future = (
+                _affine_v2_seed_pipeline_executor().submit(
+                    _affine_v2_seed_blocks, next_chunk[2], block_size, symmetric, bits
+                )
+                if next_chunk is not None
+                else None
+            )
+            local_q = best_q[start:end]
+            local_scales = best_scales[start:end]
+            local_zero_points = best_zero_points[start:end]
+            local_q[:] = seed_q
+            local_scales[:] = seed_scales[:, 0]
+            local_zero_points[:] = seed_zero_points[:, 0]
+            baseline_plain, local_plain, local_improved = numba_kernel(
+                weight,
+                local_q,
+                local_scales,
+                local_zero_points,
+                clip_ratios,
+                AFFINE_V2_SEED_ITERATIONS,
+                AFFINE_V2_SEED_ZP_RADIUS,
+                AFFINE_V2_ITERATIONS,
+                tolerance,
+                tiny,
+                symmetric,
+                np.float32(maxq),
+                np.int64(midpoint),
+                np.int64(AFFINE_V2_ASYM_ZP_SWEEP_LIMIT),
+            )
+            stats.improved_blocks += int(np.count_nonzero(local_improved))
+            stats.seed_error += float(baseline_plain.sum(dtype=np.float64))
+            stats.refined_error += float(local_plain.sum(dtype=np.float64))
+            current_chunk = next_chunk
+            seed_future = next_seed_future
+        return (
+            best_q.reshape(rows, block_count, block_size),
+            best_scales.reshape(rows, block_count),
+            best_zero_points.reshape(rows, block_count),
+            stats,
+        )
+
+    best_q, best_scales, best_zero_points, _ = _affine_v2_seed_refine_q4_rows(
+        values, block_size, symmetric, bits, allow_arbitrary_block_size
+    )
+    best_q = best_q.reshape(-1, block_size)
+    best_scales = best_scales.reshape(-1)
+    best_zero_points = best_zero_points.reshape(-1)
+
+    for start, end, weight in _iter_q4_row_chunks(
+        values, block_size, AFFINE_V2_CHUNK_BLOCKS
+    ):
+        local_q = best_q[start:end]
+        local_scales = best_scales[start:end]
+        local_zero_points = best_zero_points[start:end]
+        # Magnitude weighting is used only for the Pareto safety bound, never for
+        # the scale fit, so the optimization target stays plain MSE.
+        weight_importance = np.sqrt(np.mean(weight * weight, axis=1, keepdims=True)) + np.abs(weight)
+        weight_importance = np.where(
+            weight_importance.sum(axis=1, keepdims=True) > 0.0,
+            weight_importance,
+            np.float32(1.0),
+        )
+        seed_scales = local_scales.copy().reshape(-1, 1)
+        seed_q = local_q.astype(np.float32)
+        seed_zero_points = local_zero_points.astype(np.float32).reshape(-1, 1)
+        seed_residual = weight - seed_scales * (seed_q - seed_zero_points)
+        baseline_plain = np.sum(seed_residual * seed_residual, axis=1)
+        baseline_weighted = np.sum(weight_importance * seed_residual * seed_residual, axis=1)
+        weighted_bound = tolerance * baseline_weighted
+        local_plain = baseline_plain.copy()
+        local_improved = np.zeros(end - start, dtype=bool)
+        positive_max = np.maximum(weight.max(axis=1, keepdims=True), np.float32(0.0))
+        negative_max = np.maximum(-weight.min(axis=1, keepdims=True), np.float32(0.0))
+
+        maxq_int = int(maxq)
+        windowing = (not symmetric) and (maxq_int + 1 > AFFINE_V2_ASYM_ZP_SWEEP_LIMIT)
+        if not windowing:
+            for zero_point_int in ((midpoint,) if symmetric else range(int(maxq) + 1)):
+                zero_point = np.float32(zero_point_int)
+                positive_scale = (
+                    positive_max / np.float32(int(maxq) - zero_point_int)
+                    if zero_point_int < int(maxq)
+                    else np.zeros_like(positive_max)
+                )
+                negative_scale = (
+                    negative_max / np.float32(zero_point_int)
+                    if zero_point_int > 0
+                    else np.zeros_like(negative_max)
+                )
+                coverage_scale = np.maximum(positive_scale, negative_scale)
+                coverage_scale = np.where(coverage_scale > tiny, coverage_scale, np.float32(1.0))
+                initial_scales = [seed_scales]
+                initial_scales.extend(coverage_scale * ratio for ratio in clip_ratios)
+
+                for initial_scale in initial_scales:
+                    candidate_scale = initial_scale.copy()
+                    for _ in range(AFFINE_V2_ITERATIONS):
+                        candidate_q = np.clip(
+                            np.rint(weight / candidate_scale + zero_point), 0.0, maxq
+                        )
+                        centered_q = candidate_q - zero_point
+                        # Unweighted least-squares scale keeps the objective plain MSE.
+                        denominator = np.sum(centered_q * centered_q, axis=1, keepdims=True)
+                        numerator = np.sum(centered_q * weight, axis=1, keepdims=True)
+                        fitted_scale = np.divide(
+                            numerator,
+                            denominator,
+                            out=candidate_scale.copy(),
+                            where=denominator > tiny,
+                        )
+                        candidate_scale = np.where(
+                            np.isfinite(fitted_scale) & (fitted_scale > tiny),
+                            fitted_scale,
+                            candidate_scale,
+                        )
+
+                    candidate_q = np.clip(
+                        np.rint(weight / candidate_scale + zero_point), 0.0, maxq
+                    )
+                    residual = weight - candidate_scale * (candidate_q - zero_point)
+                    candidate_plain = np.sum(residual * residual, axis=1)
+                    candidate_weighted = np.sum(weight_importance * residual * residual, axis=1)
+                    take = (candidate_plain < local_plain) & (candidate_weighted <= weighted_bound)
+                    local_q[take] = candidate_q[take].astype(np.uint8)
+                    local_scales[take] = candidate_scale[take, 0]
+                    local_zero_points[take] = np.uint8(zero_point_int)
+                    local_plain[take] = candidate_plain[take]
+                    local_improved[take] = True
+        else:
+            # Q8 asymmetric: sweep a window of AFFINE_V2_ASYM_ZP_SWEEP_LIMIT zero
+            # points centered on each block's k-quant seed (mirrors the numba path).
+            half = AFFINE_V2_ASYM_ZP_SWEEP_LIMIT // 2
+            seed_zp_int = local_zero_points.astype(np.int64).reshape(-1, 1)
+            window_lo = np.clip(seed_zp_int - half, 0, maxq_int)
+            window_lo = np.clip(
+                window_lo - np.maximum(
+                    window_lo + AFFINE_V2_ASYM_ZP_SWEEP_LIMIT - 1 - maxq_int, 0
+                ),
+                0,
+                maxq_int,
+            )
+            for offset in range(AFFINE_V2_ASYM_ZP_SWEEP_LIMIT):
+                zp_int = np.clip(window_lo + offset, 0, maxq_int)
+                zero_point = zp_int.astype(np.float32)
+                denom_pos = np.float32(maxq_int) - zero_point
+                positive_scale = np.where(
+                    denom_pos > 0.0,
+                    positive_max / np.where(denom_pos > 0.0, denom_pos, np.float32(1.0)),
+                    np.float32(0.0),
+                )
+                negative_scale = np.where(
+                    zero_point > 0.0,
+                    negative_max / np.where(zero_point > 0.0, zero_point, np.float32(1.0)),
+                    np.float32(0.0),
+                )
+                coverage_scale = np.maximum(positive_scale, negative_scale)
+                coverage_scale = np.where(coverage_scale > tiny, coverage_scale, np.float32(1.0))
+                initial_scales = [seed_scales]
+                initial_scales.extend(coverage_scale * ratio for ratio in clip_ratios)
+
+                for initial_scale in initial_scales:
+                    candidate_scale = initial_scale.copy()
+                    for _ in range(AFFINE_V2_ITERATIONS):
+                        candidate_q = np.clip(
+                            np.rint(weight / candidate_scale + zero_point), 0.0, maxq
+                        )
+                        centered_q = candidate_q - zero_point
+                        denominator = np.sum(centered_q * centered_q, axis=1, keepdims=True)
+                        numerator = np.sum(centered_q * weight, axis=1, keepdims=True)
+                        fitted_scale = np.divide(
+                            numerator,
+                            denominator,
+                            out=candidate_scale.copy(),
+                            where=denominator > tiny,
+                        )
+                        candidate_scale = np.where(
+                            np.isfinite(fitted_scale) & (fitted_scale > tiny),
+                            fitted_scale,
+                            candidate_scale,
+                        )
+
+                    candidate_q = np.clip(
+                        np.rint(weight / candidate_scale + zero_point), 0.0, maxq
+                    )
+                    residual = weight - candidate_scale * (candidate_q - zero_point)
+                    candidate_plain = np.sum(residual * residual, axis=1)
+                    candidate_weighted = np.sum(weight_importance * residual * residual, axis=1)
+                    take = (candidate_plain < local_plain) & (candidate_weighted <= weighted_bound)
+                    local_q[take] = candidate_q[take].astype(np.uint8)
+                    local_scales[take] = candidate_scale[take, 0]
+                    local_zero_points[take] = zp_int[take, 0].astype(np.uint8)
+                    local_plain[take] = candidate_plain[take]
+                    local_improved[take] = True
+
+        stats.improved_blocks += int(np.count_nonzero(local_improved))
+        stats.seed_error += float(baseline_plain.sum(dtype=np.float64))
+        stats.refined_error += float(local_plain.sum(dtype=np.float64))
+
+    return (
+        best_q.reshape(rows, block_count, block_size),
+        best_scales.reshape(rows, block_count),
+        best_zero_points.reshape(rows, block_count),
+        stats,
+    )
+
+
+def _pack_q4_last_axis(values: np.ndarray, pad_value: int = 0) -> np.ndarray:
+    values = np.asarray(values, dtype=np.uint8)
+    if values.shape[-1] & 1:
+        values = np.pad(values, [(0, 0)] * (values.ndim - 1) + [(0, 1)], constant_values=pad_value)
+    return (values[..., 0::2] | (values[..., 1::2] << 4)).astype(np.uint8)
+
+
+def _pack_codes_last_axis(values: np.ndarray, bits: int, pad_value: int = 0) -> np.ndarray:
+    """Pack integer codes for MatMulNBits: nibble-pack at 4 bits, raw uint8 at 8 bits."""
+    if bits == 8:
+        return np.ascontiguousarray(np.asarray(values, dtype=np.uint8))
+    if bits == 4:
+        return _pack_q4_last_axis(values, pad_value=pad_value)
+    raise ValueError(f"unsupported MatMulNBits bit width {bits}; expected 4 or 8.")
+
+
+def _make_uint4_initializer(name: str, values: np.ndarray) -> TensorProto:
+    values = np.asarray(values, dtype=np.uint8)
+    flat = values.reshape(-1)
+    if flat.size & 1:
+        flat = np.pad(flat, (0, 1))
+    packed = (flat[0::2] | (flat[1::2] << 4)).astype(np.uint8)
+    return helper.make_tensor(name, TensorProto.UINT4, values.shape, packed.tobytes(), raw=True)
+
+
+def _make_uintn_initializer(name: str, values: np.ndarray, bits: int) -> TensorProto:
+    """Build a Gather data/zero-point initializer: logical UINT4 at 4 bits, UINT8 at 8 bits."""
+    if bits == 8:
+        return numpy_helper.from_array(
+            np.ascontiguousarray(np.asarray(values, dtype=np.uint8)), name=name
+        )
+    if bits == 4:
+        return _make_uint4_initializer(name, values)
+    raise ValueError(f"unsupported GatherBlockQuantized bit width {bits}; expected 4 or 8.")
+
+
+def _make_quant_initializer(name: str, values: np.ndarray) -> TensorProto:
+    return numpy_helper.from_array(np.ascontiguousarray(values), name=name)
+
+
+def _k_quant_q4_rows(
+    data: np.ndarray,
+    block_size: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Run ORT's k-quant objective on CPU with bounded temporary memory."""
+    values = np.asarray(data)
+    if values.ndim != 2:
+        raise ValueError(f"k_quant expects a 2-D row matrix, got shape {values.shape}.")
+    if not np.isfinite(values).all():
+        raise ValueError("k_quant refuses weights containing NaN or Inf.")
+    rows, columns = values.shape
+    block_count = (columns + block_size - 1) // block_size
+    quantized = np.empty((rows * block_count, block_size), dtype=np.uint8)
+    scales = np.empty(rows * block_count, dtype=np.float32)
+    zero_points = np.empty(rows * block_count, dtype=np.uint8)
+    for start, end, weight in _iter_q4_row_chunks(
+        values, block_size, AFFINE_V2_SEED_CHUNK_BLOCKS
+    ):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            chunk_q, chunk_scales, chunk_zero_points = quant_tensor_k_quant_cpu(
+                weight, 4, block_size
+            )
+        quantized[start:end] = np.clip(chunk_q, 0.0, 15.0).astype(np.uint8)
+        scales[start:end] = np.asarray(chunk_scales, dtype=np.float32).reshape(-1)
+        zero_points[start:end] = np.clip(
+            np.asarray(chunk_zero_points, dtype=np.int16).reshape(-1), 0, 15
+        ).astype(np.uint8)
+    return (
+        quantized.reshape(rows, block_count, block_size),
+        scales.reshape(rows, block_count),
+        zero_points.reshape(rows, block_count),
+    )
+
+
+def _quantize_k_quant_matmul(graph, node, weight: TensorProto, rp: ResolvedPlan, make_name):
+    weight_array = numpy_helper.to_array(weight)
+    if weight_array.ndim != 2 or weight_array.dtype.kind != "f":
+        print(
+            f"  k_quant: skipping {node.name or weight.name!r}; "
+            "MatMul weight must be a floating-point matrix."
+        )
+        return None
+    input_features, output_features = weight_array.shape
+    quantized, scales, zero_points = _k_quant_q4_rows(
+        weight_array.T, rp.block_size
+    )
+    weight_name = make_name("weight")
+    scale_name = make_name("scales")
+    zero_point_name = make_name("zero_points")
+    graph.initializer.extend([
+        _make_quant_initializer(weight_name, _pack_q4_last_axis(quantized)),
+        _make_quant_initializer(
+            scale_name, scales.astype(weight_array.dtype, copy=False)
+        ),
+        _make_quant_initializer(
+            zero_point_name,
+            _pack_q4_last_axis(zero_points, pad_value=8),
+        ),
+    ])
+    attributes = {
+        "K": input_features,
+        "N": output_features,
+        "bits": 4,
+        "block_size": rp.block_size,
+    }
+    if rp.accuracy_level:
+        attributes["accuracy_level"] = rp.accuracy_level
+    return helper.make_node(
+        "MatMulNBits",
+        [node.input[0], weight_name, scale_name, zero_point_name],
+        list(node.output),
+        name=f"{node.name}_K_QUANT_Q4" if node.name else make_name("matmul"),
+        domain="com.microsoft",
+        **attributes,
+    )
+
+
+def quantize_k_quant_model(model: onnx.ModelProto, rp: ResolvedPlan) -> int:
+    """Replace selected constant MatMuls with chunked CPU k-quant Q4 ops."""
+    quantized_matmuls = 0
+
+    def rewrite_graph(graph) -> None:
+        nonlocal quantized_matmuls
+        init_map = _init_map(graph)
+        make_name = _make_name_factory(graph, "k_quant_q4_")
+        replaced_initializers: set[str] = set()
+        new_nodes = []
+        for node in graph.node:
+            for attribute in node.attribute:
+                if attribute.HasField("g"):
+                    rewrite_graph(attribute.g)
+                for subgraph in attribute.graphs:
+                    rewrite_graph(subgraph)
+
+            selected = node.op_type == "MatMul" and "MatMul" in rp.op_types
+            if rp.nodes_to_include is not None:
+                selected = selected and node.name in rp.nodes_to_include
+            if rp.nodes_to_exclude is not None and node.name in rp.nodes_to_exclude:
+                selected = False
+            replacement = None
+            if selected and len(node.input) >= 2:
+                weight = init_map.get(node.input[1])
+                if weight is not None:
+                    replacement = _quantize_k_quant_matmul(
+                        graph, node, weight, rp, make_name
+                    )
+                    if replacement is not None:
+                        quantized_matmuls += 1
+                        replaced_initializers.add(weight.name)
+            new_nodes.append(replacement or node)
+
+        graph.ClearField("node")
+        graph.node.extend(new_nodes)
+        _drop_unused_initializers(graph)
+        remaining_initializers = {initializer.name for initializer in graph.initializer}
+        obsolete_inputs = replaced_initializers - remaining_initializers
+        if obsolete_inputs:
+            graph_inputs = [
+                value for value in graph.input if value.name not in obsolete_inputs
+            ]
+            graph.ClearField("input")
+            graph.input.extend(graph_inputs)
+
+    rewrite_graph(model.graph)
+    if quantized_matmuls:
+        _ensure_ms_domain_opset(model)
+        _deduplicate_node_names(model.graph)
+    print(f"  k_quant CPU surgery: {quantized_matmuls} MatMul -> MatMulNBits.")
+    return quantized_matmuls
+
+
+def _quantize_affine_v2_matmul(
+    graph,
+    node,
+    weight: TensorProto,
+    rp: ResolvedPlan,
+    bits: int,
+    make_name,
+):
+    weight_array = numpy_helper.to_array(weight)
+    if weight_array.ndim != 2:
+        print(
+            f"  AFFINE_REFINE_V2: skipping {node.name or weight.name!r}; "
+            "MatMul weight rank is not 2."
+        )
+        return None, None
+    if weight_array.dtype.kind != "f":
+        print(
+            f"  AFFINE_REFINE_V2: skipping {node.name or weight.name!r}; "
+            "MatMul weight is not floating point."
+        )
+        return None, None
+
+    input_features, output_features = weight_array.shape
+    quantized, scales, zero_points, stats = _affine_refine_v2_q4_rows(
+        weight_array.T, rp.block_size, rp.symmetric, bits
+    )
+    packed_weight = _pack_codes_last_axis(quantized, bits)
+    packed_zero_points = _pack_codes_last_axis(zero_points, bits, pad_value=1 << (bits - 1))
+    scales = scales.astype(weight_array.dtype, copy=False)
+
+    weight_name = make_name("weight")
+    scale_name = make_name("scales")
+    zero_point_name = make_name("zero_points")
+    graph.initializer.extend([
+        _make_quant_initializer(weight_name, packed_weight),
+        _make_quant_initializer(scale_name, scales),
+        _make_quant_initializer(zero_point_name, packed_zero_points),
+    ])
+    attributes = {
+        "K": input_features,
+        "N": output_features,
+        "bits": bits,
+        "block_size": rp.block_size,
+    }
+    if rp.accuracy_level:
+        attributes["accuracy_level"] = rp.accuracy_level
+    replacement = helper.make_node(
+        "MatMulNBits",
+        [node.input[0], weight_name, scale_name, zero_point_name],
+        list(node.output),
+        name=(
+            f"{node.name}_AFFINE_REFINE_V2_Q{bits}"
+            if node.name
+            else make_name("matmul")
+        ),
+        domain="com.microsoft",
+        **attributes,
+    )
+    return replacement, stats
+
+
+def _quantize_affine_v2_gather(
+    graph,
+    node,
+    weight: TensorProto,
+    rp: ResolvedPlan,
+    bits: int,
+    quantize_axis: int,
+    make_name,
+):
+    weight_array = numpy_helper.to_array(weight)
+    rank = weight_array.ndim
+    quantize_axis = (quantize_axis + rank) % rank
+    try:
+        gather_axis = int(helper.get_node_attr_value(node, "axis"))
+    except ValueError:
+        gather_axis = 0
+    gather_axis = (gather_axis + rank) % rank
+    if weight_array.dtype.kind != "f":
+        print(
+            f"  AFFINE_REFINE_V2: skipping {node.name or weight.name!r}; "
+            "Gather data is not floating point."
+        )
+        return None, None
+    if gather_axis != 0 or quantize_axis != rank - 1:
+        print(
+            f"  AFFINE_REFINE_V2: skipping {node.name or weight.name!r}; GatherBlockQuantized "
+            "requires gather_axis=0 and quantize_axis=last for CPU/CUDA portability."
+        )
+        return None, None
+    logical_width = weight_array.shape[-1]
+    if logical_width % rp.block_size:
+        print(
+            f"  AFFINE_REFINE_V2: skipping {node.name or weight.name!r}; "
+            f"Gather width {logical_width} is not "
+            f"divisible by block_size={rp.block_size}, which CUDA does not handle portably."
+        )
+        return None, None
+
+    outer_shape = weight_array.shape[:-1]
+    rows = int(np.prod(outer_shape, dtype=np.int64))
+    quantized, scales, zero_points, stats = _affine_refine_v2_q4_rows(
+        weight_array.reshape(rows, logical_width), rp.block_size, rp.symmetric, bits
+    )
+    logical_quantized = quantized.reshape(rows, -1)[:, :logical_width].reshape(weight_array.shape)
+    block_count = scales.shape[-1]
+    scales = scales.reshape(*outer_shape, block_count).astype(weight_array.dtype, copy=False)
+    zero_points = zero_points.reshape(*outer_shape, block_count)
+
+    weight_name = make_name("weight")
+    scale_name = make_name("scales")
+    zero_point_name = make_name("zero_points")
+    graph.initializer.extend([
+        _make_uintn_initializer(weight_name, logical_quantized, bits),
+        _make_quant_initializer(scale_name, scales),
+        _make_uintn_initializer(zero_point_name, zero_points, bits),
+    ])
+    replacement = helper.make_node(
+        "GatherBlockQuantized",
+        [weight_name, node.input[1], scale_name, zero_point_name],
+        list(node.output),
+        name=f"{node.name}_AFFINE_REFINE_V2_Q{bits}" if node.name else make_name("gather"),
+        domain="com.microsoft",
+        gather_axis=gather_axis,
+        quantize_axis=quantize_axis,
+        block_size=rp.block_size,
+        bits=bits,
+    )
+    return replacement, stats
+
+
+def _ensure_ms_domain_opset(model: onnx.ModelProto) -> None:
+    for opset in model.opset_import:
+        if opset.domain == "com.microsoft":
+            opset.version = max(opset.version, 1)
+            return
+    model.opset_import.append(helper.make_opsetid("com.microsoft", 1))
+
+
+def quantize_affine_v2_model(
+    model: onnx.ModelProto,
+    rp: ResolvedPlan,
+    bits: int,
+) -> Q4RefineStats:
+    """Replace selected constant MatMul/Gather nodes with AFFINE_REFINE_V2 Q4/Q8 ops."""
+    if rp.quant_format != "QOPERATOR":
+        raise ValueError("AFFINE_REFINE_V2 supports QOperator format only.")
+    if bits not in (4, 8):
+        raise ValueError(f"AFFINE_REFINE_V2 supports 4- or 8-bit weights, got {bits}-bit.")
+    quant_axes = dict(zip(rp.op_types, rp.axes))
+    total = Q4RefineStats()
+    quantized_matmuls = 0
+    quantized_gathers = 0
+
+    def rewrite_graph(graph) -> None:
+        nonlocal quantized_matmuls, quantized_gathers
+        init_map = _init_map(graph)
+        make_name = _make_name_factory(graph, f"affine_refine_v2_q{bits}_")
+        replaced_initializers: set[str] = set()
+        new_nodes = []
+
+        for node in graph.node:
+            for attribute in node.attribute:
+                if attribute.HasField("g"):
+                    rewrite_graph(attribute.g)
+                for subgraph in attribute.graphs:
+                    rewrite_graph(subgraph)
+
+            selected = node.op_type in rp.op_types
+            if rp.nodes_to_include is not None:
+                selected = selected and node.name in rp.nodes_to_include
+            if rp.nodes_to_exclude is not None and node.name in rp.nodes_to_exclude:
+                selected = False
+
+            replacement = None
+            stats = None
+            if selected and node.op_type == "MatMul" and len(node.input) >= 2:
+                weight = init_map.get(node.input[1])
+                if weight is not None:
+                    replacement, stats = _quantize_affine_v2_matmul(
+                        graph, node, weight, rp, bits, make_name
+                    )
+                    if replacement is not None:
+                        quantized_matmuls += 1
+                        replaced_initializers.add(weight.name)
+            elif selected and node.op_type == "Gather" and len(node.input) >= 2:
+                weight = init_map.get(node.input[0])
+                if weight is not None:
+                    replacement, stats = _quantize_affine_v2_gather(
+                        graph,
+                        node,
+                        weight,
+                        rp,
+                        bits,
+                        quant_axes.get("Gather", 1),
+                        make_name,
+                    )
+                    if replacement is not None:
+                        quantized_gathers += 1
+                        replaced_initializers.add(weight.name)
+
+            new_nodes.append(replacement or node)
+            if stats is not None:
+                total.add(stats)
+
+        graph.ClearField("node")
+        graph.node.extend(new_nodes)
+        _drop_unused_initializers(graph)
+        remaining_initializers = {initializer.name for initializer in graph.initializer}
+        obsolete_inputs = replaced_initializers - remaining_initializers
+        if obsolete_inputs:
+            graph_inputs = [value for value in graph.input if value.name not in obsolete_inputs]
+            graph.ClearField("input")
+            graph.input.extend(graph_inputs)
+
+    rewrite_graph(model.graph)
+    if quantized_matmuls or quantized_gathers:
+        _ensure_ms_domain_opset(model)
+        _deduplicate_node_names(model.graph)
+    ratio = total.refined_error / total.seed_error if total.seed_error else 1.0
+    print(
+        f"  AFFINE_REFINE_V2 surgery: {quantized_matmuls} MatMul -> MatMulNBits, "
+        f"{quantized_gathers} Gather -> GatherBlockQuantized; improved "
+        f"{total.improved_blocks}/{total.blocks} blocks over its internal seed, "
+        f"plain MSE ratio={ratio:.6f}."
+    )
+    return total
 
 
 def _uses_fp16(plan: Plan) -> bool:
@@ -448,10 +1773,8 @@ def _constant_int_values(name: str, producer: dict, init_map: dict) -> tuple[int
     return tuple(int(value) for value in values.reshape(-1))
 
 
-def fuse_consecutive_reshapes(model_path: str) -> int:
+def fuse_consecutive_reshapes_graph(graph) -> int:
     """Fuse constant-shape Reshape pairs only when their composed semantics are provable."""
-    model = onnx.load(model_path, load_external_data=False)
-    graph = model.graph
     graph_outputs = {value.name for value in graph.output}
     make_name = _make_name_factory(graph, "reshape_fusion_")
     removed_values, fused = set(), 0
@@ -511,6 +1834,13 @@ def fuse_consecutive_reshapes(model_path: str) -> int:
         keep_info = [value for value in graph.value_info if value.name not in removed_values]
         graph.ClearField("value_info")
         graph.value_info.extend(keep_info)
+    return fused
+
+
+def fuse_consecutive_reshapes(model_path: str) -> int:
+    model = onnx.load(model_path, load_external_data=False)
+    fused = fuse_consecutive_reshapes_graph(model.graph)
+    if fused:
         onnx.save(model, model_path)
     del model
     gc.collect()
@@ -685,6 +2015,38 @@ def build_weight_only_config(rp: ResolvedPlan, bits: int):
 
 def quantize_weight_only(src_path: str, dst_path: str, rp: ResolvedPlan, bits: int, external: bool,
                          do_surgery: bool = False) -> None:
+    if rp.algo == "AFFINE_REFINE_V2":
+        if bits not in (4, 8):
+            raise ValueError(f"{rp.algo} supports Q4/Q8 only, got {bits}-bit.")
+        print(
+            f"  Quantizing weights ({rp.algo}, {bits}-bit, block={rp.block_size}, "
+            f"symmetric={rp.symmetric}, format={rp.quant_format}, ops={list(rp.op_types)})..."
+        )
+        model = quant_utils.load_model_with_shape_infer(Path(src_path))
+        if do_surgery:
+            apply_kv_surgery(model)
+        quantize_affine_v2_model(model, rp, bits)
+        _save_model(model, dst_path, external)
+        del model
+        gc.collect()
+        return
+
+    if rp.algo == "k_quant":
+        if bits != 4:
+            raise ValueError(f"{rp.algo} supports Q4 only, got {bits}-bit.")
+        print(
+            f"  Quantizing weights ({rp.algo}, 4-bit, block={rp.block_size}, "
+            f"format={rp.quant_format}, ops={list(rp.op_types)}, CPU-only)..."
+        )
+        model = quant_utils.load_model_with_shape_infer(Path(src_path))
+        if do_surgery:
+            apply_kv_surgery(model)
+        quantize_k_quant_model(model, rp)
+        _save_model(model, dst_path, external)
+        del model
+        gc.collect()
+        return
+
     cfg, quant_axes = build_weight_only_config(rp, bits)
     print(f"  Quantizing weights ({rp.algo}, {bits}-bit, block={rp.block_size}, "
           f"format={rp.quant_format}, ops={list(rp.op_types)})...")
@@ -722,8 +2084,155 @@ def quantize_weight_only(src_path: str, dst_path: str, rp: ResolvedPlan, bits: i
     gc.collect()
 
 
+def _quantize_affine_v2_dynamic_matmul(
+    graph,
+    node,
+    weight: TensorProto,
+    rp: ResolvedPlan,
+    make_name,
+):
+    weight_array = numpy_helper.to_array(weight)
+    if weight_array.ndim != 2 or weight_array.dtype.kind != "f":
+        print(
+            f"  AFFINE_REFINE_V2 dynamic: skipping {node.name or weight.name!r}; "
+            "MatMul weight must be a floating-point matrix."
+        )
+        return None, None
+
+    bits = 7 if rp.reduce_range else 8
+    if rp.per_channel:
+        rows = np.ascontiguousarray(weight_array.T, dtype=np.float32)
+        block_size = weight_array.shape[0]
+    else:
+        rows = np.ascontiguousarray(weight_array.reshape(1, -1), dtype=np.float32)
+        block_size = weight_array.size
+    quantized, scales, zero_points, stats = _affine_refine_v2_q4_rows(
+        rows,
+        block_size,
+        rp.symmetric,
+        bits,
+        allow_arbitrary_block_size=True,
+    )
+    quantized = quantized.reshape(rows.shape)
+    scales = scales.reshape(-1)
+    zero_points = zero_points.reshape(-1)
+    if rp.per_channel:
+        quantized = quantized.T
+    else:
+        quantized = quantized.reshape(weight_array.shape)
+
+    if rp.dynamic_weight_type == "QINT8":
+        offset = 1 << (bits - 1)
+        quantized = (quantized.astype(np.int16) - offset).astype(np.int8)
+        zero_points = (zero_points.astype(np.int16) - offset).astype(np.int8)
+    else:
+        quantized = quantized.astype(np.uint8)
+        zero_points = zero_points.astype(np.uint8)
+
+    weight_name = make_name(f"{weight.name}_quantized")
+    scale_name = make_name(f"{weight.name}_scale")
+    zero_point_name = make_name(f"{weight.name}_zero_point")
+    if not rp.per_channel:
+        scales = scales[0]
+        zero_points = zero_points[0]
+    graph.initializer.extend([
+        _make_quant_initializer(weight_name, quantized),
+        _make_quant_initializer(scale_name, scales.astype(np.float32, copy=False)),
+        _make_quant_initializer(zero_point_name, zero_points),
+    ])
+
+    replacement = [helper.make_node(
+        "DynamicQuantizeMatMul",
+        [node.input[0], weight_name, scale_name, zero_point_name],
+        list(node.output),
+        name=make_name(f"{node.name or 'matmul'}_dynamic_quantize_matmul"),
+        domain="com.microsoft",
+    )]
+    return replacement, stats
+
+
+def quantize_affine_v2_dynamic_model(
+    model: onnx.ModelProto,
+    rp: ResolvedPlan,
+) -> Q4RefineStats:
+    """Replace selected constant MatMuls with V2-refined dynamic INT8/UINT8 ops."""
+    total = Q4RefineStats()
+    quantized_matmuls = 0
+
+    def rewrite_graph(graph) -> None:
+        nonlocal quantized_matmuls
+        init_map = _init_map(graph)
+        make_name = _make_name_factory(graph, "affine_refine_v2_dynamic_")
+        replaced_initializers: set[str] = set()
+        new_nodes = []
+        for node in graph.node:
+            for attribute in node.attribute:
+                if attribute.HasField("g"):
+                    rewrite_graph(attribute.g)
+                for subgraph in attribute.graphs:
+                    rewrite_graph(subgraph)
+
+            selected = node.op_type == "MatMul" and "MatMul" in rp.op_types
+            if rp.nodes_to_include is not None:
+                selected = selected and node.name in rp.nodes_to_include
+            if rp.nodes_to_exclude is not None and node.name in rp.nodes_to_exclude:
+                selected = False
+
+            replacement = None
+            stats = None
+            if selected and len(node.input) >= 2:
+                weight = init_map.get(node.input[1])
+                if weight is not None:
+                    replacement, stats = _quantize_affine_v2_dynamic_matmul(
+                        graph, node, weight, rp, make_name
+                    )
+                    if replacement is not None:
+                        quantized_matmuls += 1
+                        replaced_initializers.add(weight.name)
+            new_nodes.extend(replacement or [node])
+            if stats is not None:
+                total.add(stats)
+
+        graph.ClearField("node")
+        graph.node.extend(new_nodes)
+        _drop_unused_initializers(graph)
+        remaining_initializers = {initializer.name for initializer in graph.initializer}
+        obsolete_inputs = replaced_initializers - remaining_initializers
+        if obsolete_inputs:
+            graph_inputs = [value for value in graph.input if value.name not in obsolete_inputs]
+            graph.ClearField("input")
+            graph.input.extend(graph_inputs)
+
+    rewrite_graph(model.graph)
+    if quantized_matmuls:
+        _ensure_ms_domain_opset(model)
+    _deduplicate_node_names(model.graph)
+    ratio = total.refined_error / total.seed_error if total.seed_error else 1.0
+    print(
+        f"  AFFINE_REFINE_V2 dynamic surgery: {quantized_matmuls} MatMul -> "
+        f"DynamicQuantizeMatMul; improved {total.improved_blocks}/{total.blocks} channels/tensors "
+        f"over its internal seed, plain MSE ratio={ratio:.6f}."
+    )
+    return total
+
+
 def quantize_dynamic_int8(src_path: str, dst_path: str, rp: ResolvedPlan, external: bool,
                           do_surgery: bool = False) -> None:
+    if rp.algo == "AFFINE_REFINE_V2":
+        print(
+            f"  Quantizing weights ({rp.algo}, dynamic {rp.dynamic_weight_type}, "
+            f"per_channel={rp.per_channel}, reduce_range={rp.reduce_range}, "
+            f"symmetric={rp.symmetric})..."
+        )
+        model = quant_utils.load_model_with_shape_infer(Path(src_path))
+        if do_surgery:
+            apply_kv_surgery(model)
+        quantize_affine_v2_dynamic_model(model, rp)
+        _save_model(model, dst_path, external)
+        del model
+        gc.collect()
+        return
+
     weight_type = _DYNAMIC_WEIGHT_TYPES[rp.dynamic_weight_type]
     print(f"  Quantizing weights (dynamic INT8, {rp.dynamic_weight_type}, "
           f"per_channel={rp.per_channel}, reduce_range={rp.reduce_range})...")
@@ -975,6 +2484,8 @@ def _find_embed_gather(graph):
     for node in graph.node:
         if node.op_type != "Gather" or len(node.input) < 2:
             continue
+        if node.name.startswith("share_embed_lmhead_"):
+            continue
         init = inits.get(node.input[0])
         if init is None or len(init.dims) != 2:
             continue
@@ -996,7 +2507,16 @@ def _find_embed_gather(graph):
 def _restore_embed_shell_boundary(model: onnx.ModelProto) -> bool:
     """Restore the canonical Embed-to-Main edge after whole-graph optimization."""
     graph = model.graph
-    gather, _, _, _ = _find_embed_gather(graph)
+    try:
+        gather, _, _, _ = _find_embed_gather(graph)
+    except RuntimeError:
+        candidates = [node for node in graph.node if node.op_type == "GatherBlockQuantized"]
+        if len(candidates) != 1:
+            raise RuntimeError(
+                "Cannot restore Embed shell boundary: expected one quantized embedding "
+                f"GatherBlockQuantized node, found {len(candidates)}."
+            )
+        gather = candidates[0]
     old_name = gather.output[0]
     new_name = "embed_text_hidden_states"
     if old_name == new_name:
@@ -1077,7 +2597,7 @@ def _find_lmhead(graph, vocab: int, hidden: int):
             return node.op_type, node
 
     expected = {(hidden, vocab), (vocab, hidden)}
-    for op_type in ("MatMul", "Gemm", "MatMulInteger"):
+    for op_type in ("MatMul", "Gemm", "MatMulInteger", "DynamicQuantizeMatMul"):
         for node in graph.node:
             if node.op_type != op_type or len(node.input) < 2:
                 continue
@@ -1085,6 +2605,58 @@ def _find_lmhead(graph, vocab: int, hidden: int):
             if init is not None and _tensor_dims(init) in expected:
                 return node.op_type, node
     raise RuntimeError(f"lm_head op with vocab={vocab}, hidden={hidden} was not found")
+
+
+def _source_embed_lmhead_equal(model_path: Path, chunk_rows: int = 256) -> bool:
+    """Compare exported float embedding and LM-head values before quantization."""
+    model = onnx.load(str(model_path), load_external_data=False)
+    try:
+        _, embed_name, vocab, hidden = _find_embed_gather(model.graph)
+        lmhead_type, lmhead = _find_lmhead(model.graph, vocab, hidden)
+        if lmhead_type not in ("MatMul", "Gemm") or len(lmhead.input) < 2:
+            return False
+        inits = _init_map(model.graph)
+        embed = inits.get(embed_name)
+        lmhead_weight = inits.get(lmhead.input[1])
+        if embed is None or lmhead_weight is None:
+            return False
+        def tensor_values(tensor: TensorProto):
+            external = {entry.key: entry.value for entry in tensor.external_data}
+            if tensor.data_location == TensorProto.EXTERNAL and "location" in external:
+                return np.memmap(
+                    model_path.parent / external["location"],
+                    mode="r",
+                    dtype=helper.tensor_dtype_to_np_dtype(tensor.data_type),
+                    offset=int(external.get("offset", 0)),
+                    shape=_tensor_dims(tensor),
+                )
+            return numpy_helper.to_array(tensor)
+
+        embed_values = tensor_values(embed)
+        lmhead_values = tensor_values(lmhead_weight)
+        if lmhead_values.shape == (hidden, vocab):
+            lmhead_values = lmhead_values.T
+        elif lmhead_values.shape != (vocab, hidden):
+            return False
+        if embed_values.shape != lmhead_values.shape or embed_values.dtype != lmhead_values.dtype:
+            return False
+        return all(
+            np.array_equal(embed_values[start:start + chunk_rows], lmhead_values[start:start + chunk_rows])
+            for start in range(0, vocab, chunk_rows)
+        )
+    finally:
+        del model
+        gc.collect()
+
+
+def _configure_embedding_quantization(rp: ResolvedPlan, share_embed_lmhead: bool) -> None:
+    if rp.algo != "AFFINE_REFINE_V2" or rp.method not in ("Q4", "Q8"):
+        return
+    pairs = [(op_type, axis) for op_type, axis in zip(rp.op_types, rp.axes) if op_type != "Gather"]
+    if not share_embed_lmhead:
+        pairs.append(("Gather", 1))
+    rp.op_types = tuple(op_type for op_type, _ in pairs)
+    rp.axes = tuple(axis for _, axis in pairs)
 
 
 def _make_scalar_initializer(graph, name: str, array: np.ndarray) -> str:
@@ -1124,61 +2696,115 @@ def _share_float_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: int
     return {"lmhead_op": lmhead.op_type, "dropped": embed_init, "shared_weight": shared_weight}
 
 
-def _share_q4_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: int, hidden: int, fallback_block_size: int) -> dict:
+def _share_nbits_embed_lmhead(graph, gather, embed_init: str, lmhead, vocab: int, hidden: int,
+                              fallback_block_size: int) -> dict:
     attrs = _node_attrs(lmhead)
+    bits = int(attrs.get("bits", 4))
     block_size = int(attrs.get("block_size", fallback_block_size))
+    if bits not in (2, 4, 8):
+        raise RuntimeError(f"unsupported lm_head MatMulNBits width bits={bits}")
     if block_size <= 0 or hidden % block_size != 0:
         raise RuntimeError(f"lm_head MatMulNBits block_size={block_size} is incompatible with hidden={hidden}")
-    if len(lmhead.input) < 4:
-        raise RuntimeError("share_embed_lmhead currently requires asymmetric MatMulNBits with a zero-point input")
-
-    bq, bs, bz = lmhead.input[1], lmhead.input[2], lmhead.input[3]
+    # Symmetric MatMulNBits (e.g. ORT DEFAULT) omits the zero-point input; the
+    # implied per-code zero point is the integer midpoint 1 << (bits - 1).
+    # Asymmetric nodes carry an explicit per-block zero point as input[3].
+    has_zero_point = len(lmhead.input) >= 4 and bool(lmhead.input[3])
+    bq, bs = lmhead.input[1], lmhead.input[2]
+    bz = lmhead.input[3] if has_zero_point else None
     kb = hidden // block_size
-    make = _make_name_factory(graph, "share_embed_lmhead_q4_")
+    make = _make_name_factory(graph, "share_embed_lmhead_nbits_")
     ids, out = gather.input[1], gather.output[0]
 
     axm1 = _make_axes_initializer(graph, make("axis_m1"), [-1])
     rs_qint = _make_axes_initializer(graph, make("reshape_qint"), [0, 0, 0, -1])
     rs_flat = _make_axes_initializer(graph, make("reshape_flat"), [0, 0, -1])
-    c16 = _make_scalar_initializer(graph, make("c16"), np.array(16, dtype=np.uint8))
-    z_start = _make_axes_initializer(graph, make("z_start"), [0])
-    z_end = _make_axes_initializer(graph, make("z_end"), [kb])
-    z_axis = _make_axes_initializer(graph, make("z_axis"), [2])
 
-    gq, gs, gz = make("gather_q"), make("gather_s"), make("gather_z")
-    qlo, qhi, qlo1, qhi1, qcat, qint = make("qlo"), make("qhi"), make("qlo1"), make("qhi1"), make("qcat"), make("qint")
-    zlo, zhi, zlo1, zhi1, zcat, zflat, zint = make("zlo"), make("zhi"), make("zlo1"), make("zhi1"), make("zcat"), make("zflat"), make("zint")
-    qf, zf, zf1, gs1, sub, deq = make("qf"), make("zf"), make("zf1"), make("gs1"), make("sub"), make("deq")
+    gq, gs = make("gather_q"), make("gather_s")
+    qf, gs1, sub, deq = make("qf"), make("gs1"), make("sub"), make("deq")
 
     replacement = [
         helper.make_node("Gather", [bq, ids], [gq], axis=0, name=make("gather_q_node")),
         helper.make_node("Gather", [bs, ids], [gs], axis=0, name=make("gather_s_node")),
-        helper.make_node("Gather", [bz, ids], [gz], axis=0, name=make("gather_z_node")),
-        helper.make_node("Mod", [gq, c16], [qlo], name=make("qlo_node")),
-        helper.make_node("Div", [gq, c16], [qhi], name=make("qhi_node")),
-        helper.make_node("Unsqueeze", [qlo, axm1], [qlo1], name=make("qlo_unsq")),
-        helper.make_node("Unsqueeze", [qhi, axm1], [qhi1], name=make("qhi_unsq")),
-        helper.make_node("Concat", [qlo1, qhi1], [qcat], axis=-1, name=make("qcat_node")),
-        helper.make_node("Reshape", [qcat, rs_qint], [qint], name=make("qreshape_node")),
-        helper.make_node("Mod", [gz, c16], [zlo], name=make("zlo_node")),
-        helper.make_node("Div", [gz, c16], [zhi], name=make("zhi_node")),
-        helper.make_node("Unsqueeze", [zlo, axm1], [zlo1], name=make("zlo_unsq")),
-        helper.make_node("Unsqueeze", [zhi, axm1], [zhi1], name=make("zhi_unsq")),
-        helper.make_node("Concat", [zlo1, zhi1], [zcat], axis=-1, name=make("zcat_node")),
-        helper.make_node("Reshape", [zcat, rs_flat], [zflat], name=make("zreshape_node")),
-        helper.make_node("Slice", [zflat, z_start, z_end, z_axis], [zint], name=make("zslice_node")),
-        helper.make_node("Cast", [qint], [qf], to=TensorProto.FLOAT, name=make("q_cast")),
-        helper.make_node("Cast", [zint], [zf], to=TensorProto.FLOAT, name=make("z_cast")),
-        helper.make_node("Unsqueeze", [zf, axm1], [zf1], name=make("z_unsq")),
+    ]
+
+    def unpack(packed: str, reshape: str, prefix: str) -> str:
+        if bits == 8:
+            return packed
+        modulus = _make_scalar_initializer(
+            graph, make(f"{prefix}_modulus"), np.array(1 << bits, dtype=np.uint8)
+        )
+        unpacked = []
+        for group in range(8 // bits):
+            shifted = packed
+            if group:
+                divisor = _make_scalar_initializer(
+                    graph,
+                    make(f"{prefix}_divisor_{group}"),
+                    np.array(1 << (group * bits), dtype=np.uint8),
+                )
+                shifted = make(f"{prefix}_shifted_{group}")
+                replacement.append(helper.make_node(
+                    "Div", [packed, divisor], [shifted], name=make(f"{prefix}_div_{group}")
+                ))
+            digit = make(f"{prefix}_digit_{group}")
+            expanded = make(f"{prefix}_digit_{group}_expanded")
+            replacement.extend([
+                helper.make_node("Mod", [shifted, modulus], [digit], name=make(f"{prefix}_mod_{group}")),
+                helper.make_node("Unsqueeze", [digit, axm1], [expanded], name=make(f"{prefix}_unsq_{group}")),
+            ])
+            unpacked.append(expanded)
+        joined = make(f"{prefix}_joined")
+        result = make(f"{prefix}_unpacked")
+        replacement.extend([
+            helper.make_node("Concat", unpacked, [joined], axis=-1, name=make(f"{prefix}_concat")),
+            helper.make_node("Reshape", [joined, reshape], [result], name=make(f"{prefix}_reshape")),
+        ])
+        return result
+
+    qint = unpack(gq, rs_qint, "q")
+    replacement.append(
+        helper.make_node("Cast", [qint], [qf], to=TensorProto.FLOAT, name=make("q_cast"))
+    )
+
+    if has_zero_point:
+        gz = make("gather_z")
+        zf, zf1 = make("zf"), make("zf1")
+        replacement.append(
+            helper.make_node("Gather", [bz, ids], [gz], axis=0, name=make("gather_z_node"))
+        )
+        zflat = unpack(gz, rs_flat, "z")
+        if bits == 8:
+            zint = zflat
+        else:
+            z_start = _make_axes_initializer(graph, make("z_start"), [0])
+            z_end = _make_axes_initializer(graph, make("z_end"), [kb])
+            z_axis = _make_axes_initializer(graph, make("z_axis"), [2])
+            zint = make("zint")
+            replacement.append(
+                helper.make_node("Slice", [zflat, z_start, z_end, z_axis], [zint], name=make("zslice_node"))
+            )
+        replacement.extend([
+            helper.make_node("Cast", [zint], [zf], to=TensorProto.FLOAT, name=make("z_cast")),
+            helper.make_node("Unsqueeze", [zf, axm1], [zf1], name=make("z_unsq")),
+        ])
+        zero_operand = zf1
+    else:
+        # Symmetric: dequantize against the implied integer midpoint zero point.
+        midpoint = float(1 << (bits - 1))
+        zero_operand = _make_scalar_initializer(
+            graph, make("z_midpoint"), np.array(midpoint, dtype=np.float32)
+        )
+
+    replacement.extend([
         helper.make_node("Unsqueeze", [gs, axm1], [gs1], name=make("s_unsq")),
-        helper.make_node("Sub", [qf, zf1], [sub], name=make("sub_node")),
+        helper.make_node("Sub", [qf, zero_operand], [sub], name=make("sub_node")),
         helper.make_node("Mul", [sub, gs1], [deq], name=make("mul_node")),
         helper.make_node("Reshape", [deq, rs_flat], [out], name=make("output_reshape")),
-    ]
+    ])
 
     _replace_graph_node(graph, gather, replacement)
     _drop_initializers(graph, {embed_init})
-    return {"lmhead_op": lmhead.op_type, "dropped": embed_init, "shared_weight": bq}
+    return {"lmhead_op": lmhead.op_type, "bits": bits, "dropped": embed_init, "shared_weight": bq}
 
 
 def _graph_consumers(graph) -> dict[str, list]:
@@ -1197,6 +2823,11 @@ def _find_dynamic_weight_scale(graph, lmhead, vocab: int) -> str | None:
     inits = _init_map(graph)
     consumers = _graph_consumers(graph)
     producer = {out: node for node in graph.node for out in node.output}
+
+    if lmhead.op_type == "DynamicQuantizeMatMul" and len(lmhead.input) > 2:
+        scale = inits.get(lmhead.input[2])
+        if scale is not None and _is_dynamic_weight_scale_init(scale, vocab):
+            return scale.name
     bq = lmhead.input[1]
     candidates = []
     if bq.endswith("_quantized"):
@@ -1339,25 +2970,29 @@ def unify_embed_lmhead_graph(model: onnx.ModelProto, method: str, block_size: in
     method = method.upper()
     if method in ("F32", "F16"):
         info = _share_float_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden)
-    elif method == "Q4":
+    elif method == "NBITS":
         if lmhead.op_type != "MatMulNBits":
-            raise RuntimeError(f"Q4 share_embed_lmhead expected MatMulNBits lm_head, got {lmhead.op_type}")
-        info = _share_q4_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden, block_size)
+            raise RuntimeError(f"NBITS share_embed_lmhead expected MatMulNBits lm_head, got {lmhead.op_type}")
+        info = _share_nbits_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden, block_size)
     elif method == "DYNAMIC":
-        if lmhead.op_type != "MatMulInteger":
-            raise RuntimeError(f"DYNAMIC share_embed_lmhead expected MatMulInteger lm_head, got {lmhead.op_type}")
+        if lmhead.op_type not in ("MatMulInteger", "DynamicQuantizeMatMul"):
+            raise RuntimeError(
+                "DYNAMIC share_embed_lmhead expected MatMulInteger or "
+                f"DynamicQuantizeMatMul lm_head, got {lmhead.op_type}"
+            )
         info = _share_dynamic_embed_lmhead(graph, gather, embed_init, lmhead, vocab, hidden)
     else:
         raise ValueError(f"unknown share_embed_lmhead method {method!r}")
 
     _dead_code_elimination(graph)
+    _drop_unused_initializers(graph)
     _deduplicate_node_names(graph)
     return info
 
 
 def _unify_method_kind(rp: ResolvedPlan) -> str:
     if rp.method in _WEIGHT_ONLY_BITS:
-        return "Q4"
+        return "NBITS"
     if rp.method == "DYNAMIC":
         return "DYNAMIC"
     return "F16" if (rp.fp16 or rp.method == "F16") else "F32"
@@ -1447,7 +3082,7 @@ def inspect_kv_quantize_surgery(graph) -> tuple[bool, str]:
     return True, f"per-head {'asymmetric uint8+bias' if is_asym else 'symmetric int8'} write tail"
 
 
-def rewire_attention_to_matmulintegertofloat(model) -> tuple[int, int]:
+def rewire_attention_to_dynamic_quantize_matmul(model) -> tuple[int, int]:
     graph = model.graph
     inits = {i.name for i in graph.initializer}
     producer = {o: n for n in graph.node for o in n.output}
@@ -1521,13 +3156,14 @@ def rewire_attention_to_matmulintegertofloat(model) -> tuple[int, int]:
             else:
                 k_in, casts = prep_b(_src_through_casts(b, producer), pfx, "qk")
                 qk_bzp = target_bzp
-            qu8, qs, qzp = f"{pfx}_qk_qu8", f"{pfx}_qk_qs", f"{pfx}_qk_qzp"
             new_nodes.extend(casts)
-            new_nodes.extend([
-                helper.make_node("DynamicQuantizeLinear", [a], [qu8, qs, qzp], name=f"{pfx}_qk_dql"),
-                helper.make_node("MatMulIntegerToFloat", [qu8, k_in, qs, one_f32(f"{pfx}_qk_one_f32"), qzp, qk_bzp], [out],
-                                 name=f"{pfx}_qk_mmitf", domain="com.microsoft"),
-            ])
+            new_nodes.append(helper.make_node(
+                "DynamicQuantizeMatMul",
+                [a, k_in, one_f32(f"{pfx}_qk_one_f32"), qk_bzp],
+                [out],
+                name=f"{pfx}_qk_dqmm",
+                domain="com.microsoft",
+            ))
             n_qk += 1
         else:
             bp = producer.get(b)
@@ -1556,15 +3192,18 @@ def rewire_attention_to_matmulintegertofloat(model) -> tuple[int, int]:
                 v_bias = None
             v_in, casts = prep_b(_src_through_casts(v_traced, producer), pfx, "pv")
             vst, ps = f"{pfx}_pv_vst", f"{pfx}_pv_ps"
-            pu8, psc, pzp = f"{pfx}_pv_pu8", f"{pfx}_pv_psc", f"{pfx}_pv_pzp"
             main = out if v_bias is None else f"{pfx}_pv_main"
             new_nodes.extend(casts)
             new_nodes.extend([
                 helper.make_node("Transpose", [v_scale_f], [vst], perm=[0, 1, 2, 4, 3], name=f"{pfx}_pv_tr"),
                 helper.make_node("Mul", [a, vst], [ps], name=f"{pfx}_pv_mul"),
-                helper.make_node("DynamicQuantizeLinear", [ps], [pu8, psc, pzp], name=f"{pfx}_pv_dql"),
-                helper.make_node("MatMulIntegerToFloat", [pu8, v_in, psc, one_f32(f"{pfx}_pv_one_f32"), pzp, target_bzp], [main],
-                                 name=f"{pfx}_pv_mmitf", domain="com.microsoft"),
+                helper.make_node(
+                    "DynamicQuantizeMatMul",
+                    [ps, v_in, one_f32(f"{pfx}_pv_one_f32"), target_bzp],
+                    [main],
+                    name=f"{pfx}_pv_dqmm",
+                    domain="com.microsoft",
+                ),
             ])
             if v_bias is not None:
                 biasmm = f"{pfx}_pv_biasmm"
@@ -1786,9 +3425,9 @@ def rewire_kv_quantize_to_quantizelinear(model) -> int:
 def apply_kv_surgery(model) -> None:
     applicable, _ = inspect_kv_surgery(model.graph)
     if applicable:
-        n_qk, n_pv = rewire_attention_to_matmulintegertofloat(model)
+        n_qk, n_pv = rewire_attention_to_dynamic_quantize_matmul(model)
         n_q = rewire_kv_quantize_to_quantizelinear(model) if KV_BLOCKED_QDQ_SURGERY else 0
-        message = f"    surgery: {n_qk} Q@K + {n_pv} attn@V -> MatMulIntegerToFloat"
+        message = f"    surgery: {n_qk} Q@K + {n_pv} attn@V -> DynamicQuantizeMatMul"
         if n_q:
             message += f"; {n_q} KV write tails -> QuantizeLinear (blocked int8)"
         elif not KV_BLOCKED_QDQ_SURGERY:
@@ -1813,7 +3452,7 @@ def plan_kv_surgery(src_path: str) -> tuple[bool, str]:
                 if KV_BLOCKED_QDQ_SURGERY
                 else "; arithmetic write tails retained for CUDA"
             )
-            return True, f"applying ({reason}) -> MatMulIntegerToFloat{tail_note}, in-memory"
+            return True, f"applying ({reason}) -> DynamicQuantizeMatMul{tail_note}, in-memory"
         rope_ok, rope_reason = inspect_rope_shift_surgery(meta.graph)
         if rope_ok:
             if not KV_BLOCKED_QDQ_SURGERY:
@@ -1960,15 +3599,34 @@ def _load_transplant_donor(primary_path: Path) -> onnx.ModelProto:
     return donor
 
 
+def _validate_quantized_embedding(primary_path: Path, primary_plan: ResolvedPlan) -> None:
+    if primary_plan.algo != "AFFINE_REFINE_V2" or "Gather" not in primary_plan.op_types:
+        return
+    model = onnx.load(str(primary_path), load_external_data=False)
+    count = sum(node.op_type == "GatherBlockQuantized" for node in model.graph.node)
+    del model
+    if count == 0:
+        raise RuntimeError(
+            f"{primary_path.name} requested embedding Gather quantization but the final "
+            "graph has no GatherBlockQuantized node."
+        )
+    print(f"  Verified {count} quantized embedding GatherBlockQuantized node(s).")
+
+
 def _load_unified_primary(
     primary_path: Path,
     method_kind: str,
     block_size: int,
+    share_embed_lmhead: bool,
 ) -> tuple[onnx.ModelProto, dict | None]:
     # Drop the duplicate fp32 embedding before loading external data to bound
     # peak memory to the surviving quantized language weights.
     model = onnx.load(str(primary_path), load_external_data=False)
-    info = unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+    info = (
+        unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+        if share_embed_lmhead
+        else None
+    )
     if info is not None:
         print(
             f"  Shared embed/lm_head: dropped {info['dropped']!r}; "
@@ -2001,6 +3659,7 @@ def _transplant_merged_strategies(
     donor: onnx.ModelProto,
     method_kind: str,
     block_size: int,
+    share_embed_lmhead: bool,
     external_by_name: dict[str, dict[str, str]],
     metadata: dict,
 ) -> None:
@@ -2012,7 +3671,11 @@ def _transplant_merged_strategies(
         target = onnx.load(str(source_folder / file_name), load_external_data=False)
         model = Shared_Merged.transplant_quantized_main(target, donor)
         del target
-        unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+        if share_embed_lmhead:
+            unify_embed_lmhead_graph(model, method_kind, block_size=block_size, quiet=True)
+        fused_reshapes = fuse_consecutive_reshapes_graph(model.graph)
+        if fused_reshapes:
+            print(f"  {file_name}: fused {fused_reshapes} semantics-safe consecutive Reshape pairs.")
         _drop_unused_initializers(model.graph)
         Shared_Merged.redirect_shared_initializers_to_external(model, external_by_name)
         _save_merged_model(out_folder, file_name, model, metadata)
@@ -2040,6 +3703,15 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
     primary_plan = resolved.get(primary_stem) or resolved.get(_PRIMARY_MERGED_MODEL)
     if primary_plan is None:
         raise RuntimeError(f"No plan is configured for the primary merged graph {primary_stem!r}.")
+    share_embed_lmhead = _source_embed_lmhead_equal(source_folder / primary_file)
+    _configure_embedding_quantization(primary_plan, share_embed_lmhead)
+    print(
+        "  Embed/lm_head check: "
+        + ("identical; sharing enabled." if share_embed_lmhead else
+            "different; sharing disabled and embedding Gather quantization enabled."
+            if "Gather" in primary_plan.op_types else
+            "different; sharing disabled.")
+    )
 
     _print_process_header(primary_stem, primary_plan)
     process_model(primary_stem, primary_plan)
@@ -2047,6 +3719,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
     primary_path = out_folder / primary_file
     if not primary_path.exists():
         raise FileNotFoundError(primary_path)
+    _validate_quantized_embedding(primary_path, primary_plan)
 
     method_kind = _unify_method_kind(primary_plan)
     shared_model_name = model_file_names.get("shared_initializers", Shared_Merged.SHARED_MODEL_NAME)
@@ -2057,7 +3730,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
 
     donor = _load_transplant_donor(primary_path)
     primary_model, unify_info = _load_unified_primary(
-        primary_path, method_kind, primary_plan.block_size
+        primary_path, method_kind, primary_plan.block_size, share_embed_lmhead
     )
     external_by_name = Shared_Merged.write_shared_initializers(primary_model, out_folder / shared_model_name)
 
@@ -2077,6 +3750,7 @@ def build_quantized_merged_bundle(resolved: dict[str, ResolvedPlan]) -> None:
         donor,
         method_kind,
         primary_plan.block_size,
+        share_embed_lmhead,
         external_by_name,
         source_metadata,
     )
