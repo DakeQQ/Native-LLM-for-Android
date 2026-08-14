@@ -58,6 +58,7 @@ DYNAMIC_VIDEO_SHAPE      = False                                    # Allow dyna
 
 # KV cache quantization
 KV_QUANT_DTYPE           = "Q8"                                     # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
+F16_ATTENTION            = KV_QUANT_DTYPE == "F16" and not COMPUTE_IN_F32
 KV_QUANT_GROUP_SIZE      = 128                                      # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Smaller = more accurate. Must divide head_dim evenly.
 USE_HADAMARD             = False                                    # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
 HADAMARD_RANDOM_SEED     = 9527                                     # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
@@ -254,7 +255,8 @@ def dynamic_causal_attention_mask(module, ids_len, cache_len):
     attention_bias = torch.where(
         col_pos <= row_limit, module.mask_zero, module.mask_neg
     )
-    return attention_bias.view(1, 1, 1, ids_len, mask_len).float()
+    attention_mask = attention_bias.view(1, 1, 1, ids_len, mask_len)
+    return attention_mask.half() if F16_ATTENTION else attention_mask.float()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2690,11 +2692,6 @@ class LLM_MAIN(torch.nn.Module):
         rotary_pos_emb_cos = all_inputs[-3]
         rotary_pos_emb_sin = all_inputs[-2]
         attention_mask     = all_inputs[-1]
-        attn_mask_f16 = (
-            attention_mask.half()
-            if self.kv_f16 and not self.compute_in_f32
-            else None
-        )
 
         for i, layer in enumerate(self.llm.model.language_model.layers):
 
@@ -3260,7 +3257,7 @@ class LLM_MAIN(torch.nn.Module):
                     attn = torch.softmax(attn, dim=-1)
                     attn = torch.matmul(attn, v.float())
                 elif self.kv_f16:
-                    attn = torch.matmul(q, k) + attn_mask_f16
+                    attn = torch.matmul(q, k) + attention_mask
                     attn = torch.softmax(attn, dim=-1)
                     attn = torch.matmul(attn, v).float()
                 else:
@@ -4172,7 +4169,10 @@ if DO_EXPORT:
         ds_features_dummy = torch.ones((1, ids_len_main, hidden_size), dtype=torch.float32)
         rotary_cos        = torch.zeros((1, ids_len_main, 1, 1, head_dim), dtype=torch.float32)
         rotary_sin        = rotary_cos
-        attention_mask    = torch.zeros((1, 1, 1, ids_len_main, kv_seq_len + vision_embed_size), dtype=torch.float32)
+        attention_mask    = torch.zeros(
+            (1, 1, 1, ids_len_main, kv_seq_len + vision_embed_size),
+            dtype=torch.float16 if F16_ATTENTION else torch.float32,
+        )
 
         all_inputs  = kv_ins + [hidden_states]
         input_names = kv_in_names + ['hidden_states']
@@ -4883,6 +4883,7 @@ deepstack_in_name_Main = in_name_Main[num_keys_values_Main_plus_1: idx_rotary_co
 # Dtype introspection
 kv_dtype_str      = in_meta_Main[0].type
 hidden_dtype_Main = np.float16 if 'float16' in in_meta_Main[num_keys_values_Main].type else np.float32
+attention_mask_dtype_Main = np.float16 if 'float16' in in_meta_Main[in_name_Main.index('attention_mask')].type else np.float32
 vocab_size        = ort_session_Main._outputs_meta[num_keys_values_Main].shape[1]
 
 
@@ -5112,7 +5113,7 @@ for INPUT_MODE, current_query in test_modes:
     init_history_len = create_ort_with_data([0],           np.int64, device_type, DEVICE_ID)
 
     # --- Decode-phase placeholder buffers (reused every step) ---
-    attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                             hidden_dtype_Main, device_type, DEVICE_ID)
+    attention_mask_buf = create_ort_with_shape((1, 1, 1, 1, 1),                                     attention_mask_dtype_Main, device_type, DEVICE_ID)
     rotary_cos_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[0].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
     rotary_sin_buf     = create_ort_with_shape(out_meta_Rotary_Text_Decode[1].shape,                              hidden_dtype_Main, device_type, DEVICE_ID)
     hidden_states_buf  = create_ort_with_shape((1, 1, in_meta_Main[num_keys_values_Main].shape[2]), hidden_dtype_Main, device_type, DEVICE_ID)

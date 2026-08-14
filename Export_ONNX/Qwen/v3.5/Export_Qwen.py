@@ -132,6 +132,7 @@ DYNAMIC_VIDEO_SHAPE              = False                                        
 
 # KV cache quantization
 KV_QUANT_DTYPE                   = "Q8"                                                   # "ROTARY_Q4" | "ROTARY_Q4_CUDA" | "Q8" | "Q8_CUDA" | "ROTARY_Q8" | "ROTARY_Q8_CUDA" | "F16" | "F32"
+F16_ATTENTION                    = KV_QUANT_DTYPE == "F16" and not COMPUTE_IN_F32
 KV_QUANT_GROUP_SIZE              = 128                                                    # Group size for Q4 and Q8 (when USE_HADAMARD or USE_SHUFFLE enabled) per-group quantization. Must divide head_dim evenly.
 USE_HADAMARD                     = False                                                  # True = More Accuracy. Apply enhanced randomized Walsh-Hadamard mixing within each group before quantization. Works for Q4 and Q8 modes.
 HADAMARD_RANDOM_SEED             = 9527                                                   # Seed for the deterministic Rademacher sign pattern used by the enhanced Hadamard transform.
@@ -453,7 +454,8 @@ def dynamic_causal_attention_mask(module, ids_len, cache_len):
     row_limit = module.mask_row_pos[:ids_len] + cache_len.to(module.mask_row_pos.dtype)
     col_pos = module.mask_col_pos[:, :mask_len]
     attn_bias = torch.where(col_pos <= row_limit, module.mask_zero, module.mask_neg)
-    return attn_bias.view(1, 1, 1, ids_len, mask_len).float()
+    attention_mask = attn_bias.view(1, 1, 1, ids_len, mask_len)
+    return attention_mask.half() if F16_ATTENTION else attention_mask.float()
 
 
 
@@ -2898,8 +2900,6 @@ class LLM_MAIN(torch.nn.Module):
         rotary_pos_emb_cos = all_inputs[self.rotary_cos_index]
         rotary_pos_emb_sin = all_inputs[self.rotary_sin_index]
         attention_mask = all_inputs[self.attn_mask_index]
-        # F16-KV OFF mode runs attention in float16; cast the shared causal mask once per forward.
-        attn_mask_f16 = attention_mask.half() if (self.kv_f16 and not self.compute_in_f32) else None
 
         save_full_keys = []
         save_full_values = []
@@ -3480,7 +3480,7 @@ class LLM_MAIN(torch.nn.Module):
                     elif self.kv_f16:
                         # OFF: fully float16 attention (query is already F16 from the early qk cast);
                         # the cache is never upcast. Only the final result is raised to float32 for o_proj.
-                        attn_output = torch.matmul(query, key_cache) + attn_mask_f16
+                        attn_output = torch.matmul(query, key_cache) + attention_mask
                         attn_output = torch.softmax(attn_output, dim=-1)
                         attn_output = torch.matmul(attn_output, value_cache).float()
                     else:
@@ -4106,7 +4106,8 @@ if DO_EXPORT:
             (1, ids_len_main_dummy, 1, 1, ROTARY_DIM), dtype=torch.float32
         )
         attention_mask = torch.zeros(
-            (1, 1, 1, ids_len_main_dummy, ids_len_main_dummy), dtype=torch.float32
+            (1, 1, 1, ids_len_main_dummy, ids_len_main_dummy),
+            dtype=torch.float16 if F16_ATTENTION else torch.float32,
         )
 
         model_main = LLM_MAIN(model).eval()
